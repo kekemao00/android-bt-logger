@@ -5,6 +5,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import com.blankj.utilcode.util.TimeUtils
 
 
 class BtLoggerReceiver : BroadcastReceiver() {
@@ -13,6 +14,7 @@ class BtLoggerReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context?, intent: Intent?) {
         val action = intent!!.action
+        val timestamp = System.currentTimeMillis()
 
         if (action == BluetoothAdapter.ACTION_CONNECTION_STATE_CHANGED) {
             val state = intent.getIntExtra(
@@ -21,11 +23,11 @@ class BtLoggerReceiver : BroadcastReceiver() {
             )
             when (state) {
                 BluetoothAdapter.STATE_CONNECTED -> {
-                    Log.i(tag, "onReceive: 已连接+")
+                    Log.i(tag, "onReceive: 已连接: ${TimeUtils.getNowString()}")
                 }
 
                 BluetoothAdapter.STATE_DISCONNECTED -> {
-
+                    Log.i(tag, "onReceive: 断开连接: ${TimeUtils.getNowString()}")
                 }
             }
         }
