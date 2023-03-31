@@ -17,11 +17,6 @@ import kotlinx.coroutines.withContext
 
 class MainViewModel : ViewModel() {
 
-
-    // Cache all items form the database using LiveData.
-//    val allItems: LiveData<List<Item>> = itemDao.getItems().asLiveData()
-
-
     /**
      * Record list
      */
@@ -40,25 +35,15 @@ class MainViewModel : ViewModel() {
     var deviceInfoList: LiveData<List<DeviceInfo>> =
         deviceDao.getDeviceInfosWithConnectionRecords().asLiveData()
 
-
-//    init {
-//        getDevicesInfoWithConnectionRecords()
-//    }
-
     /**
      * Get all
      *
      */
 
     fun getAll() {
-
-        deviceDao.getAllDevices()
-        deviceDao.getDeviceByMac("01:02:03:04:05:06")
-        // TODO: 没查到值
-
         viewModelScope.launch() {
             withContext(Dispatchers.IO) {
-//                deviceInfoList.value = getDevicesInfoWithConnectionRecords()
+                deviceDao.getDeviceInfosWithConnectionRecords()
             }
         }
     }

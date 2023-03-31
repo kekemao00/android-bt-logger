@@ -16,7 +16,6 @@ import androidx.activity.viewModels
 import androidx.annotation.RequiresApi
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -36,6 +35,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material3.Button
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -46,6 +46,7 @@ import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.contentColorFor
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -55,6 +56,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.modifier.modifierLocalConsumer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontVariation
@@ -74,6 +76,7 @@ import org.greenrobot.eventbus.EventBus
 import org.greenrobot.eventbus.Subscribe
 import org.greenrobot.eventbus.ThreadMode
 import java.time.Duration
+import java.time.Instant
 
 
 class MainActivity : ComponentActivity() {
@@ -275,39 +278,65 @@ fun DeviceItem(device: DeviceInfo?) {
             .fillMaxWidth()
             .wrapContentHeight()
             .clip(shape = RoundedCornerShape(20.dp))
-            .padding(4.dp)
+//            .background(if (device?.connectStatus == 2) MaterialTheme.colorScheme.inversePrimary else MaterialTheme.colorScheme.background)
+            .padding(4.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (device?.connectStatus == 2) Color(0xFFDCE5CD) else MaterialTheme.colorScheme.surface,
+        )
+
         // 长按删除
 //            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outline))
     ) {
 
 
         Column(modifier = Modifier.padding(12.dp)) {
-            Text(fontSize = 18.sp, fontWeight = FontWeight.Bold, text = "设备名称：${device?.name}")
+
+            Row {
+                Text(fontSize = 18.sp, fontWeight = FontWeight.Bold, text = "设备名称：")
+                Text(
+//                    color = if (device?.connectStatus == 2) Color.Green else MaterialTheme.colorScheme.onBackground,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    text = "${device?.name}"
+                )
+            }
+
             Text(
                 color = MaterialTheme.colorScheme.outline,
                 fontSize = 13.sp,
-                text = "设备地址：${device?.mac}"
+                text = "Mac地址：${device?.mac}"
             )
             Text(
                 color = MaterialTheme.colorScheme.outline,
                 fontSize = 14.sp,
-                text = "首次连接时间：${TimeUtils.millis2String(device?.firstRecordTime ?: 0)}"
+                text = "首次连接：${TimeUtils.millis2String(device?.firstRecordTime ?: 0)}"
             )
             Text(
                 color = MaterialTheme.colorScheme.outline,
                 fontSize = 14.sp,
-                text = "最近一次：${TimeUtils.millis2String(device?.lastRecordTime ?: 0)} (${if (device?.connectStatus == 2) "已连接" else "未连接"})"
+                text = "最近一次：${TimeUtils.millis2String(device?.lastRecordTime ?: 0)}  (${if (device?.connectStatus == 2) "已连接" else "未连接"})"
             )
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                val duration = Duration.ofSeconds(
-                    (device?.lastRecordTime ?: 0) - (device?.firstRecordTime ?: 0)
+
+                val hours = TimeUtils.getTimeSpan(
+                    (device?.lastRecordTime ?: 0),
+                    (device?.firstRecordTime ?: 0),
+                    TimeConstants.HOUR
                 )
-                val hours = duration.toHours()
-                val minutes = duration.toMinutes() % 60
-                val seconds = duration.seconds % 60
+                val minutes = TimeUtils.getTimeSpan(
+                    (device?.lastRecordTime ?: 0),
+                    (device?.firstRecordTime ?: 0),
+                    TimeConstants.MIN
+                ) - (hours * 60)
+                val seconds = TimeUtils.getTimeSpan(
+                    (device?.lastRecordTime ?: 0),
+                    (device?.firstRecordTime ?: 0),
+                    TimeConstants.SEC
+                ) - (hours * 60 * 60) - (minutes * 60)
+
                 Text(
                     fontSize = 14.sp,
-                    text = "共计：$hours 时 $minutes 分 $seconds 秒"
+                    text = "间隔时长：$hours 时 $minutes 分 $seconds 秒"
                 )
             }
 

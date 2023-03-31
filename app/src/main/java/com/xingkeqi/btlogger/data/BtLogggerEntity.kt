@@ -9,12 +9,12 @@ import java.util.Date
 import javax.crypto.Mac
 
 data class DeviceInfo(
-    val mac: String,
-    val name: String?,
-    val deviceType: Int?,
-    val uuids: String?,
-    val firstRecordTime: Long,
-    val lastRecordTime: Long?,
+    val mac: String = "",
+    val name: String = "",
+    val deviceType: Int = -1,
+    val uuids: String = "",
+    val firstRecordTime: Long = 0,
+    val lastRecordTime: Long = 0,
     val connectStatus: Int
 )
 
