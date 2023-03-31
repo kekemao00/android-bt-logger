@@ -1,7 +1,5 @@
 package com.xingkeqi.btlogger
 
-import android.provider.SyncStateContract.Helpers.insert
-import android.provider.SyncStateContract.Helpers.update
 import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.ViewModel
@@ -40,18 +38,18 @@ class MainViewModel : ViewModel() {
      */
     fun getAll() = getAllDevices().value?.map {
         val minRecord =
-            getRecordsByDeviceId(it.id).value?.minByOrNull { it -> it.timestamp }
+            getRecordsByDeviceMac(it.mac).value?.minByOrNull { it -> it.timestamp }
                 ?: throw NullPointerException("没有找到最远时间的记录")
 
         val maxRecord =
-            getRecordsByDeviceId(it.id).value?.maxByOrNull { it -> it.timestamp }
+            getRecordsByDeviceMac(it.mac).value?.maxByOrNull { it -> it.timestamp }
                 ?: throw NullPointerException("没有找到最近时间的记录")
 
         DeviceInfo(
-            it.mac,
-            it.name,
-            it.type,
-            it.uuids,
+            mac = it.mac,
+            name = it.name,
+            deviceType = it.type,
+            uuids = it.uuids,
             firstConnectTime = minRecord.timestamp,
             lastRecordTime = maxRecord.timestamp,
             connectStatus = maxRecord.connectState
@@ -89,7 +87,7 @@ class MainViewModel : ViewModel() {
     fun deleteDeviceById(id: Int) {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
-                deviceDao.deleteDeviceById(id)
+                deviceDao.deleteDeviceByMac(id)
             }
         }
     }
@@ -115,8 +113,8 @@ class MainViewModel : ViewModel() {
         }
     }
 
-    fun getRecordsByDeviceId(deviceId: Int): LiveData<List<DeviceConnectionRecord>> {
-        return connectRecordDao.getRecordsByDeviceId(deviceId)
+    fun getRecordsByDeviceMac(deviceMac: String): LiveData<List<DeviceConnectionRecord>> {
+        return connectRecordDao.getRecordsByDeviceId(deviceMac)
     }
 
     fun deleteRecordById(deviceId: Int) {

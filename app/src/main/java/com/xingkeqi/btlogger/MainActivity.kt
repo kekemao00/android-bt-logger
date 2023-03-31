@@ -55,9 +55,13 @@ import com.blankj.utilcode.util.TimeUtils
 import com.xingkeqi.btlogger.data.Device
 import com.xingkeqi.btlogger.data.DeviceConnectionRecord
 import com.xingkeqi.btlogger.data.DeviceInfo
+import com.xingkeqi.btlogger.data.MessageEvent
 import com.xingkeqi.btlogger.data.RecordInfo
 import com.xingkeqi.btlogger.receiver.BtLoggerReceiver
 import com.xingkeqi.btlogger.ui.theme.BtLoggerTheme
+import org.greenrobot.eventbus.EventBus
+import org.greenrobot.eventbus.Subscribe
+import org.greenrobot.eventbus.ThreadMode
 
 
 class MainActivity : ComponentActivity() {
@@ -122,10 +126,24 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+
+        EventBus.getDefault().register(this)
+
         val receiver = btLoggerReceiver
         val filter = IntentFilter(BluetoothAdapter.ACTION_CONNECTION_STATE_CHANGED);
         registerReceiver(receiver, filter);
 
+    }
+
+    @Subscribe(threadMode = ThreadMode.MAIN)
+    fun onMessageEvent(event: MessageEvent) {
+        Log.i(
+            tag,
+            "onMessageEvent: msg=${event.message},device=${event.device},record=${event.record}"
+        )
+
+        viewModel.insertDevice(event.device)
+        viewModel.insertRecord(event.record)
     }
 
     @RequiresApi(Build.VERSION_CODES.S)
@@ -147,15 +165,14 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        EventBus.getDefault().unregister(this)
         unregisterReceiver(btLoggerReceiver)
     }
 }
 
 @Composable
 fun DeviceInfoScreen(viewModel: MainViewModel) {
-
     DeviceList(devices = viewModel.deviceList)
-
 }
 
 
@@ -236,7 +253,7 @@ fun DeviceCardPreview() {
     val device = DeviceInfo(
         "22:22:22:22:22:22",
         "Air3",
-        "type2",
+        0,
         "12312",
         System.currentTimeMillis(),
         System.currentTimeMillis(),

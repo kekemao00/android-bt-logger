@@ -18,8 +18,8 @@ interface DeviceDao {
     @Query("SELECT * FROM devices WHERE mac = :mac")
     fun getDeviceByMac(mac: String): LiveData<Device>
 
-    @Query("SELECT * FROM devices WHERE id = :id")
-    fun deleteDeviceById(id: Int): LiveData<Device>
+    @Query("SELECT * FROM devices WHERE mac = :mac")
+    fun deleteDeviceByMac(mac: Int): LiveData<Device>
 
     @Query("DELETE FROM devices")
     suspend fun deleteAll()
@@ -30,10 +30,10 @@ interface ConnectionRecordDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(connectionRecord: DeviceConnectionRecord)
 
-    @Query("SELECT * FROM device_connection_records WHERE deviceId = :deviceId ORDER BY timestamp DESC")
-    fun getRecordsByDeviceId(deviceId: Int): LiveData<List<DeviceConnectionRecord>>
+    @Query("SELECT * FROM device_connection_records WHERE deviceMac = :deviceMac ORDER BY timestamp DESC")
+    fun getRecordsByDeviceId(deviceMac: String): LiveData<List<DeviceConnectionRecord>>
 
-    @Query("DELETE FROM device_connection_records WHERE deviceId= :deviceId")
+    @Query("DELETE FROM device_connection_records WHERE deviceMac= :deviceId")
     suspend fun deleteRecordByDeviceId(deviceId: Int)
 
     @Query("DELETE FROM device_connection_records")

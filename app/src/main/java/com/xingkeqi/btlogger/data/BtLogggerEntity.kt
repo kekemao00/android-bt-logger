@@ -1,17 +1,17 @@
 package com.xingkeqi.btlogger.data
 
-import android.bluetooth.BluetoothDevice
 import android.os.ParcelUuid
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 import java.util.Date
+import javax.crypto.Mac
 
 
 data class DeviceInfo(
-    val mac: String,
-    val name: String,
-    val deviceType: String = "",
-    val uuids: String = "",
+    val mac: String?,
+    val name: String?,
+    val deviceType: Int? = -1,
+    val uuids: String? = "",
     val lastRecordTime: Long,
     val firstConnectTime: Long,
     val connectStatus: Int,
@@ -33,18 +33,18 @@ data class RecordInfo(
     val batteryLevel: Int
 )
 
-data class NewRecordInfo(
-    val state: Int,// BluetoothAdapter.STATE_CONNECTED
-    val device: BluetoothDevice?,
-    val name: String?,
-    val mac: String?,
-    val type: Int?,
-    val bondState: Int?,
-    val rssi: Short?,
-    val uuids: Array<ParcelUuid>?,
-    val alias: String?
-
-)
+//data class NewRecordInfo(
+//    val state: Int,// BluetoothAdapter.STATE_CONNECTED
+//    val device: BluetoothDevice?,
+//    val name: String?,
+//    val mac: String?,
+//    val type: Int?,
+//    val bondState: Int?,
+//    val rssi: Short?,
+//    val uuids: Array<ParcelUuid>?,
+//    val alias: String?
+//
+//)
 
 
 /**
@@ -54,11 +54,14 @@ data class NewRecordInfo(
  */
 @Entity(tableName = "devices")
 data class Device(
-    @PrimaryKey val id: Int,
-    val name: String,
-    val mac: String,
-    val type: String,
-    val uuids: String
+    @PrimaryKey val mac: String,
+    val name: String?,
+    // 配对状态
+    val bondState: Int?,
+    val rssi: Short?,
+    val alias: String?,
+    val type: Int?,
+    val uuids: String?
 )
 
 /**
@@ -69,7 +72,7 @@ data class Device(
 @Entity(tableName = "device_connection_records")
 data class DeviceConnectionRecord(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
-    val deviceId: Int,
+    val deviceMac: String,
     val timestamp: Long,
     val connectState: Int,
     val batteryLevel: Int,
