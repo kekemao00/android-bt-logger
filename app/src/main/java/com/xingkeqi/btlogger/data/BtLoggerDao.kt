@@ -1,41 +1,42 @@
 package com.xingkeqi.btlogger.data
 
+import androidx.lifecycle.LiveData
 import androidx.room.Dao
-import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
-import kotlinx.coroutines.flow.Flow
+
 
 @Dao
 interface DeviceDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(device: Device)
 
-    @Delete
-    suspend fun delete(device: Device)
+    @Query("SELECT * FROM devices")
+    fun getAllDevices(): LiveData<List<Device>>
 
-    @Query("SELECT * FROM device WHERE id = :id")
-    suspend fun getDeviceById(id: Int): Device?
+    @Query("SELECT * FROM devices WHERE mac = :mac")
+    fun getDeviceByMac(mac: String): LiveData<Device>
 
-    @Query("SELECT * FROM device")
-    fun getAllDevices(): Flow<List<Device>>
+    @Query("SELECT * FROM devices WHERE id = :id")
+    fun deleteDeviceById(id: Int): LiveData<Device>
+
+    @Query("DELETE FROM devices")
+    suspend fun deleteAll()
 }
 
 @Dao
-interface PlaybackDao {
+interface ConnectionRecordDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insert(playback: Playback)
+    suspend fun insert(connectionRecord: DeviceConnectionRecord)
 
-    @Query("SELECT * FROM playback WHERE device_id = :deviceId ORDER BY created_at DESC LIMIT 1")
-    suspend fun getLastPlayback(deviceId: Int): Playback?
+    @Query("SELECT * FROM device_connection_records WHERE deviceId = :deviceId ORDER BY timestamp DESC")
+    fun getRecordsByDeviceId(deviceId: Int): LiveData<List<DeviceConnectionRecord>>
+
+    @Query("DELETE FROM device_connection_records WHERE deviceId= :deviceId")
+    suspend fun deleteRecordByDeviceId(deviceId: Int)
+
+    @Query("DELETE FROM device_connection_records")
+    suspend fun deleteAll()
 }
 
-@Dao
-interface VolumeDao {
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insert(volume: Volume)
-
-    @Query("SELECT * FROM volume WHERE device_id = :deviceId ORDER BY created_at DESC LIMIT 1")
-    suspend fun getLastVolume(deviceId: Int): Volume?
-}

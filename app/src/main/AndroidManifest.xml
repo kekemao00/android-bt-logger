@@ -1,9 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
+    <!--    BLUETOOTH权限允许您的应用程序连接到蓝牙设备，而BLUETOOTH_ADMIN权限允许您的应用程序执行蓝牙操作，例如启用或禁用蓝牙。-->
+    <uses-permission android:name="android.permission.BLUETOOTH" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
+    <!--    这些权限允许您的应用程序在设备启动后自动启动，并在后台继续运行。WAKE_LOCK权限允许您的应用程序防止设备进入睡眠模式。请注意，这些权限应该谨慎使用，并且应该遵循Android的最佳实践，例如避免持续保持WAKE_LOCK权限以节省电量。-->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <application
         android:allowBackup="true"
+        android:name=".BtLoggerApplication"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
