@@ -1,9 +1,12 @@
 package com.xingkeqi.btlogger
 
+import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
+import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -12,6 +15,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.annotation.RequiresApi
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -23,25 +27,44 @@ import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Face
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.modifier.modifierLocalConsumer
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.blankj.utilcode.constant.TimeConstants
 import com.blankj.utilcode.util.TimeUtils
+import com.blankj.utilcode.util.ToastUtils
 import com.xingkeqi.btlogger.data.DeviceInfo
 import com.xingkeqi.btlogger.data.MessageEvent
 import com.xingkeqi.btlogger.data.RecordInfo
@@ -50,6 +73,7 @@ import com.xingkeqi.btlogger.ui.theme.BtLoggerTheme
 import org.greenrobot.eventbus.EventBus
 import org.greenrobot.eventbus.Subscribe
 import org.greenrobot.eventbus.ThreadMode
+import java.time.Duration
 
 
 class MainActivity : ComponentActivity() {
@@ -73,8 +97,8 @@ class MainActivity : ComponentActivity() {
                 // A surface container using the 'background' color from the theme
                 Surface(
                     modifier = Modifier
-                        .fillMaxSize()
-                        .padding(8.dp),
+                        .fillMaxSize(),
+//                        .padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
                     color = MaterialTheme.colorScheme.background
                 ) {
 
@@ -146,46 +170,65 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(viewModel: MainViewModel) {
-
+    val context = LocalContext.current
     Column {
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = { Text(text = "BtLogger") },
+                    navigationIcon = {
+                        IconButton(onClick = {}) {
+                            Icon(Icons.Filled.Menu, contentDescription = "Menu")
+                        }
+                    },
+                    actions = {
+                        // Add your actions here
+                        IconButton(onClick = {
+                            viewModel.getAll()
+                            ToastUtils.showShort("您点击了更新")
+                        }) {
+                            Icon(Icons.Filled.Refresh, contentDescription = "Refresh")
+                        }
+                        // Add your actions here
+                        IconButton(onClick = { context.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) }) {
+                            Icon(Icons.Filled.Settings, contentDescription = "Settings")
+                        }
+                    }
+                )
+            },
 
-        Row(
-            modifier = Modifier.height(
-                96.dp
-            )
-        ) {
-            Box(modifier = Modifier.weight(1f))
-            Button(onClick = { viewModel.getAll() }) {
-                Text(text = "历史设备")
+            content = {
+                MainContent(
+                    modifier = Modifier.padding(it),
+                    viewModel = viewModel
+                )
             }
-        }
-
-        MainContent(viewModel = viewModel)
-
+        )
     }
 }
 
 @Composable
-fun MainContent(viewModel: MainViewModel) {
+fun MainContent(modifier: Modifier = Modifier, viewModel: MainViewModel) {
 
     val devicesWithConnectionRecordsUiModel by viewModel.deviceInfoList.observeAsState(
         listOf(
             DeviceInfo(
-                "22:22:22:22:22:22",
-                "Air3",
+                "",
+                "",
                 0,
-                "12312",
+                "",
                 System.currentTimeMillis(),
                 System.currentTimeMillis(),
-                1
-
+                -1
             )
         )
     )
 
-    DeviceList(devices = devicesWithConnectionRecordsUiModel)
+    DeviceList(modifier, devices = devicesWithConnectionRecordsUiModel)
 
 }
 
@@ -217,8 +260,8 @@ fun ConnectsLogItem(record: RecordInfo) {
 }
 
 @Composable
-fun DeviceList(devices: List<DeviceInfo?>) {
-    LazyColumn {
+fun DeviceList(modifier: Modifier = Modifier, devices: List<DeviceInfo?>) {
+    LazyColumn(modifier = modifier) {
         items(devices) {
             DeviceItem(device = it)
         }
@@ -233,20 +276,41 @@ fun DeviceItem(device: DeviceInfo?) {
             .wrapContentHeight()
             .clip(shape = RoundedCornerShape(20.dp))
             .padding(4.dp)
+        // 长按删除
 //            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outline))
     ) {
 
-        Column(modifier = Modifier.padding(6.dp)) {
+
+        Column(modifier = Modifier.padding(12.dp)) {
             Text(fontSize = 18.sp, fontWeight = FontWeight.Bold, text = "设备名称：${device?.name}")
-            Text(fontSize = 14.sp, text = "设备地址：${device?.mac}")
             Text(
-                fontSize = 14.sp,
-                text = "第一次连接时间：${TimeUtils.millis2String(device?.firstRecordTime ?: 0)}"
+                color = MaterialTheme.colorScheme.outline,
+                fontSize = 13.sp,
+                text = "设备地址：${device?.mac}"
             )
             Text(
+                color = MaterialTheme.colorScheme.outline,
                 fontSize = 14.sp,
-                text = "最后一次记录时间：${TimeUtils.millis2String(device?.lastRecordTime ?: 0)} (${if (device?.connectStatus == 2) "连接" else "断开"})"
+                text = "首次连接时间：${TimeUtils.millis2String(device?.firstRecordTime ?: 0)}"
             )
+            Text(
+                color = MaterialTheme.colorScheme.outline,
+                fontSize = 14.sp,
+                text = "最近一次：${TimeUtils.millis2String(device?.lastRecordTime ?: 0)} (${if (device?.connectStatus == 2) "已连接" else "未连接"})"
+            )
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val duration = Duration.ofSeconds(
+                    (device?.lastRecordTime ?: 0) - (device?.firstRecordTime ?: 0)
+                )
+                val hours = duration.toHours()
+                val minutes = duration.toMinutes() % 60
+                val seconds = duration.seconds % 60
+                Text(
+                    fontSize = 14.sp,
+                    text = "共计：$hours 时 $minutes 分 $seconds 秒"
+                )
+            }
+
         }
     }
 

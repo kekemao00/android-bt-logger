@@ -8,6 +8,9 @@
     <!--    这些权限允许您的应用程序在设备启动后自动启动，并在后台继续运行。WAKE_LOCK权限允许您的应用程序防止设备进入睡眠模式。请注意，这些权限应该谨慎使用，并且应该遵循Android的最佳实践，例如避免持续保持WAKE_LOCK权限以节省电量。-->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+<!--    允许应用程序打开系统设置页面：-->
+    <uses-permission android:name="android.permission.WRITE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
 
     <application
         android:allowBackup="true"
