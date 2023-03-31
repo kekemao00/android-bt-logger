@@ -11,10 +11,13 @@ import androidx.room.RoomDatabase
  *
  * @constructor Create empty My database
  */
-@Database(entities = [Device::class, DeviceConnectionRecord::class], version = 1)
+@Database(
+    entities = [Device::class, DeviceConnectionRecord::class],
+    version = 1
+)
 abstract class BtLoggerDatabase : RoomDatabase() {
     abstract fun deviceDao(): DeviceDao
-    abstract fun connectionRecordDao(): ConnectionRecordDao
+    abstract fun connectionRecordDao(): RecordDao
 
     companion object {
         @Volatile
@@ -22,13 +25,11 @@ abstract class BtLoggerDatabase : RoomDatabase() {
 
         fun getDatabase(context: Context): BtLoggerDatabase {
             return INSTANCE ?: synchronized(this) {
-                val instance = Room.databaseBuilder(
-                    context.applicationContext,
-                    BtLoggerDatabase::class.java,
-                    "bt_logger_database"
+                Room.databaseBuilder(
+                    context.applicationContext, BtLoggerDatabase::class.java, "bt_logger_database"
                 ).build()
-                INSTANCE = instance
-                instance
+                    //在 build() 之后，添加一个 also 代码块并分配 Instance = it 以保留对最近创建的数据库实例的引用。
+                    .also { INSTANCE = it }
             }
         }
     }

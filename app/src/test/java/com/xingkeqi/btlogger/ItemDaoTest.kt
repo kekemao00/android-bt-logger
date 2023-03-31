@@ -1,10 +1,7 @@
 package com.xingkeqi.btlogger
 
-import android.content.Context
-import androidx.room.Room
-import com.xingkeqi.btlogger.data.ConnectionRecordDao
+import com.xingkeqi.btlogger.data.RecordDao
 import com.xingkeqi.btlogger.data.DeviceDao
-import org.junit.Before
 import org.junit.runner.RunWith
 import org.junit.runners.JUnit4
 
@@ -12,7 +9,7 @@ import org.junit.runners.JUnit4
 class ItemDaoTest {
 
     private lateinit var itemDao: DeviceDao
-    private lateinit var inventoryDatabase: ConnectionRecordDao
+    private lateinit var inventoryDatabase: RecordDao
 //
 //    @Before
 //    fun createDb() {

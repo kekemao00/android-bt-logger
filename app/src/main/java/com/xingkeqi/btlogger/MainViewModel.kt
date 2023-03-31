@@ -2,24 +2,25 @@ package com.xingkeqi.btlogger
 
 import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.LiveData
-import androidx.lifecycle.MutableLiveData
-import androidx.lifecycle.Transformations
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.xingkeqi.btlogger.data.BtLoggerDatabase
 import com.xingkeqi.btlogger.data.Device
+import androidx.lifecycle.asLiveData
 import com.xingkeqi.btlogger.data.DeviceConnectionRecord
 import com.xingkeqi.btlogger.data.DeviceInfo
 import com.xingkeqi.btlogger.data.RecordInfo
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class MainViewModel : ViewModel() {
-    /**
-     * Device list
-     */
-    var deviceInfoList = MutableLiveData<List<DeviceInfo?>>()
+
+
+    // Cache all items form the database using LiveData.
+//    val allItems: LiveData<List<Item>> = itemDao.getItems().asLiveData()
+
 
     /**
      * Record list
@@ -32,6 +33,13 @@ class MainViewModel : ViewModel() {
     private val deviceDao = db.deviceDao()
 
     private val connectRecordDao = db.connectionRecordDao()
+
+    /**
+     * Device list
+     */
+    var deviceInfoList: LiveData<List<DeviceInfo>> =
+        deviceDao.getDeviceInfosWithConnectionRecords().asLiveData()
+
 
 //    init {
 //        getDevicesInfoWithConnectionRecords()
@@ -50,7 +58,7 @@ class MainViewModel : ViewModel() {
 
         viewModelScope.launch() {
             withContext(Dispatchers.IO) {
-                deviceInfoList.value = getDevicesInfoWithConnectionRecords().value
+//                deviceInfoList.value = getDevicesInfoWithConnectionRecords()
             }
         }
     }
@@ -78,23 +86,23 @@ class MainViewModel : ViewModel() {
     }
 
     private fun getAllDevices(): LiveData<List<Device>> {
-        return deviceDao.getAllDevices()
+        return deviceDao.getAllDevices().asLiveData()
     }
 
 
-    private fun getDevicesInfoWithConnectionRecords(): LiveData<List<DeviceInfo>> {
+    private fun getDevicesInfoWithConnectionRecords(): Flow<List<DeviceInfo>> {
         return db.deviceDao().getDeviceInfosWithConnectionRecords()
     }
 
 
     fun getDeviceByMac(mac: String): LiveData<Device> {
-        return deviceDao.getDeviceByMac(mac)
+        return deviceDao.getDeviceByMac(mac).asLiveData()
     }
 
-    fun deleteDeviceById(id: Int) {
+    fun deleteDeviceById(mac: String) {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
-                deviceDao.deleteDeviceByMac(id)
+                deviceDao.deleteDeviceByMac(mac)
             }
         }
     }
@@ -121,13 +129,13 @@ class MainViewModel : ViewModel() {
     }
 
     fun getRecordsByDeviceMac(deviceMac: String): LiveData<List<DeviceConnectionRecord>> {
-        return connectRecordDao.getRecordsByDeviceId(deviceMac)
+        return connectRecordDao.getRecordsByDeviceMac(deviceMac).asLiveData()
     }
 
-    fun deleteRecordById(deviceId: Int) {
+    fun deleteRecordById(mac: String) {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
-                connectRecordDao.deleteRecordByDeviceId(deviceId)
+                connectRecordDao.deleteRecordByDeviceMac(mac)
             }
         }
     }
