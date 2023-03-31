@@ -12,6 +12,7 @@ import android.os.BatteryManager
 import android.os.Build
 import android.util.Log
 import com.blankj.utilcode.util.TimeUtils
+import com.blankj.utilcode.util.ToastUtils
 import com.blankj.utilcode.util.VolumeUtils
 import com.xingkeqi.btlogger.data.Device
 import com.xingkeqi.btlogger.data.DeviceConnectionRecord
@@ -23,19 +24,8 @@ class BtLoggerReceiver : BroadcastReceiver() {
 
     private val tag = "@@@@"
 
-
-//    val viewModel = ViewModelProvider(
-//        application,
-//        ViewModelProvider.AndroidViewModelFactory.getInstance(application)
-//    ).get(MyViewModel::class.java)
-
     @SuppressLint("MissingPermission")
     override fun onReceive(context: Context, intent: Intent) {
-//
-//        val viewModel = View(
-//            BtLoggerApplication.instance,
-//            ViewModelProvider.AndroidViewModelFactory.getInstance(BtLoggerApplication.instance)
-//        ).get(MainViewModel::class.java)
 
         val action = intent.action
 
@@ -68,6 +58,7 @@ class BtLoggerReceiver : BroadcastReceiver() {
                         tag,
                         "onReceive: 已连接到蓝牙设备 $name[$address],设备类型：$type,当前音量：$volume,是否在播放音乐：$isPlaying, 当前手机电量： $batteryLevel，配对状态：$bondState, rssi=$rssi, uuids=${uuids?.joinToString()}: $now"
                     )
+                    ToastUtils.showLong("$name - 已连接")
                     BluetoothAdapter.STATE_CONNECTED
                 }
 
@@ -77,6 +68,8 @@ class BtLoggerReceiver : BroadcastReceiver() {
                         tag,
                         "onReceive: 蓝牙连接已断开 $name[$address],设备类型：$type,当前音量：$volume,是否在播放音乐：$isPlaying, 当前手机电量： $batteryLevel，配对状态：$bondState, rssi=$rssi, uuids=${uuids?.joinToString()}: $now"
                     )
+                    ToastUtils.showLong("$name - 已断开")
+
                     BluetoothAdapter.STATE_DISCONNECTED
                 }
 
@@ -92,7 +85,7 @@ class BtLoggerReceiver : BroadcastReceiver() {
                     bondState = bondState,
                     rssi = rssi,
                     alias = alias,
-                    type = type,
+                    deviceType = type,
                     uuids = uuids?.joinToString()
                 )
 

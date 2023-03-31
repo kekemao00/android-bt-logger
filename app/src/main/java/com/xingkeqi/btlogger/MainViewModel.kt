@@ -2,6 +2,8 @@ package com.xingkeqi.btlogger
 
 import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.LiveData
+import androidx.lifecycle.MutableLiveData
+import androidx.lifecycle.Transformations
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.xingkeqi.btlogger.data.BtLoggerDatabase
@@ -17,7 +19,7 @@ class MainViewModel : ViewModel() {
     /**
      * Device list
      */
-    internal val deviceList: List<DeviceInfo> = mutableStateListOf()
+    var deviceInfoList = MutableLiveData<List<DeviceInfo?>>()
 
     /**
      * Record list
@@ -31,29 +33,26 @@ class MainViewModel : ViewModel() {
 
     private val connectRecordDao = db.connectionRecordDao()
 
+//    init {
+//        getDevicesInfoWithConnectionRecords()
+//    }
 
     /**
      * Get all
      *
      */
-    fun getAll() = getAllDevices().value?.map {
-        val minRecord =
-            getRecordsByDeviceMac(it.mac).value?.minByOrNull { it -> it.timestamp }
-                ?: throw NullPointerException("没有找到最远时间的记录")
 
-        val maxRecord =
-            getRecordsByDeviceMac(it.mac).value?.maxByOrNull { it -> it.timestamp }
-                ?: throw NullPointerException("没有找到最近时间的记录")
+    fun getAll() {
 
-        DeviceInfo(
-            mac = it.mac,
-            name = it.name,
-            deviceType = it.type,
-            uuids = it.uuids,
-            firstConnectTime = minRecord.timestamp,
-            lastRecordTime = maxRecord.timestamp,
-            connectStatus = maxRecord.connectState
-        )
+        deviceDao.getAllDevices()
+        deviceDao.getDeviceByMac("01:02:03:04:05:06")
+        // TODO: 没查到值
+
+        viewModelScope.launch() {
+            withContext(Dispatchers.IO) {
+                deviceInfoList.value = getDevicesInfoWithConnectionRecords().value
+            }
+        }
     }
 
 
@@ -61,6 +60,8 @@ class MainViewModel : ViewModel() {
 
     }
 
+
+    // ****************************************************
 
     /**
      * Insert device
@@ -79,6 +80,12 @@ class MainViewModel : ViewModel() {
     private fun getAllDevices(): LiveData<List<Device>> {
         return deviceDao.getAllDevices()
     }
+
+
+    private fun getDevicesInfoWithConnectionRecords(): LiveData<List<DeviceInfo>> {
+        return db.deviceDao().getDeviceInfosWithConnectionRecords()
+    }
+
 
     fun getDeviceByMac(mac: String): LiveData<Device> {
         return deviceDao.getDeviceByMac(mac)

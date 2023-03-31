@@ -25,7 +25,7 @@ abstract class BtLoggerDatabase : RoomDatabase() {
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     BtLoggerDatabase::class.java,
-                    "my_database"
+                    "bt_logger_database"
                 ).build()
                 INSTANCE = instance
                 instance

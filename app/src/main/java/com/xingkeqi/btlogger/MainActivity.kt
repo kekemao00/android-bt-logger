@@ -12,48 +12,36 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.annotation.RequiresApi
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.ElevatedCard
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.modifier.modifierLocalConsumer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.ViewModelProvider
-import com.blankj.utilcode.util.RomUtils.RomInfo
 import com.blankj.utilcode.util.TimeUtils
-import com.xingkeqi.btlogger.data.Device
-import com.xingkeqi.btlogger.data.DeviceConnectionRecord
 import com.xingkeqi.btlogger.data.DeviceInfo
 import com.xingkeqi.btlogger.data.MessageEvent
 import com.xingkeqi.btlogger.data.RecordInfo
@@ -90,25 +78,11 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
 
-                    Column {
-
-                        Row(
-                            modifier = Modifier.height(
-                                96.dp
-                            )
-                        ) {
-                            Button(onClick = { viewModel.getAll() }) {
-                                Text(text = "查看历史设备")
-                            }
-                            Button(onClick = { viewModel.getAll() }) {
-                                Text(text = "添加一个测试数据")
-                            }
-
-                        }
+                    Column(modifier = Modifier.fillMaxSize()) {
 
                         if (bluetoothPermissionGranted) {
                             // TODO: 获取权限成功
-                            DeviceInfoScreen(viewModel)
+                            MainScreen(viewModel)
 
                         } else {
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -118,7 +92,7 @@ class MainActivity : ComponentActivity() {
                                     tag,
                                     "onCreate:  Build.VERSION.SDK_INT = ${Build.VERSION.SDK_INT}"
                                 )
-                                DeviceInfoScreen(viewModel)
+                                MainScreen(viewModel)
                             }
                         }
                     }
@@ -126,6 +100,8 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+
+//        viewModel.getAll()
 
         EventBus.getDefault().register(this)
 
@@ -171,8 +147,46 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun DeviceInfoScreen(viewModel: MainViewModel) {
-    DeviceList(devices = viewModel.deviceList)
+fun MainScreen(viewModel: MainViewModel) {
+
+    Column {
+
+        Row(
+            modifier = Modifier.height(
+                96.dp
+            )
+        ) {
+            Box(modifier = Modifier.weight(1f))
+            Button(onClick = { viewModel.getAll() }) {
+                Text(text = "历史设备")
+            }
+        }
+
+        MainContent(viewModel = viewModel)
+
+    }
+}
+
+@Composable
+fun MainContent(viewModel: MainViewModel) {
+
+    val devicesWithConnectionRecordsUiModel by viewModel.deviceInfoList.observeAsState(
+        listOf(
+            DeviceInfo(
+                "22:22:22:22:22:22",
+                "Air3",
+                0,
+                "12312",
+                System.currentTimeMillis(),
+                System.currentTimeMillis(),
+                1
+
+            )
+        )
+    )
+
+    DeviceList(devices = devicesWithConnectionRecordsUiModel)
+
 }
 
 
@@ -203,7 +217,7 @@ fun ConnectsLogItem(record: RecordInfo) {
 }
 
 @Composable
-fun DeviceList(devices: List<DeviceInfo>) {
+fun DeviceList(devices: List<DeviceInfo?>) {
     LazyColumn {
         items(devices) {
             DeviceItem(device = it)
@@ -212,7 +226,7 @@ fun DeviceList(devices: List<DeviceInfo>) {
 }
 
 @Composable
-fun DeviceItem(device: DeviceInfo) {
+fun DeviceItem(device: DeviceInfo?) {
     ElevatedCard(
         modifier = Modifier
             .fillMaxWidth()
@@ -223,12 +237,15 @@ fun DeviceItem(device: DeviceInfo) {
     ) {
 
         Column(modifier = Modifier.padding(6.dp)) {
-            Text(fontSize = 18.sp, fontWeight = FontWeight.Bold, text = "设备名称：${device.name}")
-            Text(fontSize = 14.sp, text = "设备地址：${device.mac}")
-            Text(fontSize = 14.sp, text = "第一次连接时间：${device.firstConnectTime}")
+            Text(fontSize = 18.sp, fontWeight = FontWeight.Bold, text = "设备名称：${device?.name}")
+            Text(fontSize = 14.sp, text = "设备地址：${device?.mac}")
             Text(
                 fontSize = 14.sp,
-                text = "最后一次记录时间：${device.lastRecordTime} (${if (device.connectStatus == 1) "连接" else "断开"})"
+                text = "第一次连接时间：${TimeUtils.millis2String(device?.firstRecordTime ?: 0)}"
+            )
+            Text(
+                fontSize = 14.sp,
+                text = "最后一次记录时间：${TimeUtils.millis2String(device?.lastRecordTime ?: 0)} (${if (device?.connectStatus == 2) "连接" else "断开"})"
             )
         }
     }

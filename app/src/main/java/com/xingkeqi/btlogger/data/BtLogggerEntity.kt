@@ -1,20 +1,21 @@
 package com.xingkeqi.btlogger.data
 
 import android.os.ParcelUuid
+import android.os.Parcelable
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 import java.util.Date
 import javax.crypto.Mac
 
-
 data class DeviceInfo(
-    val mac: String?,
+    val mac: String,
     val name: String?,
-    val deviceType: Int? = -1,
-    val uuids: String? = "",
-    val lastRecordTime: Long,
-    val firstConnectTime: Long,
-    val connectStatus: Int,
+    val deviceType: Int?,
+    val uuids: String?,
+    val firstRecordTime: Long,
+    val lastRecordTime: Long?,
+    val connectStatus: Int
 )
 
 data class RecordInfo(
@@ -54,13 +55,20 @@ data class RecordInfo(
  */
 @Entity(tableName = "devices")
 data class Device(
-    @PrimaryKey val mac: String,
+    @PrimaryKey
+    @ColumnInfo(name = "mac")
+    val mac: String,
+    @ColumnInfo(name = "name")
     val name: String?,
-    // 配对状态
+    @ColumnInfo(name = "bondState")
     val bondState: Int?,
+    @ColumnInfo(name = "rssi")
     val rssi: Short?,
+    @ColumnInfo(name = "alias")
     val alias: String?,
-    val type: Int?,
+    @ColumnInfo(name = "deviceType")
+    val deviceType: Int?,
+    @ColumnInfo(name = "uuids")
     val uuids: String?
 )
 
@@ -71,11 +79,18 @@ data class Device(
  */
 @Entity(tableName = "device_connection_records")
 data class DeviceConnectionRecord(
-    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    @PrimaryKey(autoGenerate = true)
+    val id: Int = 0,
+    @ColumnInfo(name = "deviceMac")
     val deviceMac: String,
+    @ColumnInfo(name = "timestamp")
     val timestamp: Long,
+    @ColumnInfo(name = "connectStatus")
     val connectState: Int,
+    @ColumnInfo(name = "batteryLevel")
     val batteryLevel: Int,
+    @ColumnInfo(name = "volume")
     val volume: Int,
+    @ColumnInfo(name = "isPlaying")
     val isPlaying: Boolean
 )

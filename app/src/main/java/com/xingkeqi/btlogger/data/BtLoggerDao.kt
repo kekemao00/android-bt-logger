@@ -15,6 +15,9 @@ interface DeviceDao {
     @Query("SELECT * FROM devices")
     fun getAllDevices(): LiveData<List<Device>>
 
+    @Query("SELECT devices.mac, devices.name, devices.deviceType, devices.uuids, MIN(device_connection_records.timestamp) AS firstRecordTime, MAX(device_connection_records.timestamp) AS lastRecordTime, device_connection_records.connectStatus AS connectStatus FROM devices INNER JOIN device_connection_records ON devices.mac = device_connection_records.deviceMac GROUP BY devices.mac")
+    fun getDeviceInfosWithConnectionRecords(): LiveData<List<DeviceInfo>>
+
     @Query("SELECT * FROM devices WHERE mac = :mac")
     fun getDeviceByMac(mac: String): LiveData<Device>
 
