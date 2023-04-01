@@ -11,6 +11,7 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.provider.Settings
 import android.util.Log
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -97,14 +98,12 @@ class MainActivity : ComponentActivity() {
         Log.d("@@@", "onCreate: MainActivity")
         super.onCreate(savedInstanceState)
 
-
         setContent {
             BtLoggerTheme {
                 // A surface container using the 'background' color from the theme
                 Surface(
                     modifier = Modifier
                         .fillMaxSize(),
-//                        .padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
                     color = MaterialTheme.colorScheme.background
                 ) {
 
@@ -130,8 +129,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-
-//        viewModel.getAll()
 
         EventBus.getDefault().register(this)
 
@@ -173,6 +170,20 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
         EventBus.getDefault().unregister(this)
         unregisterReceiver(btLoggerReceiver)
+    }
+
+    private var lastBackPressTime: Long = 0
+    override fun onBackPressed() {
+        if (showRecordState.value) {
+            showRecordState.value = false
+            return
+        }
+        if (lastBackPressTime + 2000 < System.currentTimeMillis()) {
+            ToastUtils.showLong("再按一次返回键退出应用程序")
+            lastBackPressTime = System.currentTimeMillis();
+            return
+        }
+        super.onBackPressed()
     }
 }
 
@@ -223,8 +234,8 @@ fun MainScreen(viewModel: MainViewModel) {
                         if (openDialog.value) {
                             ShowDialog(
                                 openDialog,
-                                title = "清空历史记录？",
-                                content = "清空历史记录后，数据将无法恢复。是否继续？",
+                                title = "清空所有历史记录？",
+                                content = "清空历史所有记录后，数据将无法恢复。是否继续？",
                                 onConfirm = {
                                     openDialog.value = false
                                     viewModel.cleanAll()
@@ -289,15 +300,58 @@ private fun ShowDialog(
     )
 }
 
+/**
+ * 显示单个设备的详细记录
+ */
+val showRecordState = mutableStateOf(false)
+
 @Composable
 fun MainContent(modifier: Modifier = Modifier, viewModel: MainViewModel) {
+    if (!showRecordState.value) {
+        val deviceUiModel by viewModel.deviceInfoList.observeAsState(listOf(DeviceInfo()))
+        DeviceList(modifier, devices = deviceUiModel, viewModel)
+    } else {
+        val recordUiModel by viewModel.recordInfoList.observeAsState(listOf(RecordInfo()))
+        RecordCards(modifier, records = recordUiModel, viewModel)
+    }
 
-    val deviceUiModel by viewModel.deviceInfoList.observeAsState(listOf(DeviceInfo()))
+}
 
-    val recordUiModel by viewModel.recordInfoList.observeAsState(listOf(RecordInfo()))
+@Composable
+fun RecordCards(
+    modifier: Modifier = Modifier,
+    records: List<RecordInfo?>,
+    viewModel: MainViewModel
+) {
+    LazyColumn(modifier = modifier.padding(start = 10.dp, end = 10.dp)) {
+        item {
+            Text(text = "详情")
+        }
+        items(records) { RecordItem(record = it, viewModel = viewModel) }
+    }
 
-    DeviceList(modifier, devices = deviceUiModel, viewModel)
+}
 
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun RecordItem(record: RecordInfo?, viewModel: MainViewModel) {
+    ElevatedCard(modifier = Modifier
+        .combinedClickable(onLongClick = {}) {}) {
+        Column {
+            Text(
+                fontWeight = FontWeight.Bold,
+                fontSize = 18.sp,
+                text = "状态：${if (record?.connectState == 2) "连接" else "断开"}"
+            )
+            Text(
+                fontSize = 14.sp,
+                text = "记录时间：${TimeUtils.millis2String(record?.timestamp ?: 0)}"
+            )
+            Text(fontSize = 14.sp, text = "音量大小：${record?.volume}")
+            Text(fontSize = 14.sp, text = "正在播放：${record?.isPlaying}")
+            Text(fontSize = 14.sp, text = "手机电量：${record?.batteryLevel}")
+        }
+    }
 }
 
 
@@ -353,7 +407,7 @@ fun DeviceItem(device: DeviceInfo?, viewModel: MainViewModel) {
             .wrapContentHeight()
             .clip(shape = RoundedCornerShape(20.dp))
             .padding(4.dp)
-            .combinedClickable(enabled = true,
+            .combinedClickable(
                 onLongClick = {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                         val effect =
@@ -364,8 +418,9 @@ fun DeviceItem(device: DeviceInfo?, viewModel: MainViewModel) {
                 }) {
                 viewModel.getDeviceByMac(device?.mac ?: "")
                 viewModel.currDevice.value = device
+                showRecordState.value = true
                 ToastUtils.showShort("点击了${device?.name}")
-                // TODO: 切换页面为展示某个设备的详细日志
+
             },
         colors = CardDefaults.cardColors(
             containerColor = if (device?.connectState == 2) {
