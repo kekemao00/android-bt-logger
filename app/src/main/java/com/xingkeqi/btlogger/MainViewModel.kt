@@ -50,6 +50,11 @@ class MainViewModel : ViewModel() {
         recordDao.getRecordInfoListByMac("28:52:E0:18:39:E8").asLiveData()
 
     /**
+     * Record all
+     */
+    val recordAll: LiveData<List<RecordInfo>> = recordDao.getRecordInfoListAll().asLiveData()
+
+    /**
      * Get all
      *
      */
@@ -60,11 +65,6 @@ class MainViewModel : ViewModel() {
                 deviceDao.getDeviceInfosWithConnectionRecords()
             }
         }
-    }
-
-
-    fun addNewRecord() {
-
     }
 
 

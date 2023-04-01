@@ -8,11 +8,11 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.provider.Settings
 import android.util.Log
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -71,6 +72,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.FileProvider
 import com.blankj.utilcode.constant.TimeConstants
 import com.blankj.utilcode.util.AppUtils
 import com.blankj.utilcode.util.TimeUtils
@@ -80,6 +82,7 @@ import com.xingkeqi.btlogger.data.MessageEvent
 import com.xingkeqi.btlogger.data.RecordInfo
 import com.xingkeqi.btlogger.receiver.BtLoggerReceiver
 import com.xingkeqi.btlogger.ui.theme.BtLoggerTheme
+import com.xingkeqi.btlogger.utils.saveDataToSheet
 import org.greenrobot.eventbus.EventBus
 import org.greenrobot.eventbus.Subscribe
 import org.greenrobot.eventbus.ThreadMode
@@ -219,6 +222,32 @@ fun MainScreen(viewModel: MainViewModel) {
                     actions = {
 
                         // Add your actions here
+                        IconButton(onClick = {
+                            if ((if (showRecordState.value) viewModel.recordInfoList.value else viewModel.recordAll.value) == null) {
+                                ToastUtils.showLong("导出失败：没有可以导出的数据")
+                            } else {
+                                saveDataToSheet(if (showRecordState.value) viewModel.recordInfoList.value!! else viewModel.recordAll.value!!) {
+                                    ToastUtils.showLong("已保存：${it.absoluteFile} : ${it.length()} bytes")
+                                    val uri = FileProvider.getUriForFile(
+                                        context,
+                                        "com.example.myapp.fileprovider",
+                                        it
+                                    )
+                                    val intent = Intent(Intent.ACTION_VIEW)
+                                    intent.setDataAndType(uri, "text/plain")
+                                    intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    context.startActivity(intent)
+
+                                }
+                            }
+
+                        }) {
+                            Icon(
+                                Icons.Filled.Share,
+                                tint = MaterialTheme.colorScheme.primary,
+                                contentDescription = "导出"
+                            )
+                        }
                         IconButton(onClick = { context.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) }) {
                             Icon(
                                 Icons.Filled.Settings,

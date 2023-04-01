@@ -53,7 +53,6 @@ dependencies {
     def lifecycle_version = '2.5.1'
 
 
-
     implementation libs.core.ktx
     implementation libs.lifecycle.runtime.ktx
     implementation libs.activity.compose
@@ -84,5 +83,7 @@ dependencies {
     // Lifecycle libraries
     implementation libs.androidx.lifecycle.viewmodel.ktx
     implementation libs.androidx.lifecycle.livedata.ktx
+
+    implementation files('libs/jxl.jar')
 
 }
