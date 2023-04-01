@@ -2,6 +2,7 @@ package com.xingkeqi.btlogger
 
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -34,6 +35,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Menu
@@ -201,10 +203,14 @@ fun MainScreen(viewModel: MainViewModel) {
                     title = { Text(text = "BtLogger") },
                     navigationIcon = {
                         IconButton(onClick = {
-                            ToastUtils.showShort("当前版本： v${AppUtils.getAppVersionName()}")
+                            if (showRecordState.value) {
+                                showRecordState.value = false
+                            } else {
+                                ToastUtils.showShort("当前版本： v${AppUtils.getAppVersionName()}")
+                            }
                         }) {
                             Icon(
-                                Icons.Filled.Menu,
+                                if (showRecordState.value) Icons.Filled.ArrowBack else Icons.Filled.Menu,
                                 tint = MaterialTheme.colorScheme.primary,
                                 contentDescription = "菜单"
                             )
@@ -234,11 +240,17 @@ fun MainScreen(viewModel: MainViewModel) {
                         if (openDialog.value) {
                             ShowDialog(
                                 openDialog,
-                                title = "清空所有历史记录？",
-                                content = "清空历史所有记录后，数据将无法恢复。是否继续？",
+                                title = if (showRecordState.value) "清空 ${viewModel.currDevice.value?.name} 的历史记录？" else "清空所有历史记录？",
+                                content = if (showRecordState.value) "记录删除后，将无法恢复。是否继续？" else "历史记录清空后，将无法恢复。是否继续？",
                                 onConfirm = {
                                     openDialog.value = false
-                                    viewModel.cleanAll()
+                                    if (showRecordState.value) {
+                                        viewModel.deleteRecordById(
+                                            viewModel.currDevice.value?.mac ?: ""
+                                        )
+                                    } else {
+                                        viewModel.cleanAll()
+                                    }
                                 }, onCancel = {
                                     openDialog.value = false
                                 }
@@ -284,7 +296,7 @@ private fun ShowDialog(
                     painter = rememberVectorPainter(image = Icons.Filled.Delete),
                     contentDescription = "删除"
                 )
-                Text("确认")
+                Text("删除")
             }
         },
         dismissButton = {
@@ -325,7 +337,62 @@ fun RecordCards(
 ) {
     LazyColumn(modifier = modifier.padding(start = 10.dp, end = 10.dp)) {
         item {
-            Text(text = "详情")
+            Column(
+                modifier = Modifier
+                    .padding(start = 12.dp, top = 12.dp, end = 12.dp, bottom = 2.dp)
+            ) {
+
+                Text(
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp, text = "设备名称：${records[0]?.name}"
+                )
+                Text(
+                    color = MaterialTheme.colorScheme.outline,
+                    text = "设备别名：${records[0]?.alias}"
+                )
+                Text(
+                    color = MaterialTheme.colorScheme.outline,
+                    text = "蓝牙地址：${records[0]?.mac}"
+                )
+                Text(
+                    color = MaterialTheme.colorScheme.outline,
+                    text = "设备类型：${
+                        when (records[0]?.deviceType) {
+                            BluetoothDevice.DEVICE_TYPE_CLASSIC -> "经典蓝牙设备"
+                            BluetoothDevice.DEVICE_TYPE_LE -> "低功耗蓝牙设备"
+                            BluetoothDevice.DEVICE_TYPE_DUAL -> "支持经典蓝牙和低功耗蓝牙的设备"
+                            else -> "其他"
+                        }
+                    }"
+                )
+                Text(
+                    color = MaterialTheme.colorScheme.outline,
+                    text = "绑定状态：${
+                        when (records[0]?.bondState) {
+                            BluetoothDevice.BOND_NONE -> "未配对"
+                            BluetoothDevice.BOND_BONDING -> "正在配对"
+                            BluetoothDevice.BOND_BONDED -> "已配对"
+                            BluetoothDevice.ERROR -> "出错"
+                            else -> "其他"
+                        }
+                    }"
+                )
+
+                Text(
+                    color = MaterialTheme.colorScheme.outline,
+                    text = "信号强度：${records[0]?.rssi}"
+                )
+
+                Text(
+                    text = "当前状态：${if (records[0]?.connectState == 2) "已连接" else "未连接"}"
+                )
+
+            }
+            Text(
+                modifier = Modifier.padding(start = 6.dp, top = 16.dp, bottom = 4.dp),
+                color = MaterialTheme.colorScheme.outline,
+                text = "历史记录"
+            )
         }
         items(records) { RecordItem(record = it, viewModel = viewModel) }
     }
@@ -335,22 +402,49 @@ fun RecordCards(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun RecordItem(record: RecordInfo?, viewModel: MainViewModel) {
+    val context = LocalContext.current
+    val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+
     ElevatedCard(modifier = Modifier
-        .combinedClickable(onLongClick = {}) {}) {
-        Column {
+        .fillMaxWidth()
+        .wrapContentHeight()
+        .clip(shape = RoundedCornerShape(20.dp))
+        .padding(top = 4.dp)
+        .combinedClickable(onLongClick = {
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val effect =
+                    VibrationEffect.createOneShot(1, VibrationEffect.DEFAULT_AMPLITUDE)
+                vibrator.vibrate(effect)
+            }
+            ToastUtils.showLong("为保证数据的完整性，暂不支持删除单条数据")
+        }) {},
+        colors = CardDefaults.cardColors(
+            containerColor = if (record?.connectState == 2) {
+                if (isSystemInDarkTheme()) Color(0xFF33691E) else Color(0xFFDCE5CD)
+            } else MaterialTheme.colorScheme.surface,
+        )
+
+    ) {
+        Column(
+            modifier = Modifier
+                .padding(12.dp)
+                .fillMaxWidth()
+        ) {
             Text(
                 fontWeight = FontWeight.Bold,
                 fontSize = 18.sp,
                 text = "状态：${if (record?.connectState == 2) "连接" else "断开"}"
             )
+            Text(fontSize = 14.sp, text = "正在播放：${if (record?.isPlaying == 1) "是" else "否"}")
+            Text(fontSize = 14.sp, text = "音量大小：${record?.volume}")
+            Text(fontSize = 14.sp, text = "手机电量：${record?.batteryLevel}")
             Text(
                 fontSize = 14.sp,
                 text = "记录时间：${TimeUtils.millis2String(record?.timestamp ?: 0)}"
             )
-            Text(fontSize = 14.sp, text = "音量大小：${record?.volume}")
-            Text(fontSize = 14.sp, text = "正在播放：${if (record?.isPlaying==1) "是" else "否"}")
-            Text(fontSize = 14.sp, text = "手机电量：${record?.batteryLevel}")
         }
+
     }
 }
 
@@ -419,7 +513,7 @@ fun DeviceItem(device: DeviceInfo?, viewModel: MainViewModel) {
                 viewModel.getDeviceByMac(device?.mac ?: "")
                 viewModel.currDevice.value = device
                 showRecordState.value = true
-                ToastUtils.showShort("点击了${device?.name}")
+//                ToastUtils.showShort("点击了${device?.name}")
 
             },
         colors = CardDefaults.cardColors(
@@ -457,7 +551,7 @@ fun DeviceItem(device: DeviceInfo?, viewModel: MainViewModel) {
                 Text(
                     color = MaterialTheme.colorScheme.outline,
                     fontSize = 14.sp,
-                    text = "首次记录：${TimeUtils.millis2String(device?.firstRecordTime ?: 0)})"
+                    text = "首次记录：${TimeUtils.millis2String(device?.firstRecordTime ?: 0)}"
                 )
                 Text(
                     color = MaterialTheme.colorScheme.outline,

@@ -33,7 +33,13 @@ data class RecordInfo(
     //  播放状态（0：未播放，1：正在播放）
     val isPlaying: Int = 0,
     // 手机电量（0~100）
-    val batteryLevel: Int = 0
+    val batteryLevel: Int = 0,
+
+    val deviceType: Int = -1,
+    val uuids: String = "",
+    val bondState: Int = -1,
+    val rssi: Short = -1,
+    val alias: String = "",
 )
 
 /**
