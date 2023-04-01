@@ -4,6 +4,8 @@ import android.os.ParcelUuid
 import android.os.Parcelable
 import androidx.room.ColumnInfo
 import androidx.room.Entity
+import androidx.room.ForeignKey
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import java.util.Date
 import javax.crypto.Mac
@@ -15,38 +17,24 @@ data class DeviceInfo(
     val uuids: String = "",
     val firstRecordTime: Long = 0,
     val lastRecordTime: Long = 0,
-    val connectStatus: Int
+    val connectState: Int = 0
 )
 
 data class RecordInfo(
     // mac 地址
-    val mac: String,
-    val name: String,
+    val mac: String = "",
+    val name: String = "",
     // 时间戳
-    val timestamp: Long,
+    val timestamp: Long = 0,
     // 连接状态 0 未连接，1 已连接
-    val connectType: Int,
+    val connectState: Int = 0,
     // 音量
-    val volume: Int,
+    val volume: Int = 0,
     //  播放状态（0：未播放，1：正在播放）
-    val isPlaying: Int,
+    val isPlaying: Int = 0,
     // 手机电量（0~100）
-    val batteryLevel: Int
+    val batteryLevel: Int = 0
 )
-
-//data class NewRecordInfo(
-//    val state: Int,// BluetoothAdapter.STATE_CONNECTED
-//    val device: BluetoothDevice?,
-//    val name: String?,
-//    val mac: String?,
-//    val type: Int?,
-//    val bondState: Int?,
-//    val rssi: Short?,
-//    val uuids: Array<ParcelUuid>?,
-//    val alias: String?
-//
-//)
-
 
 /**
  * 创建 Device 表实体类
@@ -59,17 +47,17 @@ data class Device(
     @ColumnInfo(name = "mac")
     val mac: String,
     @ColumnInfo(name = "name")
-    val name: String?,
-    @ColumnInfo(name = "bondState")
-    val bondState: Int?,
+    val name: String,
+    @ColumnInfo(name = "bond_state")
+    val bondState: Int,
     @ColumnInfo(name = "rssi")
-    val rssi: Short?,
+    val rssi: Short,
     @ColumnInfo(name = "alias")
-    val alias: String?,
-    @ColumnInfo(name = "deviceType")
-    val deviceType: Int?,
+    val alias: String,
+    @ColumnInfo(name = "device_type")
+    val deviceType: Int,
     @ColumnInfo(name = "uuids")
-    val uuids: String?
+    val uuids: String
 )
 
 /**
@@ -77,20 +65,29 @@ data class Device(
  *
  * @constructor Create empty Connection record entity
  */
-@Entity(tableName = "device_connection_records")
+@Entity(
+    tableName = "device_connection_records",
+//    foreignKeys = [ForeignKey(
+//        entity = Device::class,
+//        parentColumns = ["mac"],
+//        childColumns = [
+//            "device_mac",
+//        ]
+//    )]
+)
 data class DeviceConnectionRecord(
     @PrimaryKey(autoGenerate = true)
     val id: Int = 0,
-    @ColumnInfo(name = "deviceMac")
+    @ColumnInfo(name = "device_mac")
     val deviceMac: String,
     @ColumnInfo(name = "timestamp")
     val timestamp: Long,
-    @ColumnInfo(name = "connectStatus")
+    @ColumnInfo(name = "connect_state")
     val connectState: Int,
-    @ColumnInfo(name = "batteryLevel")
+    @ColumnInfo(name = "battery_level")
     val batteryLevel: Int,
     @ColumnInfo(name = "volume")
     val volume: Int,
-    @ColumnInfo(name = "isPlaying")
+    @ColumnInfo(name = "is_playing")
     val isPlaying: Boolean
 )

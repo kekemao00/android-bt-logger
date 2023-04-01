@@ -15,7 +15,7 @@ interface DeviceDao {
     @Query("SELECT * FROM devices")
     fun getAllDevices(): Flow<List<Device>>
 
-    @Query("SELECT devices.mac, devices.name, devices.deviceType, devices.uuids, MIN(device_connection_records.timestamp) AS firstRecordTime, MAX(device_connection_records.timestamp) AS lastRecordTime, device_connection_records.connectStatus AS connectStatus FROM devices INNER JOIN device_connection_records ON devices.mac = device_connection_records.deviceMac GROUP BY devices.mac")
+    @Query("SELECT devices.mac AS mac, devices.name AS name, devices.device_type AS deviceType, devices.uuids as uuids, MIN(device_connection_records.timestamp) AS firstRecordTime, MAX(device_connection_records.timestamp) AS lastRecordTime, device_connection_records.connect_state AS connectState FROM devices INNER JOIN device_connection_records ON devices.mac = device_connection_records.device_mac GROUP BY devices.mac")
     fun getDeviceInfosWithConnectionRecords(): Flow<List<DeviceInfo>>
 
     @Query("SELECT * FROM devices WHERE mac = :mac")
@@ -33,10 +33,13 @@ interface RecordDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(connectionRecord: DeviceConnectionRecord)
 
-    @Query("SELECT * FROM device_connection_records WHERE deviceMac = :deviceMac ORDER BY timestamp DESC")
+    @Query("SELECT * FROM device_connection_records WHERE device_mac = :deviceMac ORDER BY timestamp DESC")
     fun getRecordsByDeviceMac(deviceMac: String): Flow<List<DeviceConnectionRecord>>
 
-    @Query("DELETE FROM device_connection_records WHERE deviceMac= :mac")
+    @Query("SELECT devices.mac AS mac,devices.name AS name,  device_connection_records.timestamp AS timestamp, device_connection_records.connect_state AS connectState, device_connection_records.volume AS volume, device_connection_records.is_playing AS isPlaying, device_connection_records.battery_level AS batteryLevel FROM devices INNER JOIN device_connection_records ON devices.mac = device_connection_records.device_mac WHERE devices.mac = :mac")
+    fun getRecordInfoListByMac(mac: String): Flow<List<RecordInfo>>
+
+    @Query("DELETE FROM device_connection_records WHERE device_mac= :mac")
     suspend fun deleteRecordByDeviceMac(mac: String)
 
     @Query("DELETE FROM device_connection_records")

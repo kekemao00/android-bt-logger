@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.util.Log
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -15,7 +16,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.annotation.RequiresApi
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -27,14 +28,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Build
-import androidx.compose.material.icons.filled.Face
-import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.ThumbUp
-import androidx.compose.material3.Button
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -42,24 +38,20 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.contentColorFor
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.modifier.modifierLocalConsumer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -67,6 +59,7 @@ import androidx.compose.ui.unit.sp
 import com.blankj.utilcode.constant.TimeConstants
 import com.blankj.utilcode.util.TimeUtils
 import com.blankj.utilcode.util.ToastUtils
+import com.xingkeqi.btlogger.data.DeviceConnectionRecord
 import com.xingkeqi.btlogger.data.DeviceInfo
 import com.xingkeqi.btlogger.data.MessageEvent
 import com.xingkeqi.btlogger.data.RecordInfo
@@ -75,8 +68,6 @@ import com.xingkeqi.btlogger.ui.theme.BtLoggerTheme
 import org.greenrobot.eventbus.EventBus
 import org.greenrobot.eventbus.Subscribe
 import org.greenrobot.eventbus.ThreadMode
-import java.time.Duration
-import java.time.Instant
 
 
 class MainActivity : ComponentActivity() {
@@ -217,21 +208,11 @@ fun MainScreen(viewModel: MainViewModel) {
 @Composable
 fun MainContent(modifier: Modifier = Modifier, viewModel: MainViewModel) {
 
-    val devicesWithConnectionRecordsUiModel by viewModel.deviceInfoList.observeAsState(
-        listOf(
-            DeviceInfo(
-                "",
-                "",
-                0,
-                "",
-                System.currentTimeMillis(),
-                System.currentTimeMillis(),
-                -1
-            )
-        )
-    )
+    val deviceUiModel by viewModel.deviceInfoList.observeAsState(listOf(DeviceInfo()))
 
-    DeviceList(modifier, devices = devicesWithConnectionRecordsUiModel)
+    val recordUiModel by viewModel.recordInfoList.observeAsState(listOf(RecordInfo()))
+
+    DeviceList(modifier, devices = deviceUiModel, viewModel)
 
 }
 
@@ -263,26 +244,35 @@ fun ConnectsLogItem(record: RecordInfo) {
 }
 
 @Composable
-fun DeviceList(modifier: Modifier = Modifier, devices: List<DeviceInfo?>) {
+fun DeviceList(
+    modifier: Modifier = Modifier,
+    devices: List<DeviceInfo?>,
+    viewModel: MainViewModel
+) {
     LazyColumn(modifier = modifier) {
         items(devices) {
-            DeviceItem(device = it)
+            DeviceItem(device = it, viewModel)
         }
     }
 }
 
 @Composable
-fun DeviceItem(device: DeviceInfo?) {
+fun DeviceItem(device: DeviceInfo?, viewModel: MainViewModel) {
     ElevatedCard(
         modifier = Modifier
             .fillMaxWidth()
             .wrapContentHeight()
             .clip(shape = RoundedCornerShape(20.dp))
-//            .background(if (device?.connectStatus == 2) MaterialTheme.colorScheme.inversePrimary else MaterialTheme.colorScheme.background)
-            .padding(4.dp),
+            .padding(4.dp)
+            .clickable {
+                viewModel.getDeviceByMac(device?.mac ?: "")
+                viewModel.currDevice.value = device
+                // TODO: 切换页面为展示某个设备的详细日志
+            },
         colors = CardDefaults.cardColors(
-            containerColor = if (device?.connectStatus == 2) Color(0xFFDCE5CD) else MaterialTheme.colorScheme.surface,
-        )
+            containerColor = if (device?.connectState == 2) Color(0xFFDCE5CD) else MaterialTheme.colorScheme.surface,
+
+            )
 
         // 长按删除
 //            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outline))
@@ -314,7 +304,7 @@ fun DeviceItem(device: DeviceInfo?) {
             Text(
                 color = MaterialTheme.colorScheme.outline,
                 fontSize = 14.sp,
-                text = "最近一次：${TimeUtils.millis2String(device?.lastRecordTime ?: 0)}  (${if (device?.connectStatus == 2) "已连接" else "未连接"})"
+                text = "最近一次：${TimeUtils.millis2String(device?.lastRecordTime ?: 0)}  (${if (device?.connectState == 2) "已连接" else "未连接"})"
             )
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
 
@@ -348,7 +338,6 @@ fun DeviceItem(device: DeviceInfo?) {
 @Composable
 @Preview
 fun RecordCardPreview() {
-
     val recordInfo = RecordInfo("mac", "name", System.currentTimeMillis(), 0, 22, 0, 99)
     MaterialTheme {
         ConnectsLogItem(recordInfo)
@@ -389,8 +378,8 @@ fun DeviceCardPreview() {
         )
 
     MaterialTheme {
-
-        DeviceList(devices = devices)
+//         val viewModel: MainViewModel by viewModels()
+//        DeviceList(devices = devices)
 //        DeviceItem(device)
     }
 }

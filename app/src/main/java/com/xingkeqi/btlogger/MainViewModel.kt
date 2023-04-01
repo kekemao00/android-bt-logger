@@ -2,6 +2,7 @@ package com.xingkeqi.btlogger
 
 import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.LiveData
+import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.xingkeqi.btlogger.data.BtLoggerDatabase
@@ -27,13 +28,25 @@ class MainViewModel : ViewModel() {
 
     private val deviceDao = db.deviceDao()
 
-    private val connectRecordDao = db.connectionRecordDao()
+    private val recordDao = db.connectionRecordDao()
 
     /**
-     * Device list
+     * 列表，包括当前状态，首次 尾次连接时间
      */
-    var deviceInfoList: LiveData<List<DeviceInfo>> =
+    val deviceInfoList: LiveData<List<DeviceInfo>> =
         deviceDao.getDeviceInfosWithConnectionRecords().asLiveData()
+
+    /**
+     * Curr device
+     */
+    val currDevice = MutableLiveData<DeviceInfo>()
+
+    /**
+     * 当前设备的详细记录
+     */
+    // TODO:  查询返回的结果
+    val recordInfoList: LiveData<List<RecordInfo>> =
+        recordDao.getRecordInfoListByMac(currDevice.value?.mac ?: "").asLiveData()
 
     /**
      * Get all
@@ -70,8 +83,8 @@ class MainViewModel : ViewModel() {
         }
     }
 
-    private fun getAllDevices(): LiveData<List<Device>> {
-        return deviceDao.getAllDevices().asLiveData()
+    private fun getAllDevices(): Flow<List<Device>> {
+        return deviceDao.getAllDevices()
     }
 
 
@@ -108,19 +121,19 @@ class MainViewModel : ViewModel() {
     fun insertRecord(record: DeviceConnectionRecord) {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
-                connectRecordDao.insert(record)
+                recordDao.insert(record)
             }
         }
     }
 
     fun getRecordsByDeviceMac(deviceMac: String): LiveData<List<DeviceConnectionRecord>> {
-        return connectRecordDao.getRecordsByDeviceMac(deviceMac).asLiveData()
+        return recordDao.getRecordsByDeviceMac(deviceMac).asLiveData()
     }
 
     fun deleteRecordById(mac: String) {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
-                connectRecordDao.deleteRecordByDeviceMac(mac)
+                recordDao.deleteRecordByDeviceMac(mac)
             }
         }
     }
@@ -128,7 +141,7 @@ class MainViewModel : ViewModel() {
     fun deleteAllRecord() {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
-                connectRecordDao.deleteAll()
+                recordDao.deleteAll()
             }
         }
     }

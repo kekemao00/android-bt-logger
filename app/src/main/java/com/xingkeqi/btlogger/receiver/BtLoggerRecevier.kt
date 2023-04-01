@@ -81,12 +81,12 @@ class BtLoggerReceiver : BroadcastReceiver() {
             val deviceTab =
                 Device(
                     mac = address,
-                    name = name,
-                    bondState = bondState,
+                    name = name ?: "",
+                    bondState = bondState ?: -1,
                     rssi = rssi,
-                    alias = alias,
-                    deviceType = type,
-                    uuids = uuids?.joinToString()
+                    alias = alias ?: "",
+                    deviceType = type ?: -1,
+                    uuids = uuids?.joinToString() ?: ""
                 )
 
             val record = DeviceConnectionRecord(
