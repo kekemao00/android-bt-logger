@@ -11,7 +11,6 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.provider.Settings
 import android.util.Log
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -20,8 +19,6 @@ import androidx.activity.viewModels
 import androidx.annotation.RequiresApi
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
@@ -37,10 +34,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -57,37 +52,31 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.core.content.ContextCompat
 import com.blankj.utilcode.constant.TimeConstants
 import com.blankj.utilcode.util.AppUtils
 import com.blankj.utilcode.util.TimeUtils
 import com.blankj.utilcode.util.ToastUtils
-import com.xingkeqi.btlogger.data.DeviceConnectionRecord
 import com.xingkeqi.btlogger.data.DeviceInfo
 import com.xingkeqi.btlogger.data.MessageEvent
 import com.xingkeqi.btlogger.data.RecordInfo
 import com.xingkeqi.btlogger.receiver.BtLoggerReceiver
 import com.xingkeqi.btlogger.ui.theme.BtLoggerTheme
-import kotlinx.coroutines.launch
 import org.greenrobot.eventbus.EventBus
 import org.greenrobot.eventbus.Subscribe
 import org.greenrobot.eventbus.ThreadMode
@@ -232,35 +221,15 @@ fun MainScreen(viewModel: MainViewModel) {
                         }
 
                         if (openDialog.value) {
-                            AlertDialog(
-                                onDismissRequest = { openDialog.value = false },
-                                title = { Text("清空历史记录？") },
-                                text = { Text("清空历史记录后，数据无法恢复。是否继续？") },
-                                confirmButton = {
-                                    Button(
-                                        colors = ButtonDefaults.buttonColors(MaterialTheme.colorScheme.error),
-                                        onClick = {
-                                            openDialog.value = false
-                                            viewModel.deleteAllRecord()
-                                            viewModel.deleteAllDevice()
-                                        }
-                                    ) {
-                                        Icon(
-                                            painter = rememberVectorPainter(image = Icons.Filled.Delete),
-                                            contentDescription = "删除"
-                                        )
-                                        Text("确认")
-                                    }
-                                },
-                                dismissButton = {
-                                    Button(
-                                        colors = ButtonDefaults.buttonColors(MaterialTheme.colorScheme.secondary),
-                                        onClick = {
-                                            openDialog.value = false
-                                        }
-                                    ) {
-                                        Text("取消")
-                                    }
+                            ShowDialog(
+                                openDialog,
+                                title = "清空历史记录？",
+                                content = "清空历史记录后，数据将无法恢复。是否继续？",
+                                onConfirm = {
+                                    openDialog.value = false
+                                    viewModel.cleanAll()
+                                }, onCancel = {
+                                    openDialog.value = false
                                 }
                             )
                         }
@@ -277,6 +246,47 @@ fun MainScreen(viewModel: MainViewModel) {
             }
         )
     }
+}
+
+@Composable
+private fun ShowDialog(
+    openDialog: MutableState<Boolean>,
+    title: String = "温馨提示",
+    content: String = "确认删除吗？",
+    onConfirm: () -> Unit,
+    onCancel: () -> Unit,
+
+    ) {
+    AlertDialog(
+        onDismissRequest = { openDialog.value = false },
+        title = { Text(title) },
+        text = { Text(content) },
+        confirmButton = {
+            Button(
+                colors = ButtonDefaults.buttonColors(MaterialTheme.colorScheme.error),
+                onClick = {
+                    onConfirm()
+
+                }
+            ) {
+                Icon(
+                    painter = rememberVectorPainter(image = Icons.Filled.Delete),
+                    contentDescription = "删除"
+                )
+                Text("确认")
+            }
+        },
+        dismissButton = {
+            Button(
+                colors = ButtonDefaults.buttonColors(MaterialTheme.colorScheme.secondary),
+                onClick = {
+                    onCancel()
+                }
+            ) {
+                Text("取消")
+            }
+        }
+    )
 }
 
 @Composable
@@ -335,6 +345,7 @@ fun DeviceList(
 fun DeviceItem(device: DeviceInfo?, viewModel: MainViewModel) {
     val context = LocalContext.current
     val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+    val showDialogDelItem = remember { mutableStateOf(false) }
 
     ElevatedCard(
         modifier = Modifier
@@ -349,7 +360,7 @@ fun DeviceItem(device: DeviceInfo?, viewModel: MainViewModel) {
                             VibrationEffect.createOneShot(2, VibrationEffect.DEFAULT_AMPLITUDE)
                         vibrator.vibrate(effect)
                     }
-                    ToastUtils.showShort("长按")
+                    showDialogDelItem.value = true
                 }) {
                 viewModel.getDeviceByMac(device?.mac ?: "")
                 viewModel.currDevice.value = device
@@ -363,8 +374,6 @@ fun DeviceItem(device: DeviceInfo?, viewModel: MainViewModel) {
 
             )
 
-        // 长按删除
-//            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outline))
     ) {
 
         Box(
@@ -379,7 +388,6 @@ fun DeviceItem(device: DeviceInfo?, viewModel: MainViewModel) {
                 Row {
                     Text(fontSize = 18.sp, fontWeight = FontWeight.Bold, text = "设备名称：")
                     Text(
-//                    color = if (device?.connectStatus == 2) Color.Green else MaterialTheme.colorScheme.onBackground,
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
                         text = "${device?.name}"
@@ -438,6 +446,20 @@ fun DeviceItem(device: DeviceInfo?, viewModel: MainViewModel) {
                 painter = rememberVectorPainter(image = Icons.Filled.KeyboardArrowRight),
                 contentDescription = "箭头向右"
             )
+
+            if (showDialogDelItem.value) {
+                ShowDialog(
+                    showDialogDelItem,
+                    title = "删除 ${device?.name} ？",
+                    content = "${device?.name} [${device?.mac}] \n\n确认要删除这个设备相关的所有记录吗？删除的数据将无法恢复。是否继续？",
+                    onConfirm = {
+                        showDialogDelItem.value = false
+                        viewModel.deleteDevice(device?.mac ?: "")
+                    }, onCancel = {
+                        showDialogDelItem.value = false
+                    }
+                )
+            }
         }
 
 

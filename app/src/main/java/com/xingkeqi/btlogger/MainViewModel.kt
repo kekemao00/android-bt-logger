@@ -97,7 +97,18 @@ class MainViewModel : ViewModel() {
         return deviceDao.getDeviceByMac(mac).asLiveData()
     }
 
-    fun deleteDeviceById(mac: String) {
+
+    fun deleteDevice(mac: String) {
+        deleteDeviceById(mac)
+        deleteRecordById(mac)
+    }
+
+    fun cleanAll() {
+        deleteAllRecord()
+        deleteAllDevice()
+    }
+
+    private fun deleteDeviceById(mac: String) {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
                 deviceDao.deleteDeviceByMac(mac)
@@ -105,7 +116,7 @@ class MainViewModel : ViewModel() {
         }
     }
 
-    fun deleteAllDevice() {
+    private fun deleteAllDevice() {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
                 deviceDao.deleteAll()
@@ -138,7 +149,8 @@ class MainViewModel : ViewModel() {
         }
     }
 
-    fun deleteAllRecord() {
+
+    private fun deleteAllRecord() {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
                 recordDao.deleteAll()
