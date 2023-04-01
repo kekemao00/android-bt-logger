@@ -36,7 +36,7 @@ interface RecordDao {
     @Query("SELECT * FROM device_connection_records WHERE device_mac = :deviceMac ORDER BY timestamp DESC")
     fun getRecordsByDeviceMac(deviceMac: String): Flow<List<DeviceConnectionRecord>>
 
-    @Query("SELECT devices.mac AS mac,devices.name AS name,  device_connection_records.timestamp AS timestamp, device_connection_records.connect_state AS connectState, device_connection_records.volume AS volume, device_connection_records.is_playing AS isPlaying, device_connection_records.battery_level AS batteryLevel FROM devices INNER JOIN device_connection_records ON devices.mac = device_connection_records.device_mac WHERE devices.mac = :mac")
+    @Query("SELECT devices.mac AS mac,devices.name AS name,  device_connection_records.timestamp AS timestamp, device_connection_records.connect_state AS connectState, device_connection_records.volume AS volume, device_connection_records.is_playing AS isPlaying, device_connection_records.battery_level AS batteryLevel FROM devices INNER JOIN device_connection_records ON devices.mac = device_connection_records.device_mac WHERE devices.mac = :mac ORDER BY device_connection_records.timestamp DESC")
     fun getRecordInfoListByMac(mac: String): Flow<List<RecordInfo>>
 
     @Query("DELETE FROM device_connection_records WHERE device_mac= :mac")

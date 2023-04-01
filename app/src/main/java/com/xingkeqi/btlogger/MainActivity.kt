@@ -348,7 +348,7 @@ fun RecordItem(record: RecordInfo?, viewModel: MainViewModel) {
                 text = "记录时间：${TimeUtils.millis2String(record?.timestamp ?: 0)}"
             )
             Text(fontSize = 14.sp, text = "音量大小：${record?.volume}")
-            Text(fontSize = 14.sp, text = "正在播放：${record?.isPlaying}")
+            Text(fontSize = 14.sp, text = "正在播放：${if (record?.isPlaying==1) "是" else "否"}")
             Text(fontSize = 14.sp, text = "手机电量：${record?.batteryLevel}")
         }
     }

@@ -46,7 +46,8 @@ class MainViewModel : ViewModel() {
      */
     // TODO:  查询返回的结果
     val recordInfoList: LiveData<List<RecordInfo>> =
-        recordDao.getRecordInfoListByMac(currDevice.value?.mac ?: "").asLiveData()
+//        recordDao.getRecordInfoListByMac(currDevice.value?.mac ?: "").asLiveData()
+        recordDao.getRecordInfoListByMac("28:52:E0:18:39:E8").asLiveData()
 
     /**
      * Get all
