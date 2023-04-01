@@ -2,10 +2,13 @@ package com.xingkeqi.btlogger
 
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
+import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
 import android.os.Bundle
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.provider.Settings
 import android.util.Log
 import android.widget.Toast
@@ -16,8 +19,10 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.annotation.RequiresApi
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -56,6 +61,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -70,6 +76,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.core.content.ContextCompat
 import com.blankj.utilcode.constant.TimeConstants
 import com.blankj.utilcode.util.AppUtils
 import com.blankj.utilcode.util.TimeUtils
@@ -80,6 +87,7 @@ import com.xingkeqi.btlogger.data.MessageEvent
 import com.xingkeqi.btlogger.data.RecordInfo
 import com.xingkeqi.btlogger.receiver.BtLoggerReceiver
 import com.xingkeqi.btlogger.ui.theme.BtLoggerTheme
+import kotlinx.coroutines.launch
 import org.greenrobot.eventbus.EventBus
 import org.greenrobot.eventbus.Subscribe
 import org.greenrobot.eventbus.ThreadMode
@@ -195,20 +203,32 @@ fun MainScreen(viewModel: MainViewModel) {
                         IconButton(onClick = {
                             ToastUtils.showShort("当前版本： v${AppUtils.getAppVersionName()}")
                         }) {
-                            Icon(Icons.Filled.Menu, contentDescription = "菜单")
+                            Icon(
+                                Icons.Filled.Menu,
+                                tint = MaterialTheme.colorScheme.primary,
+                                contentDescription = "菜单"
+                            )
                         }
                     },
                     actions = {
 
                         // Add your actions here
                         IconButton(onClick = { context.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) }) {
-                            Icon(Icons.Filled.Settings, contentDescription = "设置")
+                            Icon(
+                                Icons.Filled.Settings,
+                                tint = MaterialTheme.colorScheme.primary,
+                                contentDescription = "设置"
+                            )
                         }
                         // Add your actions here
                         IconButton(onClick = {
                             openDialog.value = true
                         }) {
-                            Icon(Icons.Filled.Delete, contentDescription = "删除")
+                            Icon(
+                                Icons.Filled.Delete,
+                                tint = MaterialTheme.colorScheme.error,
+                                contentDescription = "删除"
+                            )
                         }
 
                         if (openDialog.value) {
@@ -310,17 +330,30 @@ fun DeviceList(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun DeviceItem(device: DeviceInfo?, viewModel: MainViewModel) {
+    val context = LocalContext.current
+    val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+
     ElevatedCard(
         modifier = Modifier
             .fillMaxWidth()
             .wrapContentHeight()
             .clip(shape = RoundedCornerShape(20.dp))
             .padding(4.dp)
-            .clickable {
+            .combinedClickable(enabled = true,
+                onLongClick = {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        val effect =
+                            VibrationEffect.createOneShot(2, VibrationEffect.DEFAULT_AMPLITUDE)
+                        vibrator.vibrate(effect)
+                    }
+                    ToastUtils.showShort("长按")
+                }) {
                 viewModel.getDeviceByMac(device?.mac ?: "")
                 viewModel.currDevice.value = device
+                ToastUtils.showShort("点击了${device?.name}")
                 // TODO: 切换页面为展示某个设备的详细日志
             },
         colors = CardDefaults.cardColors(
