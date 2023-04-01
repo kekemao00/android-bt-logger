@@ -19,6 +19,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -32,6 +33,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
@@ -55,6 +57,7 @@ import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -212,7 +215,7 @@ fun MainScreen(viewModel: MainViewModel) {
                             AlertDialog(
                                 onDismissRequest = { openDialog.value = false },
                                 title = { Text("清空历史记录？") },
-                                text = { Text("清空历史记录后无法恢复... 是否继续？") },
+                                text = { Text("清空历史记录后，数据无法恢复。是否继续？") },
                                 confirmButton = {
                                     Button(
                                         colors = ButtonDefaults.buttonColors(MaterialTheme.colorScheme.error),
@@ -300,7 +303,7 @@ fun DeviceList(
     devices: List<DeviceInfo?>,
     viewModel: MainViewModel
 ) {
-    LazyColumn(modifier = modifier) {
+    LazyColumn(modifier = modifier.padding(start = 10.dp, end = 10.dp)) {
         items(devices) {
             DeviceItem(device = it, viewModel)
         }
@@ -331,67 +334,77 @@ fun DeviceItem(device: DeviceInfo?, viewModel: MainViewModel) {
 //            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outline))
     ) {
 
-//Row {
-//
-//}
+        Box(
+            modifier = Modifier
+                .padding(12.dp)
+                .fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier.align(alignment = Alignment.CenterStart),
+            ) {
 
-        Column(modifier = Modifier.padding(12.dp)) {
-
-            Row {
-                Text(fontSize = 18.sp, fontWeight = FontWeight.Bold, text = "设备名称：")
-                Text(
+                Row {
+                    Text(fontSize = 18.sp, fontWeight = FontWeight.Bold, text = "设备名称：")
+                    Text(
 //                    color = if (device?.connectStatus == 2) Color.Green else MaterialTheme.colorScheme.onBackground,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    text = "${device?.name}"
-                )
-            }
-
-            Text(
-                color = MaterialTheme.colorScheme.outline,
-                fontSize = 13.sp,
-                text = "Mac 地址：${device?.mac}"
-            )
-            Text(
-                color = MaterialTheme.colorScheme.outline,
-                fontSize = 14.sp,
-                text = "首次记录：${TimeUtils.millis2String(device?.firstRecordTime ?: 0)})"
-            )
-            Text(
-                color = MaterialTheme.colorScheme.outline,
-                fontSize = 14.sp,
-                text = "最近记录：${TimeUtils.millis2String(device?.lastRecordTime ?: 0)}  "
-            )
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-
-                val hours = TimeUtils.getTimeSpan(
-                    (device?.lastRecordTime ?: 0),
-                    (device?.firstRecordTime ?: 0),
-                    TimeConstants.HOUR
-                )
-                val minutes = TimeUtils.getTimeSpan(
-                    (device?.lastRecordTime ?: 0),
-                    (device?.firstRecordTime ?: 0),
-                    TimeConstants.MIN
-                ) - (hours * 60)
-                val seconds = TimeUtils.getTimeSpan(
-                    (device?.lastRecordTime ?: 0),
-                    (device?.firstRecordTime ?: 0),
-                    TimeConstants.SEC
-                ) - (hours * 60 * 60) - (minutes * 60)
-
-                Text(
-                    fontSize = 14.sp,
-                    text = "间隔时长：$hours 时 $minutes 分 $seconds 秒"
-                )
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        text = "${device?.name}"
+                    )
+                }
 
                 Text(
                     color = MaterialTheme.colorScheme.outline,
-                    fontSize = 14.sp,
-                    text = "当前状态：${if (device?.connectState == 2) "已连接" else "已断开"}"
+                    fontSize = 13.sp,
+                    text = "Mac 地址：${device?.mac}"
                 )
+                Text(
+                    color = MaterialTheme.colorScheme.outline,
+                    fontSize = 14.sp,
+                    text = "首次记录：${TimeUtils.millis2String(device?.firstRecordTime ?: 0)})"
+                )
+                Text(
+                    color = MaterialTheme.colorScheme.outline,
+                    fontSize = 14.sp,
+                    text = "最近记录：${TimeUtils.millis2String(device?.lastRecordTime ?: 0)}  "
+                )
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+
+                    val hours = TimeUtils.getTimeSpan(
+                        (device?.lastRecordTime ?: 0),
+                        (device?.firstRecordTime ?: 0),
+                        TimeConstants.HOUR
+                    )
+                    val minutes = TimeUtils.getTimeSpan(
+                        (device?.lastRecordTime ?: 0),
+                        (device?.firstRecordTime ?: 0),
+                        TimeConstants.MIN
+                    ) - (hours * 60)
+                    val seconds = TimeUtils.getTimeSpan(
+                        (device?.lastRecordTime ?: 0),
+                        (device?.firstRecordTime ?: 0),
+                        TimeConstants.SEC
+                    ) - (hours * 60 * 60) - (minutes * 60)
+
+                    Text(
+                        fontSize = 14.sp,
+                        text = "间隔时长：$hours 时 $minutes 分 $seconds 秒"
+                    )
+
+                    Text(
+                        color = MaterialTheme.colorScheme.outline,
+                        fontSize = 14.sp,
+                        text = "当前状态：${if (device?.connectState == 2) "已连接" else "已断开"}"
+                    )
+                }
+
             }
 
+            Icon(
+                modifier = Modifier.align(alignment = Alignment.CenterEnd),
+                painter = rememberVectorPainter(image = Icons.Filled.KeyboardArrowRight),
+                contentDescription = "箭头向右"
+            )
         }
 
 
