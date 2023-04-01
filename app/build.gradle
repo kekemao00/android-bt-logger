@@ -5,6 +5,12 @@ plugins {
 
 }
 
+// Use the number of seconds/10 since April 2 2023 as the versionCode.
+// This lets us upload a new build at most every 10 seconds for the
+// next ~680 years.
+// https://stackoverflow.com/a/38643838
+def vCode = (int) (((new Date().getTime() / 1000) - 1680386071) / 10)
+
 android {
     namespace 'com.xingkeqi.btlogger'
     compileSdk 33
@@ -14,7 +20,7 @@ android {
         minSdk 25
         targetSdk 33
         versionCode 1
-        versionName "1.0"
+        versionName "1.0.0"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
