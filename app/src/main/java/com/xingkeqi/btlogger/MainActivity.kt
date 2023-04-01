@@ -16,7 +16,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.annotation.RequiresApi
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -28,9 +30,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -46,17 +53,22 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import com.blankj.utilcode.constant.TimeConstants
+import com.blankj.utilcode.util.AppUtils
 import com.blankj.utilcode.util.TimeUtils
 import com.blankj.utilcode.util.ToastUtils
 import com.xingkeqi.btlogger.data.DeviceConnectionRecord
@@ -169,28 +181,67 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun MainScreen(viewModel: MainViewModel) {
     val context = LocalContext.current
+    val openDialog = remember { mutableStateOf(false) }
+
     Column {
         Scaffold(
             topBar = {
                 TopAppBar(
                     title = { Text(text = "BtLogger") },
                     navigationIcon = {
-                        IconButton(onClick = {}) {
-                            Icon(Icons.Filled.Menu, contentDescription = "Menu")
+                        IconButton(onClick = {
+                            ToastUtils.showShort("当前版本： v${AppUtils.getAppVersionName()}")
+                        }) {
+                            Icon(Icons.Filled.Menu, contentDescription = "菜单")
                         }
                     },
                     actions = {
-                        // Add your actions here
-                        IconButton(onClick = {
-                            viewModel.getAll()
-                            ToastUtils.showShort("您点击了更新")
-                        }) {
-                            Icon(Icons.Filled.Refresh, contentDescription = "Refresh")
-                        }
+
                         // Add your actions here
                         IconButton(onClick = { context.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) }) {
-                            Icon(Icons.Filled.Settings, contentDescription = "Settings")
+                            Icon(Icons.Filled.Settings, contentDescription = "设置")
                         }
+                        // Add your actions here
+                        IconButton(onClick = {
+                            openDialog.value = true
+                        }) {
+                            Icon(Icons.Filled.Delete, contentDescription = "删除")
+                        }
+
+                        if (openDialog.value) {
+                            AlertDialog(
+                                onDismissRequest = { openDialog.value = false },
+                                title = { Text("清空历史记录？") },
+                                text = { Text("清空历史记录后无法恢复... 是否继续？") },
+                                confirmButton = {
+                                    Button(
+                                        colors = ButtonDefaults.buttonColors(MaterialTheme.colorScheme.error),
+                                        onClick = {
+                                            openDialog.value = false
+                                            viewModel.deleteAllRecord()
+                                            viewModel.deleteAllDevice()
+                                        }
+                                    ) {
+                                        Icon(
+                                            painter = rememberVectorPainter(image = Icons.Filled.Delete),
+                                            contentDescription = "删除"
+                                        )
+                                        Text("确认")
+                                    }
+                                },
+                                dismissButton = {
+                                    Button(
+                                        colors = ButtonDefaults.buttonColors(MaterialTheme.colorScheme.secondary),
+                                        onClick = {
+                                            openDialog.value = false
+                                        }
+                                    ) {
+                                        Text("取消")
+                                    }
+                                }
+                            )
+                        }
+
                     }
                 )
             },
@@ -270,7 +321,9 @@ fun DeviceItem(device: DeviceInfo?, viewModel: MainViewModel) {
                 // TODO: 切换页面为展示某个设备的详细日志
             },
         colors = CardDefaults.cardColors(
-            containerColor = if (device?.connectState == 2) Color(0xFFDCE5CD) else MaterialTheme.colorScheme.surface,
+            containerColor = if (device?.connectState == 2) {
+                if (isSystemInDarkTheme()) Color(0xFF33691E) else Color(0xFFDCE5CD)
+            } else MaterialTheme.colorScheme.surface,
 
             )
 
@@ -278,6 +331,9 @@ fun DeviceItem(device: DeviceInfo?, viewModel: MainViewModel) {
 //            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outline))
     ) {
 
+//Row {
+//
+//}
 
         Column(modifier = Modifier.padding(12.dp)) {
 
@@ -294,17 +350,17 @@ fun DeviceItem(device: DeviceInfo?, viewModel: MainViewModel) {
             Text(
                 color = MaterialTheme.colorScheme.outline,
                 fontSize = 13.sp,
-                text = "Mac地址：${device?.mac}"
+                text = "Mac 地址：${device?.mac}"
             )
             Text(
                 color = MaterialTheme.colorScheme.outline,
                 fontSize = 14.sp,
-                text = "首次连接：${TimeUtils.millis2String(device?.firstRecordTime ?: 0)}"
+                text = "首次记录：${TimeUtils.millis2String(device?.firstRecordTime ?: 0)})"
             )
             Text(
                 color = MaterialTheme.colorScheme.outline,
                 fontSize = 14.sp,
-                text = "最近一次：${TimeUtils.millis2String(device?.lastRecordTime ?: 0)}  (${if (device?.connectState == 2) "已连接" else "未连接"})"
+                text = "最近记录：${TimeUtils.millis2String(device?.lastRecordTime ?: 0)}  "
             )
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
 
@@ -328,9 +384,17 @@ fun DeviceItem(device: DeviceInfo?, viewModel: MainViewModel) {
                     fontSize = 14.sp,
                     text = "间隔时长：$hours 时 $minutes 分 $seconds 秒"
                 )
+
+                Text(
+                    color = MaterialTheme.colorScheme.outline,
+                    fontSize = 14.sp,
+                    text = "当前状态：${if (device?.connectState == 2) "已连接" else "已断开"}"
+                )
             }
 
         }
+
+
     }
 
 }
