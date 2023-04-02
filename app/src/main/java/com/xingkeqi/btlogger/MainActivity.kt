@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -68,6 +69,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -226,7 +228,10 @@ fun MainScreen(viewModel: MainViewModel) {
                             if ((if (showRecordState.value) viewModel.recordInfoList.value else viewModel.recordAll.value) == null) {
                                 ToastUtils.showLong("导出失败：没有可以导出的数据")
                             } else {
-                                saveDataToSheet(if (showRecordState.value) viewModel.recordInfoList.value!! else viewModel.recordAll.value!!) {
+                                saveDataToSheet(
+                                    viewModel.currDevice.value ?: DeviceInfo(),
+                                    if (showRecordState.value) viewModel.recordInfoList.value!! else viewModel.recordAll.value!!
+                                ) {
                                     ToastUtils.showLong("已保存：${it.absoluteFile} : ${it.length()} bytes")
                                     val uri = FileProvider.getUriForFile(
                                         context,
@@ -243,7 +248,10 @@ fun MainScreen(viewModel: MainViewModel) {
 
                         }) {
                             Icon(
-                                Icons.Filled.Share,
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .padding(2.dp),
+                                painter = painterResource(id = R.drawable.icon_ex_excel),
                                 tint = MaterialTheme.colorScheme.primary,
                                 contentDescription = "导出"
                             )

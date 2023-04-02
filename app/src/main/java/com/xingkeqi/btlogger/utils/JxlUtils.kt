@@ -1,9 +1,11 @@
 package com.xingkeqi.btlogger.utils
 
 import android.bluetooth.BluetoothDevice
+import androidx.compose.ui.text.toLowerCase
 import com.blankj.utilcode.util.TimeUtils
 import com.blankj.utilcode.util.ToastUtils
 import com.xingkeqi.btlogger.BtLoggerApplication
+import com.xingkeqi.btlogger.data.DeviceInfo
 import com.xingkeqi.btlogger.data.RecordInfo
 import jxl.Workbook
 import jxl.write.Label
@@ -13,13 +15,17 @@ import java.util.Date
 import java.util.Locale
 
 
-fun saveDataToSheet(records: List<RecordInfo>, exportSucceeded: (file: File) -> Unit) {
+fun saveDataToSheet(
+    currDevice: DeviceInfo,
+    records: List<RecordInfo>,
+    exportSucceeded: (file: File) -> Unit
+) {
 
 //
 //// 创建Excel工作簿
 //    val workbook = Workbook.createWorkbook(File("BtLogger_${getCurrentDateTime()}.xls"))
 
-    val fileName = "BtLogger_${getCurrentDateTime()}.xls"
+    val fileName = "BtLogger_${currDevice.name.replace(" ", "_").lowercase(Locale.getDefault())}_${getCurrentDateTime()}.xls"
     val filePath = "${BtLoggerApplication.instance.filesDir}/$fileName"
     val file = File(filePath)
 
