@@ -19,7 +19,7 @@ android {
         applicationId "com.xingkeqi.btlogger"
         minSdk 25
         targetSdk 33
-        versionCode 1
+        versionCode vCode
         versionName "1.0.0"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
@@ -28,9 +28,17 @@ android {
         }
     }
 
+    android.applicationVariants.all {
+        variant ->
+            variant.outputs.all {
+                //在这里修改apk文件名
+                outputFileName = "BtLogger-v${variant.versionName}-${variant.versionCode}(${applicationId}).apk"
+            }
+    }
+
     buildTypes {
         release {
-            minifyEnabled false
+            minifyEnabled true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }

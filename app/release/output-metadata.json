@@ -1,0 +1,20 @@
+{
+  "version": 3,
+  "artifactType": {
+    "type": "APK",
+    "kind": "Directory"
+  },
+  "applicationId": "com.xingkeqi.btlogger",
+  "variantName": "release",
+  "elements": [
+    {
+      "type": "SINGLE",
+      "filters": [],
+      "attributes": [],
+      "versionCode": 4325,
+      "versionName": "1.0.0",
+      "outputFile": "BtLogger-v1.0.0-4325(com.xingkeqi.btlogger).apk"
+    }
+  ],
+  "elementType": "File"
+}
