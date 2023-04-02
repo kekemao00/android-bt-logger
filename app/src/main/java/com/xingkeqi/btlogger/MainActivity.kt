@@ -21,6 +21,7 @@ import androidx.activity.viewModels
 import androidx.annotation.RequiresApi
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
@@ -66,7 +67,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -374,11 +377,26 @@ fun RecordCards(
     records: List<RecordInfo?>,
     viewModel: MainViewModel
 ) {
-    LazyColumn(modifier = modifier.padding(start = 10.dp, end = 10.dp)) {
+    LazyColumn(modifier = modifier) {
         item {
             Column(
                 modifier = Modifier
-                    .padding(start = 12.dp, top = 12.dp, end = 12.dp, bottom = 2.dp)
+                    .fillMaxWidth()
+                    .background(
+                        Brush.linearGradient(
+                            listOf(
+                                if (records[0]?.connectState == 2) {
+                                    if (isSystemInDarkTheme()) Color(0xFF33691E) else Color(
+                                        0xFFDCE5CD
+                                    )
+                                } else {
+                                    MaterialTheme.colorScheme.surface
+                                },
+                                MaterialTheme.colorScheme.background
+                            )
+                        )
+                    )
+                    .padding(start = 22.dp, 12.dp, 12.dp, 12.dp)
             ) {
 
                 Text(
@@ -428,23 +446,29 @@ fun RecordCards(
 
             }
             Text(
-                modifier = Modifier.padding(start = 6.dp, top = 16.dp, bottom = 4.dp),
+                modifier = Modifier.padding(start = 18.dp, top = 16.dp, bottom = 4.dp),
                 color = MaterialTheme.colorScheme.outline,
                 text = "历史记录"
             )
         }
-        items(records) { RecordItem(record = it, viewModel = viewModel) }
+        items(records) {
+            RecordItem(
+                record = it,
+                viewModel = viewModel
+            )
+        }
     }
 
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun RecordItem(record: RecordInfo?, viewModel: MainViewModel) {
+fun RecordItem(modifier: Modifier = Modifier, record: RecordInfo?, viewModel: MainViewModel) {
     val context = LocalContext.current
     val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
 
-    ElevatedCard(modifier = Modifier
+    ElevatedCard(modifier = modifier
+        .padding(start = 10.dp, end = 10.dp)
         .fillMaxWidth()
         .wrapContentHeight()
         .clip(shape = RoundedCornerShape(20.dp))
@@ -625,7 +649,7 @@ fun DeviceItem(device: DeviceInfo?, viewModel: MainViewModel) {
 
                     Text(
                         fontSize = 14.sp,
-                        text = "间隔时长：$hours 时 $minutes 分 $seconds 秒"
+                        text = "共计时长：$hours 时 $minutes 分 $seconds 秒"
                     )
 
                     Text(
