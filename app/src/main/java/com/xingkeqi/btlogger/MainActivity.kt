@@ -223,38 +223,40 @@ fun MainScreen(viewModel: MainViewModel) {
                     },
                     actions = {
 
-                        // Add your actions here
-                        IconButton(onClick = {
-                            if ((if (showRecordState.value) viewModel.recordInfoList.value else viewModel.recordAll.value) == null) {
-                                ToastUtils.showLong("导出失败：没有可以导出的数据")
-                            } else {
-                                saveDataToSheet(
-                                    viewModel.currDevice.value ?: DeviceInfo(),
-                                    if (showRecordState.value) viewModel.recordInfoList.value!! else viewModel.recordAll.value!!
-                                ) {
-                                    ToastUtils.showLong("已保存：${it.absoluteFile} : ${it.length()} bytes")
-                                    val uri = FileProvider.getUriForFile(
-                                        context,
-                                        "com.example.myapp.fileprovider",
-                                        it
-                                    )
-                                    val intent = Intent(Intent.ACTION_VIEW)
-                                    intent.setDataAndType(uri, "text/plain")
-                                    intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                    context.startActivity(intent)
+                        if (showRecordState.value) {
+                            // Add your actions here
+                            IconButton(onClick = {
+                                if (viewModel.recordInfoList.value == null) {
+                                    ToastUtils.showLong("导出失败：没有可以导出的数据")
+                                } else {
+                                    saveDataToSheet(
+                                        viewModel.currDevice.value ?: DeviceInfo(),
+                                        viewModel.recordInfoList.value!!
+                                    ) {
+                                        ToastUtils.showLong("已保存：${it.absoluteFile} : ${it.length()} bytes")
+                                        val uri = FileProvider.getUriForFile(
+                                            context,
+                                            "com.example.myapp.fileprovider",
+                                            it
+                                        )
+                                        val intent = Intent(Intent.ACTION_VIEW)
+                                        intent.setDataAndType(uri, "text/plain")
+                                        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                        context.startActivity(intent)
 
+                                    }
                                 }
-                            }
 
-                        }) {
-                            Icon(
-                                modifier = Modifier
-                                    .size(24.dp)
-                                    .padding(2.dp),
-                                painter = painterResource(id = R.drawable.icon_ex_excel),
-                                tint = MaterialTheme.colorScheme.primary,
-                                contentDescription = "导出"
-                            )
+                            }) {
+                                Icon(
+                                    modifier = Modifier
+                                        .size(24.dp)
+                                        .padding(2.dp),
+                                    painter = painterResource(id = R.drawable.icon_ex_excel),
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    contentDescription = "导出"
+                                )
+                            }
                         }
                         IconButton(onClick = { context.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) }) {
                             Icon(
