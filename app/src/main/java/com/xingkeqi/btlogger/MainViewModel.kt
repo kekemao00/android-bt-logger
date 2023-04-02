@@ -3,6 +3,7 @@ package com.xingkeqi.btlogger
 import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
+import androidx.lifecycle.Transformations
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.xingkeqi.btlogger.data.BtLoggerDatabase
@@ -44,10 +45,10 @@ class MainViewModel : ViewModel() {
     /**
      * 当前设备的详细记录
      */
-    // TODO:  查询返回的结果
     val recordInfoList: LiveData<List<RecordInfo>> =
-//        recordDao.getRecordInfoListByMac(currDevice.value?.mac ?: "").asLiveData()
-        recordDao.getRecordInfoListByMac("28:52:E0:18:39:E8").asLiveData()
+        Transformations.switchMap(currDevice) { device ->
+            recordDao.getRecordInfoListByMac(device?.mac ?: "").asLiveData()
+        }
 
     /**
      * Record all
