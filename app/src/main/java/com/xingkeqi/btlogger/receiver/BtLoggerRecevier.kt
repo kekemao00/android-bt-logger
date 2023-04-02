@@ -10,6 +10,9 @@ import android.content.Intent
 import android.media.AudioManager
 import android.os.BatteryManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.os.Message
 import android.util.Log
 import com.blankj.utilcode.util.TimeUtils
 import com.blankj.utilcode.util.ToastUtils
@@ -98,7 +101,13 @@ class BtLoggerReceiver : BroadcastReceiver() {
                 volume = volume
             )
 
-            EventBus.getDefault().post(MessageEvent("ADD_RECORD", deviceTab, record))
+            handler.removeMessages(save_data)
+            handler.sendMessageDelayed(
+                Message().apply {
+                    obj = Pair(deviceTab, record)
+                    what = save_data
+                }, 1000
+            )
         }
     }
 
@@ -115,5 +124,20 @@ fun isPlaying(context: Context): Boolean {
 private fun getBatteryLevel(context: Context): Int {
     val batteryManager = context.getSystemService(BATTERY_SERVICE) as BatteryManager
     return batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+}
+
+const val save_data = 0x1
+val handler = Handler(
+    Looper.getMainLooper()
+) {
+    when (it.what) {
+        save_data -> {
+            val obj = it.obj as Pair<Device, DeviceConnectionRecord>
+            val deviceTab = obj.first
+            val record = obj.second
+            EventBus.getDefault().post(MessageEvent("ADD_RECORD", deviceTab, record))
+        }
+    }
+    return@Handler false
 }
 

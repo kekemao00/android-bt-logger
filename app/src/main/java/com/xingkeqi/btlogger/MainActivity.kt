@@ -117,7 +117,7 @@ class MainActivity : ComponentActivity() {
                     Column(modifier = Modifier.fillMaxSize()) {
 
                         if (bluetoothPermissionGranted) {
-                            // TODO: 获取权限成功
+                            //  获取权限成功
                             MainScreen(viewModel)
 
                         } else {
@@ -478,10 +478,28 @@ fun RecordItem(record: RecordInfo?, viewModel: MainViewModel) {
             Text(fontSize = 14.sp, text = "正在播放：${if (record?.isPlaying == 1) "是" else "否"}")
             Text(fontSize = 14.sp, text = "音量大小：${record?.volume}")
             Text(fontSize = 14.sp, text = "手机电量：${record?.batteryLevel}")
-            Text(
-                fontSize = 14.sp,
-                text = "记录时间：${TimeUtils.millis2String(record?.timestamp ?: 0)}"
+            val (h, m, s) = longLongLongTriple(
+                Pair(
+                    record?.lastRecordTime ?: 0,
+                    record?.timestamp ?: 0
+                )
             )
+            Row {
+                Text(
+                    fontSize = 14.sp,
+                    text = "记录时间：${TimeUtils.millis2String(record?.timestamp ?: 0)} （距上次间隔："
+                )
+                Text(
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp,
+                    text = "$h 时 $m 分 $s 秒"
+                )
+                Text(
+                    fontSize = 14.sp,
+                    text = "）"
+                )
+            }
+
         }
 
     }
@@ -599,21 +617,11 @@ fun DeviceItem(device: DeviceInfo?, viewModel: MainViewModel) {
                 )
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
 
-                    val hours = TimeUtils.getTimeSpan(
-                        (device?.lastRecordTime ?: 0),
-                        (device?.firstRecordTime ?: 0),
-                        TimeConstants.HOUR
+                    val (hours, minutes, seconds) = longLongLongTriple(
+                        Pair(
+                            device?.firstRecordTime ?: 0, device?.lastRecordTime ?: 0
+                        )
                     )
-                    val minutes = TimeUtils.getTimeSpan(
-                        (device?.lastRecordTime ?: 0),
-                        (device?.firstRecordTime ?: 0),
-                        TimeConstants.MIN
-                    ) - (hours * 60)
-                    val seconds = TimeUtils.getTimeSpan(
-                        (device?.lastRecordTime ?: 0),
-                        (device?.firstRecordTime ?: 0),
-                        TimeConstants.SEC
-                    ) - (hours * 60 * 60) - (minutes * 60)
 
                     Text(
                         fontSize = 14.sp,
@@ -653,6 +661,25 @@ fun DeviceItem(device: DeviceInfo?, viewModel: MainViewModel) {
 
     }
 
+}
+
+private fun longLongLongTriple(pair: Pair<Long, Long>): Triple<Long, Long, Long> {
+    val hours = TimeUtils.getTimeSpan(
+        pair.second,
+        pair.first,
+        TimeConstants.HOUR
+    )
+    val minutes = TimeUtils.getTimeSpan(
+        pair.second,
+        pair.first,
+        TimeConstants.MIN
+    ) - (hours * 60)
+    val seconds = TimeUtils.getTimeSpan(
+        pair.second,
+        pair.first,
+        TimeConstants.SEC
+    ) - (hours * 60 * 60) - (minutes * 60)
+    return Triple(hours, minutes, seconds)
 }
 
 @Composable

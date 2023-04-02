@@ -14,16 +14,11 @@ import com.xingkeqi.btlogger.data.DeviceInfo
 import com.xingkeqi.btlogger.data.RecordInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class MainViewModel : ViewModel() {
-
-    /**
-     * Record list
-     */
-    internal val recordList: List<RecordInfo> = mutableStateListOf()
-
 
     private val db = BtLoggerDatabase.getDatabase(BtLoggerApplication.instance)
 
@@ -47,29 +42,15 @@ class MainViewModel : ViewModel() {
      */
     val recordInfoList: LiveData<List<RecordInfo>> =
         Transformations.switchMap(currDevice) { device ->
-            recordDao.getRecordInfoListByMac(device?.mac ?: "").asLiveData()
+            var lastTime = 0L
+            recordDao.getRecordInfoListByMac(device?.mac ?: "").map { it ->
+                it.sortedBy { it.timestamp }.map {
+                    it.lastRecordTime = if (lastTime < 1) it.timestamp else lastTime
+                    lastTime = it.timestamp
+                    it
+                }.sortedByDescending { it.timestamp }
+            }.asLiveData()
         }
-
-    /**
-     * Record all
-     */
-    val recordAll: LiveData<List<RecordInfo>> = recordDao.getRecordInfoListAll().asLiveData()
-
-    /**
-     * Get all
-     *
-     */
-
-    fun getAll() {
-        viewModelScope.launch() {
-            withContext(Dispatchers.IO) {
-                deviceDao.getDeviceInfosWithConnectionRecords()
-            }
-        }
-    }
-
-
-    // ****************************************************
 
     /**
      * Insert device
@@ -79,21 +60,10 @@ class MainViewModel : ViewModel() {
     fun insertDevice(device: Device) {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
-                val existingDevice = getDeviceByMac(device.mac).value
-                if (existingDevice == null) deviceDao.insert(device)
+                deviceDao.insert(device)
             }
         }
     }
-
-    private fun getAllDevices(): Flow<List<Device>> {
-        return deviceDao.getAllDevices()
-    }
-
-
-    private fun getDevicesInfoWithConnectionRecords(): Flow<List<DeviceInfo>> {
-        return db.deviceDao().getDeviceInfosWithConnectionRecords()
-    }
-
 
     fun getDeviceByMac(mac: String): LiveData<Device> {
         return deviceDao.getDeviceByMac(mac).asLiveData()
@@ -126,6 +96,14 @@ class MainViewModel : ViewModel() {
         }
     }
 
+    private fun deleteAllRecord() {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                recordDao.deleteAll()
+            }
+        }
+    }
+
     /**
      * 添加记录
      *
@@ -139,23 +117,11 @@ class MainViewModel : ViewModel() {
         }
     }
 
-    fun getRecordsByDeviceMac(deviceMac: String): LiveData<List<DeviceConnectionRecord>> {
-        return recordDao.getRecordsByDeviceMac(deviceMac).asLiveData()
-    }
 
     fun deleteRecordById(mac: String) {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
                 recordDao.deleteRecordByDeviceMac(mac)
-            }
-        }
-    }
-
-
-    private fun deleteAllRecord() {
-        viewModelScope.launch {
-            withContext(Dispatchers.IO) {
-                recordDao.deleteAll()
             }
         }
     }

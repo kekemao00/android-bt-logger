@@ -40,7 +40,9 @@ data class RecordInfo(
     val bondState: Int = -1,
     val rssi: Short = -1,
     val alias: String = "",
-)
+) {
+    var lastRecordTime: Long? = 0L
+}
 
 /**
  * 创建 Device 表实体类
