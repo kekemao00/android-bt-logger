@@ -445,10 +445,11 @@ fun RecordCards(
 
                 Text(
                     color = MaterialTheme.colorScheme.outline,
-                    text = "信号强度：${records[0]?.rssi}"
+                    text = "连接总时长：${records[0]?.totalConnectionTime}"
                 )
 
                 Text(
+                    // TODO: 连接总时长
                     text = "当前状态：${if (records[0]?.connectState == 2) "已连接" else "未连接"}"
                 )
 
@@ -507,12 +508,17 @@ fun RecordItem(modifier: Modifier = Modifier, record: RecordInfo?, viewModel: Ma
                 fontSize = 18.sp,
                 text = "状态：${if (record?.connectState == 2) "连接" else "断开"}"
             )
-            Text(fontSize = 14.sp, text = "正在播放：${if (record?.isPlaying == 1) "是" else "否"}")
             Text(
+                color = MaterialTheme.colorScheme.outline,
+                fontSize = 14.sp, text = "正在播放：${if (record?.isPlaying == 1) "是" else "否"}")
+            Text(
+                color = MaterialTheme.colorScheme.outline,
                 fontSize = 14.sp,
                 text = "${if (record?.connectState == 2) "耳" else "手"}机音量：${record?.volume}%"
             )
-            Text(fontSize = 14.sp, text = "电池剩余：${record?.batteryLevel}")
+            Text(
+                color = MaterialTheme.colorScheme.outline,
+                fontSize = 14.sp, text = "电池剩余：${record?.batteryLevel}")
             val (h, m, s) = longLongLongTriple(
                 Pair(
                     record?.lastRecordTime ?: 0,
@@ -521,48 +527,54 @@ fun RecordItem(modifier: Modifier = Modifier, record: RecordInfo?, viewModel: Ma
             )
 
             Text(
+                color = MaterialTheme.colorScheme.outline,
                 fontSize = 14.sp,
                 text = "记录时间：${TimeUtils.millis2String(record?.timestamp ?: 0)}"
             )
             Row {
 
                 val annotatedString = buildAnnotatedString {
-                    withStyle(style = SpanStyle(fontSize = 14.sp)) {
-                        append(if (record?.connectState == 2) "间隔时长：" else "本次用时：")
-                    }
-                    withStyle(style = SpanStyle(fontSize = 14.sp)) {
-                        withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
-                            append("$h")
+                    if (record?.timestamp == record?.lastRecordTime) {
+                        withStyle(style = SpanStyle(fontSize = 14.sp)) {
+                            withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                                append("这是第一条记录")
+                            }
                         }
+                        return@buildAnnotatedString
                     }
-                    withStyle(style = SpanStyle(fontSize = 14.sp)) {
-                        withStyle(SpanStyle(fontWeight = FontWeight.Normal)) {
-                            append(" 时 ")
-                        }
+                    append(if (record?.connectState == 2) "上次断连：" else "本次时长：")
+
+                    withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                        append("$h")
                     }
-                    withStyle(style = SpanStyle(fontSize = 14.sp)) {
-                        withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
-                            append("$m")
-                        }
+
+                    withStyle(SpanStyle(fontWeight = FontWeight.Normal)) {
+                        append(" 时 ")
                     }
-                    withStyle(style = SpanStyle(fontSize = 14.sp)) {
-                        withStyle(SpanStyle(fontWeight = FontWeight.Normal)) {
-                            append(" 分 ")
-                        }
+
+                    withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                        append("$m")
                     }
-                    withStyle(style = SpanStyle(fontSize = 14.sp)) {
-                        withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
-                            append("$s")
-                        }
+
+                    withStyle(SpanStyle(fontWeight = FontWeight.Normal)) {
+                        append(" 分 ")
                     }
-                    withStyle(style = SpanStyle(fontSize = 14.sp)) {
-                        withStyle(SpanStyle(fontWeight = FontWeight.Normal)) {
-                            append(" 秒 ")
-                        }
+
+                    withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                        append("$s")
+                    }
+
+                    withStyle(SpanStyle(fontWeight = FontWeight.Normal)) {
+                        append(" 秒 ")
+
                     }
                 }
 
-                Text(text = annotatedString)
+                Text(
+                    color = if (record?.connectState == 2) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.onBackground,
+                    fontSize = if (record?.connectState == 2) 14.sp else 14.sp,
+                    text = annotatedString
+                )
 
             }
         }

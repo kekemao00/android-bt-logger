@@ -41,7 +41,15 @@ data class RecordInfo(
     val rssi: Short = -1,
     val alias: String = "",
 ) {
+    /**
+     * 上次记录的时间
+     */
     var lastRecordTime: Long? = 0L
+
+    /**
+     * 连接总时长
+     */
+    var totalConnectionTime: Long? = 0L
 }
 
 /**
