@@ -485,8 +485,6 @@ fun RecordItem(modifier: Modifier = Modifier, record: RecordInfo?, viewModel: Ma
                     VibrationEffect.createOneShot(1, VibrationEffect.DEFAULT_AMPLITUDE)
                 vibrator.vibrate(effect)
             }
-//            ToastUtils.showLong("为保证数据的完整性，暂不支持删除单条数据")
-
             showDialogDelItem.value = true
         }) {},
         colors = CardDefaults.cardColors(
@@ -595,33 +593,6 @@ fun RecordItem(modifier: Modifier = Modifier, record: RecordInfo?, viewModel: Ma
     }
 }
 
-
-@Composable
-fun ConnectsLogItem(record: RecordInfo) {
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(80.dp)
-            .padding(4.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
-    ) {
-        Row {
-
-            Column {
-                Text(text = record.mac)
-                Text(text = record.name)
-                Text(text = TimeUtils.millis2String(record.timestamp))
-            }
-
-            Column {
-
-
-            }
-        }
-    }
-
-}
-
 @Composable
 fun DeviceList(
     modifier: Modifier = Modifier,
@@ -660,7 +631,6 @@ fun DeviceItem(device: DeviceInfo?, viewModel: MainViewModel) {
                 viewModel.getDeviceByMac(device?.mac ?: "")
                 viewModel.currDevice.value = device
                 showRecordState.value = true
-//                ToastUtils.showShort("点击了${device?.name}")
 
             },
         colors = CardDefaults.cardColors(
@@ -747,8 +717,6 @@ fun DeviceItem(device: DeviceInfo?, viewModel: MainViewModel) {
                 )
             }
         }
-
-
     }
 
 }
@@ -771,55 +739,5 @@ private fun longLongLongTriple(pair: Pair<Long, Long>): Triple<Long, Long, Long>
     ) - (hours * 60 * 60) - (minutes * 60)
     return Triple(hours, minutes, seconds)
 }
-
-@Composable
-@Preview
-fun RecordCardPreview() {
-    val recordInfo = RecordInfo()
-    MaterialTheme {
-        ConnectsLogItem(recordInfo)
-    }
-}
-
-@Preview
-@Composable
-fun DeviceCardPreview() {
-//    val device = Device(0, "SOUNDPEATS Air3", "33:33:33:33:33:33", "type", "uuids")
-//    val record = DeviceConnectionRecord(0, device.id, System.currentTimeMillis(), null, 0, 99, 22, true)
-    val device = DeviceInfo(
-        "22:22:22:22:22:22",
-        "Air3",
-        0,
-        "12312",
-        System.currentTimeMillis(),
-        System.currentTimeMillis(),
-        1
-    )
-
-    val devices =
-        listOf(
-            device,
-            device,
-            device,
-            device,
-            device,
-            device,
-            device,
-            device,
-            device,
-            device,
-            device,
-            device,
-            device,
-            device
-        )
-
-    MaterialTheme {
-//         val viewModel: MainViewModel by viewModels()
-//        DeviceList(devices = devices)
-//        DeviceItem(device)
-    }
-}
-
 
 
