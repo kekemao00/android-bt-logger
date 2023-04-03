@@ -35,20 +35,59 @@ class MainViewModel : ViewModel() {
      */
     val currDevice = MutableLiveData<DeviceInfo>()
 
+    val pairTimeDuration = MutableLiveData(Pair(0L, 0L))
+
     /**
      * 当前设备的详细记录
      */
     val recordInfoList: LiveData<List<RecordInfo>> =
         Transformations.switchMap(currDevice) { device ->
-            var lastTime = 0L
+            var lastTimestamp = 0L
+            var connectionTime = 0L
+            var disconnectionTime = 0L
             recordDao.getRecordInfoListByMac(device?.mac ?: "").map { it ->
                 it.sortedBy { it.timestamp }.map {
-                    it.lastRecordTime = if (lastTime < 1) it.timestamp else lastTime
-                    lastTime = it.timestamp
+                    it.lastRecordTime = if (lastTimestamp < 1) it.timestamp else lastTimestamp
+                    val timeDiff = it.timestamp - (it.lastRecordTime ?: 0)
+                    if (it.connectState == 2) {
+                        disconnectionTime += timeDiff
+                    } else {
+                        connectionTime += timeDiff
+                    }
+                    it.totalConnectionTime = connectionTime
+                    it.totalDisConnectionTime = disconnectionTime
+                    pairTimeDuration.value = Pair(connectionTime, disconnectionTime)
+
+                    lastTimestamp = it.timestamp
                     it
-                }.sortedByDescending { it.timestamp }
+                }.sortedByDescending { it.timestamp }.also {
+                    // 处理完成初始化临时变量，为下次计算做准备
+                    lastTimestamp = 0L
+                    connectionTime = 0L
+                    disconnectionTime = 0L
+                }
             }.asLiveData()
         }
+
+    /**
+     *
+     * val connectionTime = 0L
+     * val disconnectionTime = 0L
+     * var lastTimestamp = 0L
+     *
+     * recordDao.getRecordInfoListByMac(device?.mac ?: "").map { it ->
+     *     it.sortedBy { it.timestamp }.forEach { recordInfo ->
+     *         val timeDiff = recordInfo.timestamp - lastTimestamp
+     *         if (recordInfo.isConnected) {
+     *             connectionTime += timeDiff
+     *         } else {
+     *             disconnectionTime += timeDiff
+     *         }
+     *         lastTimestamp = recordInfo.timestamp
+     *     }
+     * }.asLiveData()
+     */
+
 
     /**
      * Insert device

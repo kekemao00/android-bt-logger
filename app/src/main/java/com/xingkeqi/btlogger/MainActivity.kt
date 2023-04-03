@@ -87,6 +87,8 @@ import com.xingkeqi.btlogger.data.MessageEvent
 import com.xingkeqi.btlogger.data.RecordInfo
 import com.xingkeqi.btlogger.receiver.BtLoggerReceiver
 import com.xingkeqi.btlogger.ui.theme.BtLoggerTheme
+import com.xingkeqi.btlogger.utils.getDurationString
+import com.xingkeqi.btlogger.utils.longLongLongTriple
 import com.xingkeqi.btlogger.utils.saveDataToSheet
 import org.greenrobot.eventbus.EventBus
 import org.greenrobot.eventbus.Subscribe
@@ -438,13 +440,16 @@ fun RecordCards(
                 )
 
                 Text(
-                    color = MaterialTheme.colorScheme.outline,
-                    text = "连接总时长：${records[0]?.totalConnectionTime}"
+                    text = "当前状态：${if (records[0]?.connectState == 2) "已连接" else "未连接"}"
                 )
 
                 Text(
-                    // TODO: 连接总时长
-                    text = "当前状态：${if (records[0]?.connectState == 2) "已连接" else "未连接"}"
+                    text = "连接总时长：${getDurationString(records[0]?.totalConnectionTime ?: 0)}"
+                )
+
+                Text(
+                    color = MaterialTheme.colorScheme.outline,
+                    text = "断开总时长：${getDurationString(records[0]?.totalDisConnectionTime ?: 0)}"
                 )
 
             }
@@ -531,12 +536,12 @@ fun RecordItem(modifier: Modifier = Modifier, record: RecordInfo?, viewModel: Ma
                 color = MaterialTheme.colorScheme.outline,
                 fontSize = 14.sp, text = "电池剩余：${record?.batteryLevel}"
             )
-            val (h, m, s) = longLongLongTriple(
-                Pair(
-                    record?.lastRecordTime ?: 0,
-                    record?.timestamp ?: 0
-                )
-            )
+//            val (h, m, s) = longLongLongTriple(
+//                Pair(
+//                    record?.lastRecordTime ?: 0,
+//                    record?.timestamp ?: 0
+//                )
+//            )
 
             Text(
                 color = MaterialTheme.colorScheme.outline,
@@ -554,30 +559,18 @@ fun RecordItem(modifier: Modifier = Modifier, record: RecordInfo?, viewModel: Ma
                         }
                         return@buildAnnotatedString
                     }
-                    append(if (record?.connectState == 2) "上次断连：" else "本次时长：")
+                    append(if (record?.connectState == 2) "上次断开：" else "连接计时：")
 
-                    withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
-                        append("$h")
+                    withStyle(SpanStyle(fontWeight = FontWeight.Normal)) {
+                        append(
+                            getDurationString(
+                                (record?.timestamp ?: 0) - (record?.lastRecordTime ?: 0)
+                            )
+                        )
                     }
 
                     withStyle(SpanStyle(fontWeight = FontWeight.Normal)) {
-                        append(" 时 ")
-                    }
-
-                    withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
-                        append("$m")
-                    }
-
-                    withStyle(SpanStyle(fontWeight = FontWeight.Normal)) {
-                        append(" 分 ")
-                    }
-
-                    withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
-                        append("$s")
-                    }
-
-                    withStyle(SpanStyle(fontWeight = FontWeight.Normal)) {
-                        append(" 秒 ")
+                        append(if (record?.connectState == 2) "之前" else "")
 
                     }
                 }
@@ -677,15 +670,14 @@ fun DeviceItem(device: DeviceInfo?, viewModel: MainViewModel) {
                 )
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
 
-                    val (hours, minutes, seconds) = longLongLongTriple(
-                        Pair(
-                            device?.firstRecordTime ?: 0, device?.lastRecordTime ?: 0
-                        )
-                    )
-
                     Text(
                         fontSize = 14.sp,
-                        text = "共计时长：$hours 时 $minutes 分 $seconds 秒"
+                        text = "总连接时长：${getDurationString(viewModel.pairTimeDuration.value?.first ?: 0)}"
+                    )
+                    Text(
+                        color = MaterialTheme.colorScheme.outline,
+                        fontSize = 14.sp,
+                        text = "总断开时长：${getDurationString(viewModel.pairTimeDuration.value?.second ?: 0)}"
                     )
 
                     Text(
@@ -719,25 +711,6 @@ fun DeviceItem(device: DeviceInfo?, viewModel: MainViewModel) {
         }
     }
 
-}
-
-private fun longLongLongTriple(pair: Pair<Long, Long>): Triple<Long, Long, Long> {
-    val hours = TimeUtils.getTimeSpan(
-        pair.second,
-        pair.first,
-        TimeConstants.HOUR
-    )
-    val minutes = TimeUtils.getTimeSpan(
-        pair.second,
-        pair.first,
-        TimeConstants.MIN
-    ) - (hours * 60)
-    val seconds = TimeUtils.getTimeSpan(
-        pair.second,
-        pair.first,
-        TimeConstants.SEC
-    ) - (hours * 60 * 60) - (minutes * 60)
-    return Triple(hours, minutes, seconds)
 }
 
 

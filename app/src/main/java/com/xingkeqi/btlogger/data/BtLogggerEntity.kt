@@ -51,6 +51,11 @@ data class RecordInfo(
      * 连接总时长
      */
     var totalConnectionTime: Long? = 0L
+
+    /**
+     * 断开总时长
+     */
+    var totalDisConnectionTime: Long? = 0L
 }
 
 /**
