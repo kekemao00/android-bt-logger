@@ -507,7 +507,7 @@ fun RecordItem(modifier: Modifier = Modifier, record: RecordInfo?, viewModel: Ma
                 fontSize = 14.sp,
                 text = "${if (record?.connectState == 2) "耳" else "手"}机音量：${record?.volume}%"
             )
-            Text(fontSize = 14.sp, text = "手机电量：${record?.batteryLevel}")
+            Text(fontSize = 14.sp, text = "电池剩余：${record?.batteryLevel}")
             val (h, m, s) = longLongLongTriple(
                 Pair(
                     record?.lastRecordTime ?: 0,
