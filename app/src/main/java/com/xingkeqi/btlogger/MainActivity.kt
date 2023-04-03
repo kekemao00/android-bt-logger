@@ -73,7 +73,12 @@ import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -521,16 +526,44 @@ fun RecordItem(modifier: Modifier = Modifier, record: RecordInfo?, viewModel: Ma
             )
             Row {
 
-                Text(
-                    fontSize = 14.sp,
-                    text = "距上次间隔："
-                )
+                val annotatedString = buildAnnotatedString {
+                    withStyle(style = SpanStyle(fontSize = 14.sp)) {
+                        append(if (record?.connectState == 2) "间隔时长：" else "本次用时：")
+                    }
+                    withStyle(style = SpanStyle(fontSize = 14.sp)) {
+                        withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                            append("$h")
+                        }
+                    }
+                    withStyle(style = SpanStyle(fontSize = 14.sp)) {
+                        withStyle(SpanStyle(fontWeight = FontWeight.Normal)) {
+                            append(" 时 ")
+                        }
+                    }
+                    withStyle(style = SpanStyle(fontSize = 14.sp)) {
+                        withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                            append("$m")
+                        }
+                    }
+                    withStyle(style = SpanStyle(fontSize = 14.sp)) {
+                        withStyle(SpanStyle(fontWeight = FontWeight.Normal)) {
+                            append(" 分 ")
+                        }
+                    }
+                    withStyle(style = SpanStyle(fontSize = 14.sp)) {
+                        withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                            append("$s")
+                        }
+                    }
+                    withStyle(style = SpanStyle(fontSize = 14.sp)) {
+                        withStyle(SpanStyle(fontWeight = FontWeight.Normal)) {
+                            append(" 秒 ")
+                        }
+                    }
+                }
 
-                Text(
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp,
-                    text = "$h 时 $m 分 $s 秒"
-                )
+                Text(text = annotatedString)
+
             }
         }
     }
