@@ -18,6 +18,16 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.annotation.RequiresApi
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandIn
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -187,8 +197,8 @@ class MainActivity : ComponentActivity() {
 
     private var lastBackPressTime: Long = 0
     override fun onBackPressed() {
-        if (showRecordState.value) {
-            showRecordState.value = false
+        if (showRecordState) {
+            showRecordState = false
             return
         }
         if (lastBackPressTime + 2000 < System.currentTimeMillis()) {
@@ -214,14 +224,14 @@ fun MainScreen(viewModel: MainViewModel) {
                     title = { Text(text = "BtLogger") },
                     navigationIcon = {
                         IconButton(onClick = {
-                            if (showRecordState.value) {
-                                showRecordState.value = false
+                            if (showRecordState) {
+                                showRecordState = false
                             } else {
                                 ToastUtils.showShort("当前版本： v${AppUtils.getAppVersionName()}")
                             }
                         }) {
                             Icon(
-                                if (showRecordState.value) Icons.Filled.ArrowBack else Icons.Filled.Menu,
+                                if (showRecordState) Icons.Filled.ArrowBack else Icons.Filled.Menu,
                                 tint = MaterialTheme.colorScheme.primary,
                                 contentDescription = "菜单"
                             )
@@ -229,7 +239,7 @@ fun MainScreen(viewModel: MainViewModel) {
                     },
                     actions = {
 
-                        if (showRecordState.value) {
+                        if (showRecordState) {
                             // Add your actions here
                             IconButton(onClick = {
                                 if (viewModel.recordInfoList.value == null) {
@@ -285,11 +295,11 @@ fun MainScreen(viewModel: MainViewModel) {
                         if (openDialog.value) {
                             ShowDialog(
                                 openDialog,
-                                title = if (showRecordState.value) "清空 ${viewModel.currDevice.value?.name} 的历史记录？" else "清空所有历史记录？",
-                                content = if (showRecordState.value) "记录删除后，将无法恢复。是否继续？" else "历史记录清空后，将无法恢复。是否继续？",
+                                title = if (showRecordState) "清空 ${viewModel.currDevice.value?.name} 的历史记录？" else "清空所有历史记录？",
+                                content = if (showRecordState) "记录删除后，将无法恢复。是否继续？" else "历史记录清空后，将无法恢复。是否继续？",
                                 onConfirm = {
                                     openDialog.value = false
-                                    if (showRecordState.value) {
+                                    if (showRecordState) {
                                         viewModel.deleteRecordByMac(
                                             viewModel.currDevice.value?.mac ?: ""
                                         )
@@ -360,11 +370,11 @@ private fun ShowDialog(
 /**
  * 显示单个设备的详细记录
  */
-val showRecordState = mutableStateOf(false)
+private var showRecordState by mutableStateOf(false)
 
 @Composable
 fun MainContent(modifier: Modifier = Modifier, viewModel: MainViewModel) {
-    if (!showRecordState.value) {
+    if (!showRecordState) {
         val deviceUiModel by viewModel.deviceInfoList.observeAsState(listOf(DeviceInfo()))
         DeviceList(modifier, devices = deviceUiModel, viewModel)
     } else {
@@ -460,10 +470,17 @@ fun RecordCards(
             )
         }
         items(records) {
-            RecordItem(
-                record = it,
-                viewModel = viewModel
-            )
+            // FIXME: 入场动画不起作用为何？
+            AnimatedVisibility(
+                visible = showRecordState,
+                enter = fadeIn(animationSpec = tween(durationMillis = 300, delayMillis = 150)),
+                exit = fadeOut(animationSpec = tween(durationMillis = 300))
+            ) {
+                RecordItem(
+                    record = it,
+                    viewModel = viewModel
+                )
+            }
         }
     }
 
@@ -536,12 +553,6 @@ fun RecordItem(modifier: Modifier = Modifier, record: RecordInfo?, viewModel: Ma
                 color = MaterialTheme.colorScheme.outline,
                 fontSize = 14.sp, text = "电池剩余：${record?.batteryLevel}"
             )
-//            val (h, m, s) = longLongLongTriple(
-//                Pair(
-//                    record?.lastRecordTime ?: 0,
-//                    record?.timestamp ?: 0
-//                )
-//            )
 
             Text(
                 color = MaterialTheme.colorScheme.outline,
@@ -594,7 +605,14 @@ fun DeviceList(
 ) {
     LazyColumn(modifier = modifier.padding(start = 10.dp, end = 10.dp, bottom = 10.dp)) {
         items(devices) {
-            DeviceItem(device = it, viewModel)
+            // FIXME: 入场动画不起作用为何？
+            AnimatedVisibility(
+                visible = !showRecordState, // 这里假设所有的 item 都是可见的
+                enter = fadeIn(animationSpec = tween(durationMillis = 300, delayMillis = 150)),
+                exit = fadeOut(animationSpec = tween(durationMillis = 300))
+            ) {
+                DeviceItem(device = it, viewModel)
+            }
         }
     }
 }
@@ -623,7 +641,7 @@ fun DeviceItem(device: DeviceInfo?, viewModel: MainViewModel) {
                 }) {
                 viewModel.getDeviceByMac(device?.mac ?: "")
                 viewModel.currDevice.value = device
-                showRecordState.value = true
+                showRecordState = true
 
             },
         colors = CardDefaults.cardColors(
@@ -669,7 +687,8 @@ fun DeviceItem(device: DeviceInfo?, viewModel: MainViewModel) {
                     text = "最近记录：${TimeUtils.millis2String(device?.lastRecordTime ?: 0)}  "
                 )
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-// TODO: 每条数据不能独立显示，待修复后放开
+
+// FIXME: 每条数据不能独立显示，待修复后放开
 //                    Text(
 //                        fontSize = 14.sp,
 //                        text = "总连接时长：${getDurationString(viewModel.pairTimeDuration.value?.first ?: 0)}"
