@@ -8,15 +8,18 @@ import android.content.Context
 import android.content.Context.BATTERY_SERVICE
 import android.content.Intent
 import android.media.AudioManager
+import android.media.AudioManager.STREAM_MUSIC
 import android.os.BatteryManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.Message
 import android.util.Log
+import androidx.core.content.ContextCompat.getSystemService
 import com.blankj.utilcode.util.TimeUtils
 import com.blankj.utilcode.util.ToastUtils
 import com.blankj.utilcode.util.VolumeUtils
+import com.xingkeqi.btlogger.BtLoggerApplication
 import com.xingkeqi.btlogger.data.Device
 import com.xingkeqi.btlogger.data.DeviceConnectionRecord
 import com.xingkeqi.btlogger.data.MessageEvent
@@ -48,10 +51,10 @@ class BtLoggerReceiver : BroadcastReceiver() {
             val alias =
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) bluetoothDevice?.alias else "" // 蓝牙设备别名
 
-            val isPlaying = isPlaying(context)
+            val isPlaying = isPlaying()
             val volume = getCurrVolume()
             val now = System.currentTimeMillis()
-            val batteryLevel = getBatteryLevel(context)
+            val batteryLevel = getBatteryLevel()
 
 
             val connectStatus = when (state) {
@@ -113,16 +116,19 @@ class BtLoggerReceiver : BroadcastReceiver() {
 
 }
 
-fun getCurrVolume() = VolumeUtils.getVolume(AudioManager.STREAM_MUSIC)
+fun getCurrVolume() =
+    (VolumeUtils.getVolume(STREAM_MUSIC) * 100) / VolumeUtils.getMaxVolume(STREAM_MUSIC)
 
-fun isPlaying(context: Context): Boolean {
-    val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+fun isPlaying(): Boolean {
+    val audioManager =
+        BtLoggerApplication.instance.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     return audioManager.isMusicActive
 }
 
 
-private fun getBatteryLevel(context: Context): Int {
-    val batteryManager = context.getSystemService(BATTERY_SERVICE) as BatteryManager
+private fun getBatteryLevel(): Int {
+    val batteryManager =
+        BtLoggerApplication.instance.getSystemService(BATTERY_SERVICE) as BatteryManager
     return batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
 }
 

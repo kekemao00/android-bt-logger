@@ -378,6 +378,7 @@ fun RecordCards(
     viewModel: MainViewModel
 ) {
     LazyColumn(modifier = modifier) {
+        if (records.isEmpty()) return@LazyColumn
         item {
             Column(
                 modifier = Modifier
@@ -500,7 +501,10 @@ fun RecordItem(modifier: Modifier = Modifier, record: RecordInfo?, viewModel: Ma
                 text = "状态：${if (record?.connectState == 2) "连接" else "断开"}"
             )
             Text(fontSize = 14.sp, text = "正在播放：${if (record?.isPlaying == 1) "是" else "否"}")
-            Text(fontSize = 14.sp, text = "音量大小：${record?.volume}")
+            Text(
+                fontSize = 14.sp,
+                text = "${if (record?.connectState == 2) "耳" else "手"}机音量：${record?.volume}%"
+            )
             Text(fontSize = 14.sp, text = "手机电量：${record?.batteryLevel}")
             val (h, m, s) = longLongLongTriple(
                 Pair(
@@ -508,24 +512,25 @@ fun RecordItem(modifier: Modifier = Modifier, record: RecordInfo?, viewModel: Ma
                     record?.timestamp ?: 0
                 )
             )
+
+            Text(
+                fontSize = 14.sp,
+                text = "记录时间：${TimeUtils.millis2String(record?.timestamp ?: 0)}"
+            )
             Row {
+
                 Text(
                     fontSize = 14.sp,
-                    text = "记录时间：${TimeUtils.millis2String(record?.timestamp ?: 0)} （距上次间隔："
+                    text = "距上次间隔："
                 )
+
                 Text(
                     fontWeight = FontWeight.Bold,
                     fontSize = 14.sp,
                     text = "$h 时 $m 分 $s 秒"
                 )
-                Text(
-                    fontSize = 14.sp,
-                    text = "）"
-                )
             }
-
         }
-
     }
 }
 
