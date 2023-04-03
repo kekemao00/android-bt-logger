@@ -669,16 +669,16 @@ fun DeviceItem(device: DeviceInfo?, viewModel: MainViewModel) {
                     text = "最近记录：${TimeUtils.millis2String(device?.lastRecordTime ?: 0)}  "
                 )
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-
-                    Text(
-                        fontSize = 14.sp,
-                        text = "总连接时长：${getDurationString(viewModel.pairTimeDuration.value?.first ?: 0)}"
-                    )
-                    Text(
-                        color = MaterialTheme.colorScheme.outline,
-                        fontSize = 14.sp,
-                        text = "总断开时长：${getDurationString(viewModel.pairTimeDuration.value?.second ?: 0)}"
-                    )
+// TODO: 每条数据不能独立显示，待修复后放开
+//                    Text(
+//                        fontSize = 14.sp,
+//                        text = "总连接时长：${getDurationString(viewModel.pairTimeDuration.value?.first ?: 0)}"
+//                    )
+//                    Text(
+//                        color = MaterialTheme.colorScheme.outline,
+//                        fontSize = 14.sp,
+//                        text = "总断开时长：${getDurationString(viewModel.pairTimeDuration.value?.second ?: 0)}"
+//                    )
 
                     Text(
                         color = MaterialTheme.colorScheme.outline,
