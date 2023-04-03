@@ -141,6 +141,8 @@ val handler = Handler(
             val obj = it.obj as Pair<Device, DeviceConnectionRecord>
             val deviceTab = obj.first
             val record = obj.second
+            // 获取最新的音量
+            record.volume = getCurrVolume()
             EventBus.getDefault().post(MessageEvent("ADD_RECORD", deviceTab, record))
         }
     }

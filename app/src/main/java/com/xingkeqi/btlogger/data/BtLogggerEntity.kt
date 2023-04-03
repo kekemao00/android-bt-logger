@@ -95,7 +95,7 @@ data class DeviceConnectionRecord(
     @ColumnInfo(name = "battery_level")
     val batteryLevel: Int,
     @ColumnInfo(name = "volume")
-    val volume: Int,
+    var volume: Int,
     @ColumnInfo(name = "is_playing")
     val isPlaying: Boolean
 )

@@ -86,6 +86,7 @@ import com.xingkeqi.btlogger.data.DeviceInfo
 import com.xingkeqi.btlogger.data.MessageEvent
 import com.xingkeqi.btlogger.data.RecordInfo
 import com.xingkeqi.btlogger.receiver.BtLoggerReceiver
+import com.xingkeqi.btlogger.receiver.getCurrVolume
 import com.xingkeqi.btlogger.ui.theme.BtLoggerTheme
 import com.xingkeqi.btlogger.utils.saveDataToSheet
 import org.greenrobot.eventbus.EventBus
@@ -154,9 +155,10 @@ class MainActivity : ComponentActivity() {
             tag,
             "onMessageEvent: msg=${event.message},device=${event.device},record=${event.record}"
         )
-
-        viewModel.insertDevice(event.device)
-        viewModel.insertRecord(event.record)
+        if (event.message == "ADD_RECORD") {
+            viewModel.insertDevice(event.device)
+            viewModel.insertRecord(event.record)
+        }
     }
 
     @RequiresApi(Build.VERSION_CODES.S)
