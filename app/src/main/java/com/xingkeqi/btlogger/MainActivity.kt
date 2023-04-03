@@ -242,7 +242,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                         ToastUtils.showLong("已保存：${it.absoluteFile} : ${it.length()} bytes")
                                         val uri = FileProvider.getUriForFile(
                                             context,
-                                            "com.example.myapp.fileprovider",
+                                            "com.xingkeqi.btlogger.fileprovider",
                                             it
                                         )
                                         val intent = Intent(Intent.ACTION_VIEW)

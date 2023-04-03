@@ -4,6 +4,6 @@
         name="external_files"
         path="." />
     <files-path
-        name="my_files"
+        name="btlogger_files"
         path="." />
 </paths>
