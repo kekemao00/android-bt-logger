@@ -21,6 +21,7 @@ data class DeviceInfo(
 )
 
 data class RecordInfo(
+    val id: Int = -1,
     // mac 地址
     val mac: String = "",
     val name: String = "",

@@ -8,7 +8,6 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
 import android.os.Bundle
-import android.os.Environment
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.provider.Settings
@@ -42,7 +41,6 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -69,12 +67,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -91,7 +86,6 @@ import com.xingkeqi.btlogger.data.DeviceInfo
 import com.xingkeqi.btlogger.data.MessageEvent
 import com.xingkeqi.btlogger.data.RecordInfo
 import com.xingkeqi.btlogger.receiver.BtLoggerReceiver
-import com.xingkeqi.btlogger.receiver.getCurrVolume
 import com.xingkeqi.btlogger.ui.theme.BtLoggerTheme
 import com.xingkeqi.btlogger.utils.saveDataToSheet
 import org.greenrobot.eventbus.EventBus
@@ -294,7 +288,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                 onConfirm = {
                                     openDialog.value = false
                                     if (showRecordState.value) {
-                                        viewModel.deleteRecordById(
+                                        viewModel.deleteRecordByMac(
                                             viewModel.currDevice.value?.mac ?: ""
                                         )
                                     } else {
@@ -475,6 +469,8 @@ fun RecordCards(
 fun RecordItem(modifier: Modifier = Modifier, record: RecordInfo?, viewModel: MainViewModel) {
     val context = LocalContext.current
     val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+    val showDialogDelItem = remember { mutableStateOf(false) }
+
 
     ElevatedCard(modifier = modifier
         .padding(start = 10.dp, end = 10.dp)
@@ -489,7 +485,9 @@ fun RecordItem(modifier: Modifier = Modifier, record: RecordInfo?, viewModel: Ma
                     VibrationEffect.createOneShot(1, VibrationEffect.DEFAULT_AMPLITUDE)
                 vibrator.vibrate(effect)
             }
-            ToastUtils.showLong("为保证数据的完整性，暂不支持删除单条数据")
+//            ToastUtils.showLong("为保证数据的完整性，暂不支持删除单条数据")
+
+            showDialogDelItem.value = true
         }) {},
         colors = CardDefaults.cardColors(
             containerColor = if (record?.connectState == 2) {
@@ -498,6 +496,20 @@ fun RecordItem(modifier: Modifier = Modifier, record: RecordInfo?, viewModel: Ma
         )
 
     ) {
+        if (showDialogDelItem.value) {
+            ShowDialog(
+                openDialog = showDialogDelItem,
+                title = "删除此条记录？",
+                content = "确定要删除 ${record?.name} 在 ${TimeUtils.millis2String(record?.timestamp ?: 0)} 的【${if (record?.connectState == 2) "连接" else "断开"}】这条记录吗? 删除的数据将无法恢复，是否继续？",
+                onConfirm = {
+                    showDialogDelItem.value = false
+                    viewModel.deleteRecordById(record?.id ?: -1)
+                }) {
+                showDialogDelItem.value = false
+
+            }
+        }
+
         Column(
             modifier = Modifier
                 .padding(12.dp)
@@ -510,7 +522,8 @@ fun RecordItem(modifier: Modifier = Modifier, record: RecordInfo?, viewModel: Ma
             )
             Text(
                 color = MaterialTheme.colorScheme.outline,
-                fontSize = 14.sp, text = "正在播放：${if (record?.isPlaying == 1) "是" else "否"}")
+                fontSize = 14.sp, text = "正在播放：${if (record?.isPlaying == 1) "是" else "否"}"
+            )
             Text(
                 color = MaterialTheme.colorScheme.outline,
                 fontSize = 14.sp,
@@ -518,7 +531,8 @@ fun RecordItem(modifier: Modifier = Modifier, record: RecordInfo?, viewModel: Ma
             )
             Text(
                 color = MaterialTheme.colorScheme.outline,
-                fontSize = 14.sp, text = "电池剩余：${record?.batteryLevel}")
+                fontSize = 14.sp, text = "电池剩余：${record?.batteryLevel}"
+            )
             val (h, m, s) = longLongLongTriple(
                 Pair(
                     record?.lastRecordTime ?: 0,
@@ -761,7 +775,7 @@ private fun longLongLongTriple(pair: Pair<Long, Long>): Triple<Long, Long, Long>
 @Composable
 @Preview
 fun RecordCardPreview() {
-    val recordInfo = RecordInfo("mac", "name", System.currentTimeMillis(), 0, 22, 0, 99)
+    val recordInfo = RecordInfo()
     MaterialTheme {
         ConnectsLogItem(recordInfo)
     }

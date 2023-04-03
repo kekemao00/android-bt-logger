@@ -1,6 +1,5 @@
 package com.xingkeqi.btlogger
 
-import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.Transformations
@@ -13,7 +12,6 @@ import com.xingkeqi.btlogger.data.DeviceConnectionRecord
 import com.xingkeqi.btlogger.data.DeviceInfo
 import com.xingkeqi.btlogger.data.RecordInfo
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -72,7 +70,7 @@ class MainViewModel : ViewModel() {
 
     fun deleteDevice(mac: String) {
         deleteDeviceById(mac)
-        deleteRecordById(mac)
+        deleteRecordByMac(mac)
     }
 
     fun cleanAll() {
@@ -118,10 +116,19 @@ class MainViewModel : ViewModel() {
     }
 
 
-    fun deleteRecordById(mac: String) {
+    fun deleteRecordByMac(mac: String) {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
                 recordDao.deleteRecordByDeviceMac(mac)
+            }
+        }
+    }
+
+
+    fun deleteRecordById(id: Int) {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                recordDao.deleteRecordByDeviceId(id)
             }
         }
     }
