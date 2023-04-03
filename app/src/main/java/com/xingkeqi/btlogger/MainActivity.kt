@@ -473,7 +473,7 @@ fun RecordItem(modifier: Modifier = Modifier, record: RecordInfo?, viewModel: Ma
 
 
     ElevatedCard(modifier = modifier
-        .padding(start = 10.dp, end = 10.dp)
+        .padding(start = 10.dp, end = 10.dp, bottom = 10.dp)
         .fillMaxWidth()
         .wrapContentHeight()
         .clip(shape = RoundedCornerShape(20.dp))
@@ -628,7 +628,7 @@ fun DeviceList(
     devices: List<DeviceInfo?>,
     viewModel: MainViewModel
 ) {
-    LazyColumn(modifier = modifier.padding(start = 10.dp, end = 10.dp)) {
+    LazyColumn(modifier = modifier.padding(start = 10.dp, end = 10.dp, bottom = 10.dp)) {
         items(devices) {
             DeviceItem(device = it, viewModel)
         }
