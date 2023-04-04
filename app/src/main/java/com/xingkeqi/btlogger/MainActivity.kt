@@ -92,6 +92,7 @@ import com.blankj.utilcode.constant.TimeConstants
 import com.blankj.utilcode.util.AppUtils
 import com.blankj.utilcode.util.TimeUtils
 import com.blankj.utilcode.util.ToastUtils
+import com.pgyer.pgyersdk.PgyerSDKManager
 import com.xingkeqi.btlogger.data.DeviceInfo
 import com.xingkeqi.btlogger.data.MessageEvent
 import com.xingkeqi.btlogger.data.RecordInfo
@@ -103,6 +104,7 @@ import com.xingkeqi.btlogger.utils.saveDataToSheet
 import org.greenrobot.eventbus.EventBus
 import org.greenrobot.eventbus.Subscribe
 import org.greenrobot.eventbus.ThreadMode
+import java.lang.Exception
 
 
 class MainActivity : ComponentActivity() {
@@ -228,6 +230,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                 showRecordState = false
                             } else {
                                 ToastUtils.showShort("当前版本： v${AppUtils.getAppVersionName()}")
+                                PgyerSDKManager.checkSoftwareUpdate()
                             }
                         }) {
                             Icon(

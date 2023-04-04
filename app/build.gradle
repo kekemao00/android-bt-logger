@@ -99,5 +99,8 @@ dependencies {
     implementation libs.androidx.lifecycle.livedata.ktx
 
     implementation files('libs/jxl.jar')
+    // https://seed.pgyer.com/site/2Umq3b49JJ
+    // implementation 'com.pgyer:analytics:4.+'//最好写上具体依赖的版本号 如：4.2.1
+    implementation 'com.pgyer:analytics:4.3.3'//最好写上具体依赖的版本号 如：4.2.1
 
 }

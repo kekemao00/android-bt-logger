@@ -10,6 +10,9 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+//        maven { url "https://raw.githubusercontent.com/Pgyer/mvn_repo_pgyer/master" }
+        maven { url "https://frontjs-static.pgyer.com/dist/sdk/pgyersdk" }  //主力仓库
+        maven { url "https://raw.githubusercontent.com/PGYER/analytics/master" }  //备用仓库（主力仓库下载不下来使用）
     }
 }
 rootProject.name = "BtLogger"

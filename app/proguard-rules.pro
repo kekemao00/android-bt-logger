@@ -19,3 +19,8 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# 蒲公英：一般不需要添加，如果需要，则添加以下代码
+#-keep class com.pgyer.pgyersdk.** { *; }
+#-keep class com.pgyer.pgyersdk.**$* { *; }
+
