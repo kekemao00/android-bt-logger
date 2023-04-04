@@ -19,9 +19,9 @@ android {
         applicationId "com.xingkeqi.btlogger"
         minSdk 25
         targetSdk 33
-//        versionCode vCode
-        versionCode 1
-        versionName "1.0.3"
+        versionCode vCode
+//        versionCode 1
+        versionName "1.0.6"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
