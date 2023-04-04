@@ -36,6 +36,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -59,6 +60,7 @@ import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -83,6 +85,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -93,6 +96,9 @@ import com.blankj.utilcode.util.AppUtils
 import com.blankj.utilcode.util.TimeUtils
 import com.blankj.utilcode.util.ToastUtils
 import com.pgyer.pgyersdk.PgyerSDKManager
+import com.pgyer.pgyersdk.callback.CheckoutCallBack
+import com.pgyer.pgyersdk.callback.CheckoutVersionCallBack
+import com.pgyer.pgyersdk.model.CheckSoftModel
 import com.xingkeqi.btlogger.data.DeviceInfo
 import com.xingkeqi.btlogger.data.MessageEvent
 import com.xingkeqi.btlogger.data.RecordInfo
@@ -101,10 +107,12 @@ import com.xingkeqi.btlogger.ui.theme.BtLoggerTheme
 import com.xingkeqi.btlogger.utils.getDurationString
 import com.xingkeqi.btlogger.utils.longLongLongTriple
 import com.xingkeqi.btlogger.utils.saveDataToSheet
+import kotlinx.coroutines.delay
 import org.greenrobot.eventbus.EventBus
 import org.greenrobot.eventbus.Subscribe
 import org.greenrobot.eventbus.ThreadMode
 import java.lang.Exception
+import kotlin.text.*
 
 
 class MainActivity : ComponentActivity() {
@@ -230,7 +238,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                 showRecordState = false
                             } else {
                                 ToastUtils.showShort("当前版本： v${AppUtils.getAppVersionName()}")
-                                PgyerSDKManager.checkSoftwareUpdate()
+                                viewModel.checkUpdate()
                             }
                         }) {
                             Icon(
@@ -326,6 +334,46 @@ fun MainScreen(viewModel: MainViewModel) {
                 )
             }
         )
+//        var progress by remember { mutableStateOf(0.0f) }
+        var speedStr by remember { mutableStateOf("0.0MB/s") }
+        var timeLeftStr by remember { mutableStateOf("0分0秒") }
+        LaunchedEffect(viewModel.showDialogLD.value == 2) {
+            if (viewModel.showDialogLD.value == 2) {
+                for (i in 0 until 100) {
+                    viewModel.downloadProgressLD.value = (i + 1) / 100f
+                    delay(500)
+                    val downloadSize: Long = 100 * 1024 * 1024 // 下载文件的大小，这里假设为100MB
+                    val downloadedSize: Long = ((viewModel.downloadProgressLD.value
+                        ?: (0f * (viewModel.versionModelLD.value?.buildFileSize?.toInt()
+                            ?: 0))).toLong())// 已下载的文件大小
+                    val elapsedTime: Long = (i + 1) * 1000L // 已经过去的时间，这里假设为1分钟
+                    val speed: Long = if (elapsedTime > 0) downloadedSize / elapsedTime else 0 // 下载速度，单位为Byte/ms
+                    val timeLeft: Long = if (speed > 0) (downloadSize - downloadedSize) / speed else 0 // 剩余时间，单位为ms
+                    val timeLeftInSecond = (timeLeft / 1000).toInt()
+                    val minutes = timeLeftInSecond / 60
+                    val seconds = timeLeftInSecond % 60
+                    speedStr = String.format("%.1fMB/s", speed * 1000f / (1024 * 1024)) // 转换为MB/s
+                    timeLeftStr = String.format("%d分%d秒", minutes, seconds)
+                }
+            }
+        }
+
+
+        when (viewModel.showDialogLD.observeAsState().value) {
+
+            1 -> UpdateDialog(
+                onDismiss = { viewModel.showDialogLD.value = 0 },
+                viewModel = viewModel
+            )
+
+            2 -> DownloadDialog(
+                progress = viewModel.downloadProgressLD.value ?: 0F,
+                speed = speedStr,
+                timeLeft = timeLeftStr
+            ) {
+            }
+        }
+
     }
 }
 
@@ -734,5 +782,77 @@ fun DeviceItem(device: DeviceInfo?, viewModel: MainViewModel) {
     }
 
 }
+
+@Composable
+fun UpdateDialog(onDismiss: () -> Unit, viewModel: MainViewModel) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(text = "版本更新") },
+        text = {
+            Column {
+
+                Text(
+                    text = "发现新版本可用，请更新以获得更好的使用体验"
+                )
+                Text(text = "版本名称：v${viewModel.versionModelLD.value?.buildVersion}")
+                Text(text = "更新详情：\n${viewModel.versionModelLD.value?.buildUpdateDescription}")
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    // TODO: 处理更新逻辑
+                    onDismiss()
+                    viewModel.downLoadUpdate(viewModel.versionModelLD.value)
+                }
+            ) {
+                Text(text = "立即更新")
+            }
+        },
+        dismissButton = {
+            Button(onClick = onDismiss) {
+                Text(text = "稍后再说")
+            }
+        }
+    )
+}
+
+@Composable
+fun DownloadDialog(
+    progress: Float,
+    speed: String,
+    timeLeft: String,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(text = "下载中") },
+        text = {
+            Column {
+                LinearProgressIndicator(
+                    progress = progress,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    text = "${(progress * 100).toInt()}% 下载完成",
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(text = "下载速度: $speed")
+                Text(text = "剩余时间: $timeLeft")
+            }
+        },
+        dismissButton = {
+            Button(onClick = onDismiss) {
+                Text(text = "取消下载")
+            }
+        },
+        confirmButton = {}
+
+    )
+}
+
+
 
 

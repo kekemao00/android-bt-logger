@@ -1,5 +1,6 @@
 package com.xingkeqi.btlogger
 
+import android.util.Log
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.Transformations
@@ -8,13 +9,23 @@ import androidx.lifecycle.viewModelScope
 import com.xingkeqi.btlogger.data.BtLoggerDatabase
 import com.xingkeqi.btlogger.data.Device
 import androidx.lifecycle.asLiveData
+import com.blankj.utilcode.util.AppUtils
+import com.pgyer.pgyersdk.PgyerSDKManager
+import com.pgyer.pgyersdk.callback.CheckoutVersionCallBack
+import com.pgyer.pgyersdk.model.CheckSoftModel
 import com.xingkeqi.btlogger.data.DeviceConnectionRecord
 import com.xingkeqi.btlogger.data.DeviceInfo
 import com.xingkeqi.btlogger.data.RecordInfo
+import io.reactivex.android.schedulers.AndroidSchedulers
+import io.reactivex.rxkotlin.subscribeBy
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import zlc.season.rxdownload4.download
+import zlc.season.rxdownload4.file
+import java.io.File
+import java.lang.Exception
 
 class MainViewModel : ViewModel() {
 
@@ -172,4 +183,69 @@ class MainViewModel : ViewModel() {
         }
     }
 
+    /**
+     * Version model
+     * 0. 不显示弹框
+     * 1. 显示升级弹框
+     * 2. 显示下载进度提示框
+     */
+    val showDialogLD = MutableLiveData(0)
+
+    /**
+     * Download progress
+     */
+    val downloadProgressLD = MutableLiveData(0F)
+
+    /**
+     * Version model l d
+     * 3. 版本信息
+     *
+     */
+    val versionModelLD = MutableLiveData(CheckSoftModel())
+
+    fun checkUpdate() {
+        PgyerSDKManager.checkSoftwareUpdate(object :
+            CheckoutVersionCallBack {
+            override fun onSuccess(version: CheckSoftModel?) {
+                Log.d("@@@", "onSuccess: ${version.toString()}")
+                if (version?.isBuildHaveNewVersion == true) {
+                    showDialogLD.value = 1
+                    versionModelLD.value = version
+                }
+            }
+
+            override fun onFail(p0: String?) =
+                PgyerSDKManager.reportException(Exception("版本检测更新异常：$p0"))
+        })
+    }
+
+    fun downLoadUpdate(version: CheckSoftModel?) {
+
+        val uri = version?.downloadURL
+
+        val disposable = uri?.download()?.observeOn(AndroidSchedulers.mainThread())
+            ?.subscribeBy(
+                onNext = {
+                    Log.v("@@@", "downLoadUpdate: $it")
+                    if (showDialogLD.value != 2) {
+                        showDialogLD.value = 2
+                    }
+                    downloadProgressLD.value = it.downloadSize.toFloat() / it.totalSize.toFloat()
+                },
+                onComplete = {
+                    Log.i("@@@", "downLoadUpdate: 下载完成！")
+                    showDialogLD.value = 0
+                    installApk(uri.file())
+                },
+                onError = {
+                    PgyerSDKManager.reportException(Exception("下载新版本发生异常!!", it))
+                    showDialogLD.value = 0
+                }
+            )
+
+    }
+
+    private fun installApk(file: File) {
+        AppUtils.installApp(file)
+    }
 }

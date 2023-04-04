@@ -26,13 +26,6 @@ class BtLoggerApplication : Application() {
      *  初始化蒲公英SDK
      * @param application
      *
-     *
-     * try {
-     *     //code
-     * }catch (Exception e){
-     *   	//手动上报异常
-     *     PgyerSDKManager.reportException(e);
-     * }
      */
     private fun initPgyerSDK(application: Application) {
         PgyerSDKManager.Init()

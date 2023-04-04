@@ -1,4 +1,5 @@
 [versions]
+analytics = "4.3.3"
 com-android-application = "8.1.0-alpha11"
 eventbus = "3.3.1"
 glance = "1.1.0"
@@ -13,8 +14,10 @@ lifecycle-runtime-ktx = "2.3.1"
 activity-compose = "1.5.1"
 compose-bom = "2022.10.00"
 room-runtime = "2.5.0"
+rxdownload4 = "1.1.4"
 
 [libraries]
+analytics = { module = "com.pgyer:analytics", version.ref = "analytics" }
 androidx-lifecycle-livedata-ktx = { module = "androidx.lifecycle:lifecycle-livedata-ktx", version.ref = "lifecycle-livedata-ktx" }
 androidx-lifecycle-viewmodel-ktx = { module = "androidx.lifecycle:lifecycle-viewmodel-ktx", version.ref = "lifecycle-viewmodel-ktx" }
 androidx-room-ktx = { module = "androidx.room:room-ktx", version.ref = "room-runtime" }
@@ -28,6 +31,7 @@ espresso-core = { group = "androidx.test.espresso", name = "espresso-core", vers
 lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycle-runtime-ktx" }
 activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activity-compose" }
 compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "compose-bom" }
+rxdownload4 = { module = "com.github.ssseasonnn.RxDownload:rxdownload4", version.ref = "rxdownload4" }
 ui = { group = "androidx.compose.ui", name = "ui" }
 ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics" }
 ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }

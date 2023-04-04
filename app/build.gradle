@@ -19,7 +19,8 @@ android {
         applicationId "com.xingkeqi.btlogger"
         minSdk 25
         targetSdk 33
-        versionCode vCode
+//        versionCode vCode
+        versionCode 1
         versionName "1.0.3"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
@@ -101,6 +102,8 @@ dependencies {
     implementation files('libs/jxl.jar')
     // https://seed.pgyer.com/site/2Umq3b49JJ
     // implementation 'com.pgyer:analytics:4.+'//最好写上具体依赖的版本号 如：4.2.1
-    implementation 'com.pgyer:analytics:4.3.3'//最好写上具体依赖的版本号 如：4.2.1
+    implementation libs.analytics//最好写上具体依赖的版本号 如：4.2.1
+    implementation libs.rxdownload4
+
 
 }
