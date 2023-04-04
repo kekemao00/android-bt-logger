@@ -285,6 +285,16 @@ fun MainScreen(viewModel: MainViewModel) {
                                 )
                             }
                         }
+                        IconButton(onClick = { ToastUtils.showShort("设置连接时的音量百分比") }) {
+                            Icon(
+                                modifier = Modifier
+                                    .size(24.dp),
+                                painter = painterResource(id = R.drawable.icon_volue),
+                                tint = MaterialTheme.colorScheme.primary,
+                                contentDescription = "音量预设置"
+                            )
+                        }
+
                         IconButton(onClick = { context.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) }) {
                             Icon(
                                 Icons.Filled.Settings,
@@ -347,8 +357,10 @@ fun MainScreen(viewModel: MainViewModel) {
                         ?: (0f * (viewModel.versionModelLD.value?.buildFileSize?.toInt()
                             ?: 0))).toLong())// 已下载的文件大小
                     val elapsedTime: Long = (i + 1) * 1000L // 已经过去的时间，这里假设为1分钟
-                    val speed: Long = if (elapsedTime > 0) downloadedSize / elapsedTime else 0 // 下载速度，单位为Byte/ms
-                    val timeLeft: Long = if (speed > 0) (downloadSize - downloadedSize) / speed else 0 // 剩余时间，单位为ms
+                    val speed: Long =
+                        if (elapsedTime > 0) downloadedSize / elapsedTime else 0 // 下载速度，单位为Byte/ms
+                    val timeLeft: Long =
+                        if (speed > 0) (downloadSize - downloadedSize) / speed else 0 // 剩余时间，单位为ms
                     val timeLeftInSecond = (timeLeft / 1000).toInt()
                     val minutes = timeLeftInSecond / 60
                     val seconds = timeLeftInSecond % 60
