@@ -4,7 +4,9 @@ import android.app.Application
 import android.content.Context
 import com.pgyer.pgyersdk.PgyerSDKManager
 import com.pgyer.pgyersdk.pgyerenum.Features
+import dagger.hilt.android.HiltAndroidApp
 
+@HiltAndroidApp
 class BtLoggerApplication : Application() {
     val tag = this.javaClass.simpleName
 

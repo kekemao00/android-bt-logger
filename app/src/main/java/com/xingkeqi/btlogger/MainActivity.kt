@@ -56,6 +56,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Divider
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -107,6 +108,7 @@ import com.xingkeqi.btlogger.ui.theme.BtLoggerTheme
 import com.xingkeqi.btlogger.utils.getDurationString
 import com.xingkeqi.btlogger.utils.longLongLongTriple
 import com.xingkeqi.btlogger.utils.saveDataToSheet
+import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.delay
 import org.greenrobot.eventbus.EventBus
 import org.greenrobot.eventbus.Subscribe
@@ -114,7 +116,7 @@ import org.greenrobot.eventbus.ThreadMode
 import java.lang.Exception
 import kotlin.text.*
 
-
+@AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
     private val tag: String = this.javaClass.simpleName
@@ -526,6 +528,7 @@ fun RecordCards(
                 )
 
             }
+            Divider()
             Text(
                 modifier = Modifier.padding(start = 18.dp, top = 16.dp, bottom = 4.dp),
                 color = MaterialTheme.colorScheme.outline,

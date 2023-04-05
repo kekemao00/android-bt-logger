@@ -16,6 +16,7 @@ import com.pgyer.pgyersdk.model.CheckSoftModel
 import com.xingkeqi.btlogger.data.DeviceConnectionRecord
 import com.xingkeqi.btlogger.data.DeviceInfo
 import com.xingkeqi.btlogger.data.RecordInfo
+import dagger.hilt.android.lifecycle.HiltViewModel
 import io.reactivex.android.schedulers.AndroidSchedulers
 import io.reactivex.rxkotlin.subscribeBy
 import kotlinx.coroutines.Dispatchers
@@ -26,8 +27,10 @@ import zlc.season.rxdownload4.download
 import zlc.season.rxdownload4.file
 import java.io.File
 import java.lang.Exception
+import javax.inject.Inject
 
-class MainViewModel : ViewModel() {
+@HiltViewModel
+class MainViewModel @Inject constructor() : ViewModel() {
 
     private val db = BtLoggerDatabase.getDatabase(BtLoggerApplication.instance)
 

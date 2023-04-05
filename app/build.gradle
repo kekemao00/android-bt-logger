@@ -2,7 +2,8 @@ plugins {
     alias(libs.plugins.com.android.application)
     alias(libs.plugins.org.jetbrains.kotlin.android)
     id 'com.google.devtools.ksp'
-
+    id 'kotlin-kapt'
+    id 'com.google.dagger.hilt.android'
 }
 
 // Use the number of seconds/10 since April 2 2023 as the versionCode.
@@ -103,6 +104,12 @@ dependencies {
     // implementation 'com.pgyer:analytics:4.+'//最好写上具体依赖的版本号 如：4.2.1
     implementation libs.analytics//最好写上具体依赖的版本号 如：4.2.1
     implementation libs.rxdownload4
+    // https://developer.android.com/training/dependency-injection/hilt-android?hl=zh-cn#groovy
+    implementation libs.hilt.android
+    kapt libs.hilt.compiler
+}
 
-
+// Allow references to generated code
+kapt {
+    correctErrorTypes true
 }

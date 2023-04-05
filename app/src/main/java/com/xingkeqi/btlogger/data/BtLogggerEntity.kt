@@ -86,6 +86,8 @@ data class Device(
  * 创建 ConnectionRecord 表实体类
  *
  * @constructor Create empty Connection record entity
+ *
+ * 第一次测试完了后，第二次重新测试： 结束前点击完成按钮，对已有的数据添加一个列 Int？ "历史标记"， 下次查询时过滤掉这个字段有值的，每次历史使用当时完成时的时间戳, 但是导出数据时可以导出当前设备下全部的
  */
 @Entity(
     tableName = "device_connection_records",
