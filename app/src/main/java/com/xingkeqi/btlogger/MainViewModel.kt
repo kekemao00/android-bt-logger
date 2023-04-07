@@ -5,14 +5,14 @@ import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.Transformations
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
-import com.xingkeqi.btlogger.data.BtLoggerDatabase
-import com.xingkeqi.btlogger.data.Device
 import androidx.lifecycle.asLiveData
+import androidx.lifecycle.viewModelScope
 import com.blankj.utilcode.util.AppUtils
 import com.pgyer.pgyersdk.PgyerSDKManager
 import com.pgyer.pgyersdk.callback.CheckoutVersionCallBack
 import com.pgyer.pgyersdk.model.CheckSoftModel
+import com.xingkeqi.btlogger.data.BtLoggerDatabase
+import com.xingkeqi.btlogger.data.Device
 import com.xingkeqi.btlogger.data.DeviceConnectionRecord
 import com.xingkeqi.btlogger.data.DeviceInfo
 import com.xingkeqi.btlogger.data.RecordInfo
@@ -26,7 +26,6 @@ import kotlinx.coroutines.withContext
 import zlc.season.rxdownload4.download
 import zlc.season.rxdownload4.file
 import java.io.File
-import java.lang.Exception
 import javax.inject.Inject
 
 @HiltViewModel
@@ -50,6 +49,11 @@ class MainViewModel @Inject constructor() : ViewModel() {
     val currDevice = MutableLiveData<DeviceInfo>()
 
     val pairTimeDuration = MutableLiveData(Pair(0L, 0L))
+
+    var customVolumeSwitch = MutableLiveData(false)
+
+    var presetTestVolume = 60
+
 
     /**
      * 当前设备的详细记录

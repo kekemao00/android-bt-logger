@@ -15,8 +15,6 @@ import android.os.Handler
 import android.os.Looper
 import android.os.Message
 import android.util.Log
-import androidx.core.content.ContextCompat.getSystemService
-import com.blankj.utilcode.util.TimeUtils
 import com.blankj.utilcode.util.ToastUtils
 import com.blankj.utilcode.util.VolumeUtils
 import com.xingkeqi.btlogger.BtLoggerApplication
@@ -118,6 +116,8 @@ class BtLoggerReceiver : BroadcastReceiver() {
 
 fun getCurrVolume() =
     (VolumeUtils.getVolume(STREAM_MUSIC) * 100) / VolumeUtils.getMaxVolume(STREAM_MUSIC)
+
+fun setVolume() = VolumeUtils.setVolume(STREAM_MUSIC, 15, 0)
 
 fun isPlaying(): Boolean {
     val audioManager =

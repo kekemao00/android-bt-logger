@@ -26,7 +26,6 @@
 
 package org.imaginativeworld.whynotcompose.ui.screens.composition.slider
 
-import android.annotation.SuppressLint
 import android.content.res.Configuration
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -107,7 +106,7 @@ fun SliderScreenSkeleton() {
             AppComponent.MediumSpacer()
 
             var stepSliderPosition by remember { mutableStateOf(0f) }
-            Text(text = stepSliderPosition.toString())
+            Text(text = stepSliderPosition.toInt().toString())
             Slider(
                 value = stepSliderPosition,
                 onValueChange = { stepSliderPosition = it },
@@ -116,7 +115,7 @@ fun SliderScreenSkeleton() {
                     // launch some business logic update with the state you hold
                     // viewModel.updateSelectedSliderValue(sliderPosition)
                 },
-                steps = 5,
+                steps = 9,
                 colors = SliderDefaults.colors(
                     thumbColor = MaterialTheme.colorScheme.secondary,
                     activeTrackColor = MaterialTheme.colorScheme.secondary

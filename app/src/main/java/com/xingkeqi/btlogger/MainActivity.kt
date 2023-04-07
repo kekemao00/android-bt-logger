@@ -6,6 +6,7 @@ import android.bluetooth.BluetoothDevice
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
 import android.os.VibrationEffect
@@ -19,16 +20,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.annotation.RequiresApi
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandIn
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -64,7 +58,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -88,32 +85,26 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
-import com.blankj.utilcode.constant.TimeConstants
 import com.blankj.utilcode.util.AppUtils
 import com.blankj.utilcode.util.TimeUtils
 import com.blankj.utilcode.util.ToastUtils
-import com.pgyer.pgyersdk.PgyerSDKManager
-import com.pgyer.pgyersdk.callback.CheckoutCallBack
-import com.pgyer.pgyersdk.callback.CheckoutVersionCallBack
-import com.pgyer.pgyersdk.model.CheckSoftModel
+import com.blankj.utilcode.util.VolumeUtils
 import com.xingkeqi.btlogger.data.DeviceInfo
 import com.xingkeqi.btlogger.data.MessageEvent
 import com.xingkeqi.btlogger.data.RecordInfo
 import com.xingkeqi.btlogger.receiver.BtLoggerReceiver
+import com.xingkeqi.btlogger.receiver.getCurrVolume
 import com.xingkeqi.btlogger.ui.theme.BtLoggerTheme
 import com.xingkeqi.btlogger.utils.getDurationString
-import com.xingkeqi.btlogger.utils.longLongLongTriple
 import com.xingkeqi.btlogger.utils.saveDataToSheet
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.delay
 import org.greenrobot.eventbus.EventBus
 import org.greenrobot.eventbus.Subscribe
 import org.greenrobot.eventbus.ThreadMode
-import java.lang.Exception
 import kotlin.text.*
 
 @AndroidEntryPoint
@@ -179,6 +170,16 @@ class MainActivity : ComponentActivity() {
             "onMessageEvent: msg=${event.message},device=${event.device},record=${event.record}"
         )
         if (event.message == "ADD_RECORD") {
+            if (viewModel.customVolumeSwitch.value == true && event.record.connectState == 2) {
+                VolumeUtils.setVolume(
+                    AudioManager.STREAM_MUSIC,
+                    ((viewModel.presetTestVolume.toFloat() / 100) * VolumeUtils.getMaxVolume(
+                        AudioManager.STREAM_MUSIC
+                    )).toInt(),
+                    0x01
+                )
+                event.record.volume = getCurrVolume()
+            }
             viewModel.insertDevice(event.device)
             viewModel.insertRecord(event.record)
         }
@@ -230,6 +231,82 @@ fun MainScreen(viewModel: MainViewModel) {
     val openDialog = remember { mutableStateOf(false) }
 
     Column {
+
+        var showDialog by remember { mutableStateOf(false) }
+
+        var stepSliderPosition by remember { mutableStateOf(viewModel.presetTestVolume.toFloat()) }
+        Box(contentAlignment = Alignment.Center) {
+            if (showDialog) {
+                AlertDialog(title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Switch(
+                            checked = viewModel.customVolumeSwitch.observeAsState().value == true,
+                            onCheckedChange = {
+                                viewModel.customVolumeSwitch.value = it
+                            })
+                        Text(
+                            text = "固定音量已${if (viewModel.customVolumeSwitch.value == true) "启用" else "禁用"}",
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(start = 4.dp),
+                        )
+
+                    }
+                }, onDismissRequest = { showDialog = false }, text = {
+                    Row(
+                        modifier = Modifier
+                            .wrapContentHeight()
+                            .padding(vertical = 16.dp)
+                    ) {
+
+
+                        Column(
+                            modifier = Modifier
+                                .padding(start = 4.dp)
+                                .align(Alignment.CenterVertically)
+                        ) {
+
+                            Text(
+                                text = "连接时固定音量为 " + stepSliderPosition.toInt()
+                                    .toString() + "%"
+                            )
+
+                            Row {
+                                Icon(
+                                    modifier = Modifier
+                                        .size(34.dp)
+                                        .align(Alignment.CenterVertically),
+                                    painter = painterResource(id = R.drawable.icon_volue),
+                                    contentDescription = "音量图标"
+                                )
+                                Slider(
+                                    value = stepSliderPosition,
+                                    onValueChange = { stepSliderPosition = it },
+                                    valueRange = 0f..100f,
+                                    onValueChangeFinished = {
+                                        // launch some business logic update with the state you hold
+                                        // viewModel.updateSelectedSliderValue(sliderPosition)
+                                        Log.d("@@@", "MainScreen: $stepSliderPosition")
+                                        viewModel.presetTestVolume = stepSliderPosition.toInt()
+
+                                    },
+                                    steps = 9,
+                                    colors = SliderDefaults.colors(
+                                        thumbColor = MaterialTheme.colorScheme.secondary,
+                                        activeTrackColor = MaterialTheme.colorScheme.secondary
+                                    )
+                                )
+                            }
+
+                        }
+
+                    }
+
+                }, confirmButton = { /*showDialog = false*/ })
+            }
+        }
+
+
         Scaffold(
             topBar = {
                 TopAppBar(
@@ -287,7 +364,11 @@ fun MainScreen(viewModel: MainViewModel) {
                                 )
                             }
                         }
-                        IconButton(onClick = { ToastUtils.showShort("设置连接时的音量百分比") }) {
+                        IconButton(onClick = {
+                            ToastUtils.showShort("设置连接时的音量百分比")
+                            showDialog = true
+                        }) {
+
                             Icon(
                                 modifier = Modifier
                                     .size(24.dp),
@@ -347,6 +428,8 @@ fun MainScreen(viewModel: MainViewModel) {
             }
         )
 //        var progress by remember { mutableStateOf(0.0f) }
+
+        // FIXME: 需要优化
         var speedStr by remember { mutableStateOf("0.0MB/s") }
         var timeLeftStr by remember { mutableStateOf("0分0秒") }
         LaunchedEffect(viewModel.showDialogLD.value == 2) {
