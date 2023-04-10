@@ -85,6 +85,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
@@ -101,10 +102,13 @@ import com.xingkeqi.btlogger.ui.theme.BtLoggerTheme
 import com.xingkeqi.btlogger.utils.getDurationString
 import com.xingkeqi.btlogger.utils.saveDataToSheet
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.ObsoleteCoroutinesApi
+import kotlinx.coroutines.channels.ticker
 import kotlinx.coroutines.delay
 import org.greenrobot.eventbus.EventBus
 import org.greenrobot.eventbus.Subscribe
 import org.greenrobot.eventbus.ThreadMode
+import java.util.Calendar
 import kotlin.text.*
 
 @AndroidEntryPoint
@@ -523,10 +527,10 @@ private var showRecordState by mutableStateOf(false)
 @Composable
 fun MainContent(modifier: Modifier = Modifier, viewModel: MainViewModel) {
     if (!showRecordState) {
-        val deviceUiModel by viewModel.deviceInfoList.observeAsState(listOf(DeviceInfo()))
+        val deviceUiModel = viewModel.deviceInfoList.observeAsState().value.orEmpty()
         DeviceList(modifier, devices = deviceUiModel, viewModel)
     } else {
-        val recordUiModel by viewModel.recordInfoList.observeAsState(listOf(RecordInfo()))
+        val recordUiModel = viewModel.recordInfoList.observeAsState().value.orEmpty()
         RecordCards(modifier, records = recordUiModel, viewModel)
     }
 
@@ -596,10 +600,21 @@ fun RecordCards(
                         }
                     }"
                 )
+                // 假设你已经观察了 deviceInfoList
+                val deviceInfos = viewModel.deviceInfoList.observeAsState().value.orEmpty()
 
-                Text(
-                    text = "当前状态：${if (records[0]?.connectState == 2) "已连接" else "未连接"}"
-                )
+                Row {
+                    Text(
+                        text = "当前状态：${if (records[0]?.connectState == 2) "已连接" else "已断开"}"
+                    )
+                    Clock(
+                        deviceInfos[0].mac,
+                        lastRecordTime = deviceInfos[0].lastRecordTime,
+                        connectState = deviceInfos[0].connectState,
+                        viewModel = viewModel
+                    )
+                }
+
 
                 Text(
                     text = "连接总时长：${getDurationString(records[0]?.totalConnectionTime ?: 0)}"
@@ -847,12 +862,26 @@ fun DeviceItem(device: DeviceInfo?, viewModel: MainViewModel) {
 //                        fontSize = 14.sp,
 //                        text = "总断开时长：${getDurationString(viewModel.pairTimeDuration.value?.second ?: 0)}"
 //                    )
+                    val deviceInfos = viewModel.deviceInfoList.observeAsState().value.orEmpty()
 
-                    Text(
-                        color = MaterialTheme.colorScheme.outline,
-                        fontSize = 14.sp,
-                        text = "当前状态：${if (device?.connectState == 2) "已连接" else "已断开"}"
-                    )
+                    Row {
+                        Text(
+                            color = MaterialTheme.colorScheme.outline,
+                            fontSize = 14.sp,
+                            text = "当前状态：${if (device?.connectState == 2) "已连接" else "已断开"}"
+                        )
+
+                        if (device?.connectState == 2 && device.connectState == viewModel.currDevice.value?.connectState) {
+                            Clock(
+                                deviceId = deviceInfos[0].mac,
+                                fontSize = 14.sp,
+                                color = MaterialTheme.colorScheme.outline,
+                                lastRecordTime = device.lastRecordTime,
+                                connectState = deviceInfos[0].connectState,
+                                viewModel = viewModel
+                            )
+                        }
+                    }
                 }
 
             }
@@ -952,5 +981,34 @@ fun DownloadDialog(
 }
 
 
+@OptIn(ObsoleteCoroutinesApi::class)
+@Composable
+fun Clock(
+    deviceId: String,
+    lastRecordTime: Long,
+    connectState: Int,
+    color: Color = MaterialTheme.colorScheme.onSurface,
+    fontSize: TextUnit = 16.sp,
+    viewModel: MainViewModel
+) {
+//    val currentTime = remember { mutableStateOf(Calendar.getInstance().timeInMillis) }
 
+    val timeDifference = remember(deviceId, connectState) {
+        mutableStateOf(Calendar.getInstance().timeInMillis - lastRecordTime)
+    }
 
+    LaunchedEffect(deviceId, connectState) {
+        val ticker = ticker(delayMillis = 1000)
+        for (event in ticker) {
+            timeDifference.value = Calendar.getInstance().timeInMillis - lastRecordTime
+        }
+    }
+    Row {
+
+        Text(
+            color = color,
+            fontSize = fontSize,
+            text = "（" + getDurationString(timeDifference.value) + "）",
+        )
+    }
+}
