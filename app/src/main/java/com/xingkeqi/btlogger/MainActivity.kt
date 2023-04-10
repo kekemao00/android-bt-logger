@@ -601,16 +601,16 @@ fun RecordCards(
                     }"
                 )
                 // 假设你已经观察了 deviceInfoList
-                val deviceInfos = viewModel.deviceInfoList.observeAsState().value.orEmpty()
+                val records = viewModel.recordInfoList.observeAsState().value.orEmpty()
 
                 Row {
                     Text(
-                        text = "当前状态：${if (records[0]?.connectState == 2) "已连接" else "已断开"}"
+                        text = "当前状态：${if (records[0].connectState == 2) "已连接" else "已断开"}"
                     )
                     Clock(
-                        deviceInfos[0].mac,
-                        lastRecordTime = deviceInfos[0].lastRecordTime,
-                        connectState = deviceInfos[0].connectState,
+                        records[0].mac,
+                        lastRecordTime = records[0].timestamp,
+                        connectState = records[0].connectState,
                         viewModel = viewModel
                     )
                 }
@@ -991,14 +991,13 @@ fun Clock(
     fontSize: TextUnit = 16.sp,
     viewModel: MainViewModel
 ) {
-//    val currentTime = remember { mutableStateOf(Calendar.getInstance().timeInMillis) }
 
-    val timeDifference = remember(deviceId, connectState) {
+    val timeDifference = remember(viewModel.currDevice.value?.connectState) {
         mutableStateOf(Calendar.getInstance().timeInMillis - lastRecordTime)
     }
 
     LaunchedEffect(deviceId, connectState) {
-        val ticker = ticker(delayMillis = 1000)
+        val ticker = ticker(delayMillis = 10)
         for (event in ticker) {
             timeDifference.value = Calendar.getInstance().timeInMillis - lastRecordTime
         }
