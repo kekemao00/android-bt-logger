@@ -569,14 +569,37 @@ fun RecordCards(
                     fontWeight = FontWeight.Bold,
                     fontSize = 18.sp, text = "设备名称：${records[0]?.name}"
                 )
-                Text(
-                    color = MaterialTheme.colorScheme.outline,
-                    text = "设备别名：${records[0]?.alias}"
-                )
+
                 Text(
                     color = MaterialTheme.colorScheme.outline,
                     text = "蓝牙地址：${records[0]?.mac}"
                 )
+
+                // 假设你已经观察了 deviceInfoList
+                val records = viewModel.recordInfoList.observeAsState().value.orEmpty()
+
+                Row {
+                    Text(
+                        text = "当前状态：${if (records[0].connectState == 2) "已连接" else "已断开"}"
+                    )
+                    Clock(
+                        records[0].mac,
+                        lastRecordTime = records[0].timestamp,
+                        connectState = records[0].connectState,
+                        viewModel = viewModel
+                    )
+                }
+
+                Text(
+                    color = MaterialTheme.colorScheme.outline,
+                    text = "连接总时长：${getDurationString(records[0].totalConnectionTime ?: 0)}"
+                )
+
+                Text(
+                    color = MaterialTheme.colorScheme.outline,
+                    text = "断开总时长：${getDurationString(records[0].totalDisConnectionTime ?: 0)}"
+                )
+
                 Text(
                     color = MaterialTheme.colorScheme.outline,
                     text = "设备类型：${
@@ -600,31 +623,6 @@ fun RecordCards(
                         }
                     }"
                 )
-                // 假设你已经观察了 deviceInfoList
-                val records = viewModel.recordInfoList.observeAsState().value.orEmpty()
-
-                Row {
-                    Text(
-                        text = "当前状态：${if (records[0].connectState == 2) "已连接" else "已断开"}"
-                    )
-                    Clock(
-                        records[0].mac,
-                        lastRecordTime = records[0].timestamp,
-                        connectState = records[0].connectState,
-                        viewModel = viewModel
-                    )
-                }
-
-
-                Text(
-                    text = "连接总时长：${getDurationString(records[0]?.totalConnectionTime ?: 0)}"
-                )
-
-                Text(
-                    color = MaterialTheme.colorScheme.outline,
-                    text = "断开总时长：${getDurationString(records[0]?.totalDisConnectionTime ?: 0)}"
-                )
-
             }
             Divider()
             Text(
@@ -684,7 +682,7 @@ fun RecordItem(modifier: Modifier = Modifier, record: RecordInfo?, viewModel: Ma
             ShowDialog(
                 openDialog = showDialogDelItem,
                 title = "删除此条记录？",
-                content = "确定要删除 ${record?.name} 在 ${TimeUtils.millis2String(record?.timestamp ?: 0)} 的【${if (record?.connectState == 2) "连接" else "断开"}】这条记录吗? 删除的数据将无法恢复，是否继续？",
+                content = "确定要删除 ${record?.name} 在 ${TimeUtils.millis2String(record?.timestamp ?: 0)} 的【${if (record?.connectState == 2) "连接" else "断开"}】记录吗? 删除的数据将无法恢复，是否继续？",
                 onConfirm = {
                     showDialogDelItem.value = false
                     viewModel.deleteRecordById(record?.id ?: -1)
@@ -702,7 +700,7 @@ fun RecordItem(modifier: Modifier = Modifier, record: RecordInfo?, viewModel: Ma
             Text(
                 fontWeight = FontWeight.Bold,
                 fontSize = 18.sp,
-                text = "状态：${if (record?.connectState == 2) "连接" else "断开"}"
+                text = "蓝牙已${if (record?.connectState == 2) "连接" else "断开"}"
             )
             Text(
                 color = MaterialTheme.colorScheme.outline,
@@ -734,7 +732,7 @@ fun RecordItem(modifier: Modifier = Modifier, record: RecordInfo?, viewModel: Ma
                         }
                         return@buildAnnotatedString
                     }
-                    append(if (record?.connectState == 2) "上次断开：" else "连接计时：")
+                    append(if (record?.connectState == 2) "断开间隔：" else "本次连接时长：")
 
                     withStyle(SpanStyle(fontWeight = FontWeight.Normal)) {
                         append(
@@ -744,10 +742,10 @@ fun RecordItem(modifier: Modifier = Modifier, record: RecordInfo?, viewModel: Ma
                         )
                     }
 
-                    withStyle(SpanStyle(fontWeight = FontWeight.Normal)) {
-                        append(if (record?.connectState == 2) "之前" else "")
-
-                    }
+//                    withStyle(SpanStyle(fontWeight = FontWeight.Normal)) {
+//                        append(if (record?.connectState == 2) "之前" else "")
+//
+//                    }
                 }
 
                 Text(
