@@ -1,6 +1,7 @@
 package com.xingkeqi.btlogger
 
 import android.annotation.SuppressLint
+import android.bluetooth.BluetoothA2dp
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.content.Context
@@ -162,7 +163,7 @@ class MainActivity : ComponentActivity() {
         EventBus.getDefault().register(this)
 
         val receiver = btLoggerReceiver
-        val filter = IntentFilter(BluetoothAdapter.ACTION_CONNECTION_STATE_CHANGED);
+        val filter = IntentFilter(BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED);
         registerReceiver(receiver, filter);
 
     }
@@ -174,7 +175,7 @@ class MainActivity : ComponentActivity() {
             "onMessageEvent: msg=${event.message},device=${event.device},record=${event.record}"
         )
         if (event.message == "ADD_RECORD") {
-            if (viewModel.customVolumeSwitch.value == true && event.record.connectState == 2) {
+            if (viewModel.customVolumeSwitch.value == true && event.record.connectState == BluetoothA2dp.STATE_CONNECTED) {
                 VolumeUtils.setVolume(
                     AudioManager.STREAM_MUSIC,
                     ((viewModel.presetTestVolume.toFloat() / 100) * VolumeUtils.getMaxVolume(

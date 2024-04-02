@@ -1,6 +1,6 @@
 [versions]
 analytics = "4.3.3"
-com-android-application = "8.1.0-alpha11"
+com-android-application = "8.1.4"
 eventbus = "3.3.1"
 glance = "1.1.0"
 hilt-android = "2.44"

@@ -1,6 +1,7 @@
 package com.xingkeqi.btlogger.receiver
 
 import android.annotation.SuppressLint
+import android.bluetooth.BluetoothA2dp
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.content.BroadcastReceiver
@@ -33,8 +34,8 @@ class BtLoggerReceiver : BroadcastReceiver() {
 
         val action = intent.action
 
-        if (BluetoothAdapter.ACTION_CONNECTION_STATE_CHANGED == action) {
-            val state = intent.getIntExtra(BluetoothAdapter.EXTRA_CONNECTION_STATE, -1)
+        if (BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED == action) {
+            val state = intent.getIntExtra(BluetoothA2dp.EXTRA_STATE, -1)
             val bluetoothDevice =
                 intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
             val name = bluetoothDevice?.name // 蓝牙设备名称
@@ -56,29 +57,29 @@ class BtLoggerReceiver : BroadcastReceiver() {
 
 
             val connectStatus = when (state) {
-                BluetoothAdapter.STATE_CONNECTED -> {
+                BluetoothA2dp.STATE_CONNECTED -> {
                     // 处理蓝牙设备连接的相关逻辑
                     Log.i(
                         tag,
-                        "onReceive: 已连接到蓝牙设备 $name[$address],设备类型：$type,当前音量：$volume,是否在播放音乐：$isPlaying, 当前手机电量： $batteryLevel，配对状态：$bondState, rssi=$rssi, uuids=${uuids?.joinToString()}: $now"
+                        "onReceive: A2DP已连接 $name[$address],设备类型：$type,当前音量：$volume,是否在播放音乐：$isPlaying, 当前手机电量： $batteryLevel，配对状态：$bondState, rssi=$rssi, uuids=${uuids?.joinToString()}: $now"
                     )
                     ToastUtils.showLong("$name - 已连接")
-                    BluetoothAdapter.STATE_CONNECTED
+                    BluetoothA2dp.STATE_CONNECTED
                 }
 
-                BluetoothAdapter.STATE_DISCONNECTED -> {
-                    // 处理蓝牙设备连接的相关逻辑
+                BluetoothA2dp.STATE_DISCONNECTED -> {
+                    // A2DP已断开
                     Log.i(
                         tag,
-                        "onReceive: 蓝牙连接已断开 $name[$address],设备类型：$type,当前音量：$volume,是否在播放音乐：$isPlaying, 当前手机电量： $batteryLevel，配对状态：$bondState, rssi=$rssi, uuids=${uuids?.joinToString()}: $now"
+                        "onReceive: A2DP已断开 $name[$address],设备类型：$type,当前音量：$volume,是否在播放音乐：$isPlaying, 当前手机电量： $batteryLevel，配对状态：$bondState, rssi=$rssi, uuids=${uuids?.joinToString()}: $now"
                     )
                     ToastUtils.showLong("$name - 已断开")
 
-                    BluetoothAdapter.STATE_DISCONNECTED
+                    BluetoothA2dp.STATE_DISCONNECTED
                 }
 
                 else -> {
-                    BluetoothAdapter.STATE_DISCONNECTED
+                    BluetoothA2dp.STATE_DISCONNECTED
                 }
             }
 
