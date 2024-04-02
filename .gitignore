@@ -16,3 +16,4 @@ local.properties
 .idea
 *.apk
 output-metadata.json
+bt-logger.jks
