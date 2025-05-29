@@ -22,8 +22,8 @@ BtLogger 是一款 Android 应用程序，旨在帮助用户详细记录和管�
 
 ## 主要功能
 
-* **自动事件记录：** 自动监听并记录蓝牙音频设备 (A2DP) 的连接和断开事件。
-* **详细日志信息：** 为每次事件记录以下信息：
+* **自动事件记录**：自动监听并记录蓝牙音频设备 (A2DP) 的连接和断开事件。
+* **详细日志信息**：为每次事件记录以下信息：
     * 设备名称和 MAC 地址
     * 设备类型 (经典蓝牙、LE、双模)
     * 绑定状态
@@ -33,28 +33,28 @@ BtLogger 是一款 Android 应用程序，旨在帮助用户详细记录和管�
     * 音乐是否正在播放
     * 手机当前电量
     * 设备 UUIDs (如果可用)
-* **设备列表总览：**
+* **设备列表总览**：
     * 以列表形式展示所有记录过的蓝牙设备。
     * 显示每个设备的首次和末次记录时间。
     * 指示设备当前的连接状态（基于最新记录）。
-* **设备连接历史详情：**
+* **设备连接历史详情**：
     * 查看特定设备的详细连接/断开历史记录。
     * 清晰展示每次连接的持续时长和每次断开的间隔时长。
     * 动态显示当前连接的已持续时间或当前断开的已持续时间。
-* **数据持久化存储：**
+* **数据持久化存储**：
     * 使用 Room 数据库在本地持久化存储所有设备信息和连接记录。
-* **Excel 数据导出：**
-    * 支持将指定蓝牙设备的详细连接历史记录导出为 Excel (.xls) 文件。
+* **Excel 数据导出**：
+    * 支持将指定蓝牙设备的详细连接历史记录导出为 Excel (`.xls`) 文件。
     * 导出的文件包含设备名称、MAC 地址、记录时间、绑定状态、设备类型、连接状态、手机电量、播放状态和 UUID 等信息。
-* **自定义音量设置：**
+* **自定义音量设置**：
     * 允许用户启用“固定音量”功能。
     * 当蓝牙设备连接时，如果该功能启用，应用会自动将媒体音量调整到用户预设的百分比。
-* **应用内更新：**
+* **应用内更新**：
     * 集成蒲公英 (Pgyer) SDK，支持应用内检查新版本、查看更新日志并下载安装新版本。
-* **现代化 UI：**
+* **现代化 UI**：
     * 使用 Jetpack Compose 构建用户界面，提供流畅的交互体验。
     * 支持 Android 系统深色模式。
-* **数据清理：**
+* **数据清理**：
     * 支持单独删除某个设备的所有记录。
     * 支持删除单条连接/断开记录。
     * 支持清空所有历史记录。
@@ -64,26 +64,26 @@ BtLogger 是一款 Android 应用程序，旨在帮助用户详细记录和管�
 *(由于无法直接生成截图，此处用文字描述主要界面)*
 
 1.  **主屏幕 (设备列表):**
-    * 顶部应用栏 (TopAppBar) 显示应用名称 "BtLogger"，包含菜单按钮（显示版本信息/检查更新，或在详情页时为返回按钮）、音量预设按钮、系统蓝牙设置快捷方式和全局删除按钮。
+    * 顶部应用栏 (TopAppBar) 显示应用名称 `BtLogger`，包含菜单按钮（显示版本信息/检查更新，或在详情页时为返回按钮）、音量预设按钮、系统蓝牙设置快捷方式和全局删除按钮。
     * 列表区域展示所有曾记录过的蓝牙设备卡片。每个卡片显示设备名称、MAC 地址、首次/末次记录时间以及当前连接状态（通过背景色区分）。点击卡片进入设备详情。长按卡片可删除该设备及其所有相关记录。
 2.  **设备详情屏幕 (记录列表):**
     * 顶部应用栏变为返回按钮，并增加导出到 Excel 按钮。
     * 设备信息区域：展示当前查看设备的名称、MAC 地址、当前状态、总连接时长、总断开时长、设备类型和绑定状态。
     * 历史记录列表：按时间倒序展示该设备的每一条连接/断开记录。每条记录卡片显示事件类型（连接/断开）、播放状态、音量、手机电量、记录时间以及与上一条记录的时间间隔（即连接时长或断开间隔）。长按可删除单条记录。
 3.  **对话框:**
-    * **音量预设对话框：** 允许用户开启/关闭“固定音量”开关，并通过滑块设置预设的音量百分比。
-    * **删除确认对话框：** 在执行删除操作前弹出，请求用户确认。
-    * **版本更新对话框：** 当检测到新版本时，显示版本信息和更新日志，并提供“立即更新”和“稍后再说”的选项。
-    * **下载进度对话框：** 更新包下载时显示下载进度条、下载速度和预估剩余时间。
+    * **音量预设对话框**：允许用户开启/关闭“固定音量”开关，并通过滑块设置预设的音量百分比。
+    * **删除确认对话框**：在执行删除操作前弹出，请求用户确认。
+    * **版本更新对话框**：当检测到新版本时，显示版本信息和更新日志，并提供“立即更新”和“稍后再说”的选项。
+    * **下载进度对话框**：更新包下载时显示下载进度条、下载速度和预估剩余时间。
 
 ## 技术栈与依赖库
 
 * **核心语言：** Kotlin
 * **UI 框架：** Jetpack Compose - 用于构建声明式用户界面。
 * **架构模式：** MVVM (Model-View-ViewModel)
-    * `ViewModel`: `androidx.lifecycle.ViewModel`
-    * `LiveData`: `androidx.lifecycle.LiveData`
-    * `StateFlow` (通过 `asLiveData()` 转换)
+    * ViewModel: `androidx.lifecycle.ViewModel`
+    * LiveData: `androidx.lifecycle.LiveData`
+    * StateFlow (通过 `asLiveData()` 转换)
 * **依赖注入：** Hilt (`dagger.hilt.android`) - 用于简化依赖管理。
 * **数据库：** Room Persistence Library (`androidx.room`) - 用于本地数据持久化。
 * **异步编程：**
@@ -92,7 +92,7 @@ BtLogger 是一款 Android 应用程序，旨在帮助用户详细记录和管�
 * **事件通信：** GreenRobot EventBus (`org.greenrobot:eventbus`) - 用于组件间消息传递。
 * **工具库：**
     * `com.blankj:utilcodex`: 强大的 Android 工具类库，用于Toast、音量控制、App信息获取、时间转换等。
-    * `net.sourceforge.jexcelapi:jxl`: 用于创建和写入 Excel (.xls) 文件。
+    * `net.sourceforge.jexcelapi:jxl`: 用于创建和写入 Excel (`.xls`) 文件。
 * **第三方服务 SDK：**
     * `com.pgyersdk:sdk`: 蒲公英 SDK，提供应用分发、版本更新检查、下载、APM（应用性能管理，如启动时间、卡顿监测）、异常上报等功能。
     * `zlc.season:rxdownload4`: (可能由蒲公英 SDK 依赖) 基于 RxJava 的文件下载库。
@@ -108,7 +108,7 @@ BtLogger 是一款 Android 应用程序，旨在帮助用户详细记录和管�
 * `com.xingkeqi.btlogger`
     * `BtLoggerApplication.kt`: Application 类，用于 Hilt 初始化和蒲公英 SDK 初始化。
     * `MainActivity.kt`: 主 Activity，承载所有 Jetpack Compose UI。
-    * `MainViewModel.kt`:主要的 ViewModel，负责处理 UI 逻辑、数据获取与更新。
+    * `MainViewModel.kt`: 主要的 ViewModel，负责处理 UI 逻辑、数据获取与更新。
     * `data/`
         * `BtLogggerEntity.kt`: 定义数据实体类 (如 `Device`, `DeviceConnectionRecord`, `DeviceInfo`, `RecordInfo`)。
         * `BtLoggerDao.kt`: Room 数据访问对象 (DAO)，定义数据库操作接口 (如 `DeviceDao`, `RecordDao`)。
@@ -116,7 +116,7 @@ BtLogger 是一款 Android 应用程序，旨在帮助用户详细记录和管�
         * `MessageEvent.kt`: EventBus 使用的事件类。
         * `repo/`: 数据仓库类 (如 `DeviceRepository`, `RecordRepository`) 和接口。
     * `receiver/`
-        * `BtLoggerRecevier.kt`: BroadcastReceiver，用于监听系统蓝牙连接状态变化 (如 `BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED`)。
+        * `BtLoggerRecevier.kt`: `BroadcastReceiver`，用于监听系统蓝牙连接状态变化 (如 `BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED`)。
     * `ui/`
         * `AppComponent.kt`: 通用的 Composable UI 组件。
         * `slider/SliderScreen.kt`: (似乎是一个示例或未完全集成的Slider组件屏幕)。
@@ -197,7 +197,7 @@ BtLogger 是一款 Android 应用程序，旨在帮助用户详细记录和管�
     * `android.permission.WAKE_LOCK`: 允许应用阻止设备进入休眠状态，确保后台任务（如日志记录）可以持续进行。
 * **存储（用于文件导出）：**
     * `android.permission.READ_EXTERNAL_STORAGE` (android:maxSdkVersion="32"): 允许应用读取外部存储。
-    * `android.permission.WRITE_EXTERNAL_STORAGE` (android:maxSdkVersion="32"): 允许应用写入外部存储。这两个权限主要用于在 Android 10 (API 29) 及以下版本导出 Excel 文件到公共目录。对于更高版本，应用使用 `FileProvider` 在应用专属目录操作，或需要通过存储访问框架 (SAF)。
+    * `android.permission.WRITE_EXTERNAL_STORAGE` (android:maxSdkVersion="32"): 允许应用写入外部存储。 这两个权限主要用于在 Android 10 (API 29) 及以下版本导出 Excel 文件到公共目录。对于更高版本，应用使用 `FileProvider` 在应用专属目录操作，或需要通过存储访问框架 (SAF)。
 * **其他：**
     * `android.permission.VIBRATE`: 允许应用使用震动功能，用于操作反馈。
     * `android.permission.WRITE_SETTINGS` (tools:ignore="ProtectedPermissions"): 允许应用修改系统设置（当前应用中似乎未使用此权限更改系统设置，但已声明）。
@@ -211,7 +211,7 @@ BtLogger 是一款 Android 应用程序，旨在帮助用户详细记录和管�
 ## 如何构建（可选）
 
 1.  克隆仓库。
-2.  使用 Android Studio Bumblebee 或更高版本打开项目。
+2.  使用 Android Studio (推荐最新稳定版，如 `gradle-8.0-bin.zip` 对应的版本) 打开项目。
 3.  确保已安装所需的 Android SDK 版本 (根据 `build.gradle` 文件配置)。
 4.  项目使用 Hilt 进行依赖注入，构建时会自动生成相关代码。
 5.  蒲公英 SDK 的 API Key 已在 `AndroidManifest.xml` 中配置。
@@ -220,7 +220,7 @@ BtLogger 是一款 Android 应用程序，旨在帮助用户详细记录和管�
 ## 使用说明
 
 1.  **首次启动与权限：**
-    * 首次启动应用时，如果设备是 Android 12 或更高版本，系统会提示请求“附近设备”（即 `BLUETOOTH_CONNECT`）权限。请授予此权限以确保应用能正常工作。
+    * 首次启动应用时，如果设备是 Android 12 (`Build.VERSION_CODES.S`) 或更高版本，系统会提示请求“附近设备”（即 `BLUETOOTH_CONNECT`）权限。请授予此权限以确保应用能正常工作。
 2.  **自动记录：**
     * 应用启动后会自动在后台监听蓝牙音频设备的连接和断开事件。无需额外操作。
 3.  **查看设备列表：**
@@ -233,7 +233,7 @@ BtLogger 是一款 Android 应用程序，旨在帮助用户详细记录和管�
 5.  **导出 Excel 日志：**
     * 在设备详细记录页面，点击右上角的“导出”图标 (Excel 图标)。
     * 应用会将当前设备的所有历史记录导出为一个 `.xls` 文件，并尝试使用系统默认应用打开它。
-    * 文件保存在应用的内部存储中，路径通常为 `/data/data/com.xingkeqi.btlogger/files/BtLogger_设备名_时间戳.xls`。
+    * 文件保存在应用的内部存储中，路径通常为 `/data/data/com.xingkeqi.btlogger/files/BtLogger_设备名_时间戳.xls`。 (实际路径由 `FileProvider` 管理)
 6.  **设置固定音量：**
     * 在主屏幕，点击顶部操作栏的“音量”图标。
     * 在弹出的对话框中，打开“固定音量已启用”开关。
