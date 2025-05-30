@@ -61,7 +61,8 @@ BtLogger 是一款 Android 应用程序，旨在帮助用户详细记录和管�
 
 ## 屏幕截图/界面概览
 
-*(由于无法直接生成截图，此处用文字描述主要界面)*
+<img src="images\main.png" alt="main" style="zoom:20%;" /><img src="images\device_info.png" alt="device_info" style="zoom:20%;" /><img src="images\execl.png" alt="execl" style="zoom:20%;" />
+<img src="images\dialog1.png" alt="dialog1" style="zoom:20%;" /><img src="images\dialog_delete_3.png" alt="dialog_delete_3" style="zoom:20%;" /><img src="images\dialog_delete.png" alt="dialog_delete" style="zoom:20%;" /><img src="images\dialog_delete2.png" alt="dialog_delete2" style="zoom:20%;" />
 
 1.  **主屏幕 (设备列表):**
     * 顶部应用栏 (TopAppBar) 显示应用名称 `BtLogger`，包含菜单按钮（显示版本信息/检查更新，或在详情页时为返回按钮）、音量预设按钮、系统蓝牙设置快捷方式和全局删除按钮。
