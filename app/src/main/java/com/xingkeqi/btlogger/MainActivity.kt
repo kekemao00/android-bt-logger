@@ -646,7 +646,7 @@ fun RecordCards(
 
                     // 播放状态徽章
                     StatusBadge(
-                        text = if (latestRecord?.isPlaying == 1) "播放中" else "已暂停",
+                        text = if (latestRecord?.isPlaying == 1) "记录时播放" else "记录时静音",
                         type = if (latestRecord?.isPlaying == 1) BadgeType.Playing else BadgeType.Paused
                     )
                 }
@@ -800,7 +800,7 @@ fun RecordItem(modifier: Modifier = Modifier, record: RecordInfo?, viewModel: Ma
 
                 // 播放状态
                 StatusBadge(
-                    text = if (record?.isPlaying == 1) "播放中" else "已暂停",
+                    text = if (record?.isPlaying == 1) "播放" else "静音",
                     type = if (record?.isPlaying == 1) BadgeType.Playing else BadgeType.Paused
                 )
             }
