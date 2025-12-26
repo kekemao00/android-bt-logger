@@ -5,7 +5,6 @@ import android.bluetooth.BluetoothA2dp
 import android.bluetooth.BluetoothDevice
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
@@ -96,8 +95,8 @@ import com.blankj.utilcode.util.VolumeUtils
 import com.xingkeqi.btlogger.data.DeviceInfo
 import com.xingkeqi.btlogger.data.MessageEvent
 import com.xingkeqi.btlogger.data.RecordInfo
-import com.xingkeqi.btlogger.receiver.BtLoggerReceiver
 import com.xingkeqi.btlogger.receiver.getCurrVolume
+import com.xingkeqi.btlogger.service.BtLoggerForegroundService
 import com.xingkeqi.btlogger.ui.theme.BtLoggerTheme
 import com.xingkeqi.btlogger.utils.getDurationString
 import com.xingkeqi.btlogger.utils.saveDataToSheet
@@ -120,12 +119,6 @@ class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
 
     private var bluetoothPermissionGranted by mutableStateOf(false)
-
-    /**
-     * 蓝牙广播接收器实例
-     * Android 8.0+ 要求蓝牙连接状态等隐式广播必须动态注册
-     */
-    private val btLoggerReceiver by lazy { BtLoggerReceiver() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         Log.d("@@@", "onCreate: MainActivity")
@@ -168,13 +161,9 @@ class MainActivity : ComponentActivity() {
             EventBus.getDefault().register(this)
         }
 
-        // 动态注册蓝牙广播接收器（Android 8.0+ 隐式广播必须动态注册）
-        // 只监听 A2DP 广播，避免同一事件记录多条数据
-        val intentFilter = IntentFilter().apply {
-            addAction(BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED)
-        }
-        registerReceiver(btLoggerReceiver, intentFilter)
-        Log.i(tag, "onCreate: 已动态注册蓝牙广播接收器 (A2DP)")
+        // 启动前台服务，保持应用存活并监听蓝牙连接状态
+        BtLoggerForegroundService.start(this)
+        Log.i(tag, "onCreate: 已启动前台服务")
 
     }
 
@@ -224,13 +213,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        // 取消注册蓝牙广播接收器
-        try {
-            unregisterReceiver(btLoggerReceiver)
-            Log.i(tag, "onDestroy: 已取消注册蓝牙广播接收器")
-        } catch (e: Exception) {
-            Log.w(tag, "onDestroy: 取消注册广播接收器失败", e)
-        }
+        // 注意：不停止前台服务，让它继续在后台运行
+        // 只有用户主动退出应用时才停止服务
         EventBus.getDefault().unregister(this)
     }
 

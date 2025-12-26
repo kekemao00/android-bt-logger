@@ -14,6 +14,9 @@
         tools:ignore="ProtectedPermissions" />
     <!--    震动效果，需要的权限-->
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!--    前台服务权限（Android 9+）-->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <!--    要正确地使用 FileProvider 来共享文件，您需要在清单文件中请求以下权限-->
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
@@ -60,6 +63,14 @@
             </intent-filter>
         </activity>
 
+        <!--  前台服务，用于保持应用存活并监听蓝牙连接状态 -->
+        <service
+            android:name=".service.BtLoggerForegroundService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
+
+        <!-- 静态注册的 Receiver 在 Android 8.0+ 对隐式广播无效，保留仅作兼容 -->
         <receiver
             android:name=".receiver.BtLoggerReceiver"
             android:exported="false">
