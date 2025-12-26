@@ -4,6 +4,7 @@ plugins {
     id 'com.google.devtools.ksp'
     id 'kotlin-kapt'
     id 'com.google.dagger.hilt.android'
+    id 'org.jetbrains.kotlin.plugin.compose'
 }
 
 // Use the number of seconds/10 since April 2 2023 as the versionCode.
@@ -53,7 +54,6 @@ android {
 				}
 			}
 		}
-	}
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
@@ -63,9 +63,6 @@ android {
     }
     buildFeatures {
         compose true
-    }
-    composeOptions {
-        kotlinCompilerExtensionVersion '1.4.3'
     }
     packagingOptions {
         resources {
