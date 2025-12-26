@@ -2,7 +2,6 @@ package com.xingkeqi.btlogger
 
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothA2dp
-import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.content.Context
 import android.content.Intent
@@ -120,9 +119,13 @@ class MainActivity : ComponentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
 
-    private val btLoggerReceiver by lazy { BtLoggerReceiver() }
-
     private var bluetoothPermissionGranted by mutableStateOf(false)
+
+    /**
+     * 蓝牙广播接收器实例
+     * Android 8.0+ 要求蓝牙连接状态等隐式广播必须动态注册
+     */
+    private val btLoggerReceiver by lazy { BtLoggerReceiver() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         Log.d("@@@", "onCreate: MainActivity")
@@ -145,12 +148,12 @@ class MainActivity : ComponentActivity() {
 
                         } else {
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                // Android 12+ 需要 BLUETOOTH_CONNECT 权限
                                 RequestBluetoothPermission { bluetoothPermissionGranted = it }
                             } else {
-                                Log.w(
-                                    tag,
-                                    "onCreate:  Build.VERSION.SDK_INT = ${Build.VERSION.SDK_INT}"
-                                )
+                                // Android 11 及以下版本，蓝牙权限在 Manifest 中声明即可
+                                // 直接显示主界面
+                                bluetoothPermissionGranted = true
                                 MainScreen(viewModel)
                             }
                         }
@@ -160,11 +163,18 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        EventBus.getDefault().register(this)
+        // 避免 Activity 重建时重复注册
+        if (!EventBus.getDefault().isRegistered(this)) {
+            EventBus.getDefault().register(this)
+        }
 
-        val receiver = btLoggerReceiver
-        val filter = IntentFilter(BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED);
-        registerReceiver(receiver, filter);
+        // 动态注册蓝牙广播接收器（Android 8.0+ 隐式广播必须动态注册）
+        // 只监听 A2DP 广播，避免同一事件记录多条数据
+        val intentFilter = IntentFilter().apply {
+            addAction(BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED)
+        }
+        registerReceiver(btLoggerReceiver, intentFilter)
+        Log.i(tag, "onCreate: 已动态注册蓝牙广播接收器 (A2DP)")
 
     }
 
@@ -175,18 +185,23 @@ class MainActivity : ComponentActivity() {
             "onMessageEvent: msg=${event.message},device=${event.device},record=${event.record}"
         )
         if (event.message == "ADD_RECORD") {
-            if (viewModel.customVolumeSwitch.value == true && event.record.connectState == BluetoothA2dp.STATE_CONNECTED) {
-                VolumeUtils.setVolume(
-                    AudioManager.STREAM_MUSIC,
-                    ((viewModel.presetTestVolume.toFloat() / 100) * VolumeUtils.getMaxVolume(
-                        AudioManager.STREAM_MUSIC
-                    )).toInt(),
-                    0x01
-                )
-                event.record.volume = getCurrVolume()
+            try {
+                if (viewModel.customVolumeSwitch.value == true && event.record.connectState == BluetoothA2dp.STATE_CONNECTED) {
+                    VolumeUtils.setVolume(
+                        AudioManager.STREAM_MUSIC,
+                        ((viewModel.presetTestVolume.toFloat() / 100) * VolumeUtils.getMaxVolume(
+                            AudioManager.STREAM_MUSIC
+                        )).toInt(),
+                        0x01
+                    )
+                    event.record.volume = getCurrVolume()
+                }
+                viewModel.insertDevice(event.device)
+                viewModel.insertRecord(event.record)
+            } catch (e: Exception) {
+                Log.e(tag, "onMessageEvent: 保存记录失败", e)
+                ToastUtils.showShort("保存记录失败: ${e.message}")
             }
-            viewModel.insertDevice(event.device)
-            viewModel.insertRecord(event.record)
         }
     }
 
@@ -209,8 +224,14 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        // 取消注册蓝牙广播接收器
+        try {
+            unregisterReceiver(btLoggerReceiver)
+            Log.i(tag, "onDestroy: 已取消注册蓝牙广播接收器")
+        } catch (e: Exception) {
+            Log.w(tag, "onDestroy: 取消注册广播接收器失败", e)
+        }
         EventBus.getDefault().unregister(this)
-        unregisterReceiver(btLoggerReceiver)
     }
 
     private var lastBackPressTime: Long = 0

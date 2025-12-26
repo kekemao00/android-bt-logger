@@ -91,13 +91,13 @@ data class Device(
  */
 @Entity(
     tableName = "device_connection_records",
-//    foreignKeys = [ForeignKey(
-//        entity = Device::class,
-//        parentColumns = ["mac"],
-//        childColumns = [
-//            "device_mac",
-//        ]
-//    )]
+    foreignKeys = [ForeignKey(
+        entity = Device::class,
+        parentColumns = ["mac"],
+        childColumns = ["device_mac"],
+        onDelete = ForeignKey.CASCADE // 级联删除：设备删除时自动删除关联记录
+    )],
+    indices = [Index(value = ["device_mac"])] // 外键字段添加索引提升查询性能
 )
 data class DeviceConnectionRecord(
     @PrimaryKey(autoGenerate = true)

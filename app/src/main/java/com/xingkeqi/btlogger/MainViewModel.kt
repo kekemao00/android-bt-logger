@@ -11,10 +11,12 @@ import com.blankj.utilcode.util.AppUtils
 import com.pgyer.pgyersdk.PgyerSDKManager
 import com.pgyer.pgyersdk.callback.CheckoutVersionCallBack
 import com.pgyer.pgyersdk.model.CheckSoftModel
-import com.xingkeqi.btlogger.data.BtLoggerDatabase
 import com.xingkeqi.btlogger.data.Device
 import com.xingkeqi.btlogger.data.DeviceConnectionRecord
+import com.xingkeqi.btlogger.data.DeviceDao
 import com.xingkeqi.btlogger.data.DeviceInfo
+import com.xingkeqi.btlogger.data.DeviceWithRecordsDao
+import com.xingkeqi.btlogger.data.RecordDao
 import com.xingkeqi.btlogger.data.RecordInfo
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.reactivex.android.schedulers.AndroidSchedulers
@@ -29,13 +31,11 @@ import java.io.File
 import javax.inject.Inject
 
 @HiltViewModel
-class MainViewModel @Inject constructor() : ViewModel() {
-
-    private val db = BtLoggerDatabase.getDatabase(BtLoggerApplication.instance)
-
-    private val deviceDao = db.deviceDao()
-
-    private val recordDao = db.connectionRecordDao()
+class MainViewModel @Inject constructor(
+    private val deviceDao: DeviceDao,
+    private val recordDao: RecordDao,
+    private val deviceWithRecordsDao: DeviceWithRecordsDao
+) : ViewModel() {
 
     /**
      * 列表，包括当前状态，首次 尾次连接时间
@@ -125,22 +125,21 @@ class MainViewModel @Inject constructor() : ViewModel() {
     }
 
 
+    /**
+     * 删除设备及其所有记录
+     * 使用事务保护确保数据一致性
+     */
     fun deleteDevice(mac: String) {
-        deleteDeviceById(mac)
-        deleteRecordByMac(mac)
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                deviceWithRecordsDao.deleteDeviceWithRecords(mac)
+            }
+        }
     }
 
     fun cleanAll() {
         deleteAllRecord()
         deleteAllDevice()
-    }
-
-    private fun deleteDeviceById(mac: String) {
-        viewModelScope.launch {
-            withContext(Dispatchers.IO) {
-                deviceDao.deleteDeviceByMac(mac)
-            }
-        }
     }
 
     private fun deleteAllDevice() {
