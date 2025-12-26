@@ -174,22 +174,16 @@ class MainActivity : ComponentActivity() {
             "onMessageEvent: msg=${event.message},device=${event.device},record=${event.record}"
         )
         if (event.message == "ADD_RECORD") {
-            try {
-                if (viewModel.customVolumeSwitch.value == true && event.record.connectState == BluetoothA2dp.STATE_CONNECTED) {
-                    VolumeUtils.setVolume(
-                        AudioManager.STREAM_MUSIC,
-                        ((viewModel.presetTestVolume.toFloat() / 100) * VolumeUtils.getMaxVolume(
-                            AudioManager.STREAM_MUSIC
-                        )).toInt(),
-                        0x01
-                    )
-                    event.record.volume = getCurrVolume()
-                }
-                viewModel.insertDevice(event.device)
-                viewModel.insertRecord(event.record)
-            } catch (e: Exception) {
-                Log.e(tag, "onMessageEvent: 保存记录失败", e)
-                ToastUtils.showShort("保存记录失败: ${e.message}")
+            // 数据已由前台服务保存，此处仅处理音量调整
+            if (viewModel.customVolumeSwitch.value == true && event.record.connectState == BluetoothA2dp.STATE_CONNECTED) {
+                VolumeUtils.setVolume(
+                    AudioManager.STREAM_MUSIC,
+                    ((viewModel.presetTestVolume.toFloat() / 100) * VolumeUtils.getMaxVolume(
+                        AudioManager.STREAM_MUSIC
+                    )).toInt(),
+                    0x01
+                )
+                Log.i(tag, "onMessageEvent: 已调整音量至 ${viewModel.presetTestVolume}%")
             }
         }
     }
