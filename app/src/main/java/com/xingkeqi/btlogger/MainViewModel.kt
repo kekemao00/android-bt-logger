@@ -3,9 +3,9 @@ package com.xingkeqi.btlogger
 import android.util.Log
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
-import androidx.lifecycle.Transformations
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.asLiveData
+import androidx.lifecycle.switchMap
 import androidx.lifecycle.viewModelScope
 import com.blankj.utilcode.util.AppUtils
 import com.pgyer.pgyersdk.PgyerSDKManager
@@ -59,7 +59,7 @@ class MainViewModel @Inject constructor(
      * 当前设备的详细记录
      */
     val recordInfoList: LiveData<List<RecordInfo>> =
-        Transformations.switchMap(currDevice) { device ->
+        currDevice.switchMap { device ->
             var lastTimestamp = 0L
             var connectionTime = 0L
             var disconnectionTime = 0L

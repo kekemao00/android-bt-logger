@@ -26,6 +26,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -35,6 +36,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -98,6 +100,18 @@ import com.xingkeqi.btlogger.data.RecordInfo
 import com.xingkeqi.btlogger.receiver.getCurrVolume
 import com.xingkeqi.btlogger.service.BtLoggerForegroundService
 import com.xingkeqi.btlogger.ui.theme.BtLoggerTheme
+import com.xingkeqi.btlogger.ui.theme.ConnectedGreen
+import com.xingkeqi.btlogger.ui.theme.ConnectedGreenDark
+import com.xingkeqi.btlogger.ui.theme.ConnectedGreenLight
+import com.xingkeqi.btlogger.ui.theme.Dimens
+import com.xingkeqi.btlogger.ui.components.BadgeType
+import com.xingkeqi.btlogger.ui.components.BatteryIndicator
+import com.xingkeqi.btlogger.ui.components.BatteryTrendChart
+import com.xingkeqi.btlogger.ui.components.ConnectionStatusIndicator
+import com.xingkeqi.btlogger.ui.components.DurationProgressBar
+import com.xingkeqi.btlogger.ui.components.StatCard
+import com.xingkeqi.btlogger.ui.components.StatItem
+import com.xingkeqi.btlogger.ui.components.StatusBadge
 import com.xingkeqi.btlogger.utils.getDurationString
 import com.xingkeqi.btlogger.utils.saveDataToSheet
 import dagger.hilt.android.AndroidEntryPoint
@@ -544,6 +558,11 @@ fun RecordCards(
 ) {
     LazyColumn(modifier = modifier) {
         if (records.isEmpty()) return@LazyColumn
+
+        val latestRecord = records[0]
+        val isConnected = latestRecord?.connectState == 2
+
+        // 详情页头部
         item {
             Column(
                 modifier = Modifier
@@ -551,10 +570,8 @@ fun RecordCards(
                     .background(
                         Brush.linearGradient(
                             listOf(
-                                if (records[0]?.connectState == 2) {
-                                    if (isSystemInDarkTheme()) Color(0xFF33691E) else Color(
-                                        0xFFDCE5CD
-                                    )
+                                if (isConnected) {
+                                    if (isSystemInDarkTheme()) ConnectedGreenDark else ConnectedGreenLight
                                 } else {
                                     MaterialTheme.colorScheme.surface
                                 },
@@ -562,77 +579,115 @@ fun RecordCards(
                             )
                         )
                     )
-                    .padding(start = 22.dp, 12.dp, 12.dp, 12.dp)
+                    .padding(Dimens.spacingLg)
             ) {
-
-                Text(
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp, text = "设备名称：${records[0]?.name}"
-                )
-
-                Text(
-                    color = MaterialTheme.colorScheme.outline,
-                    text = "蓝牙地址：${records[0]?.mac}"
-                )
-
-                // 假设你已经观察了 deviceInfoList
-                val records = viewModel.recordInfoList.observeAsState().value.orEmpty()
-
-                Row {
-                    Text(
-                        text = "当前状态：${if (records[0].connectState == 2) "已连接" else "已断开"}"
+                // 第一行：状态指示器 + 设备名称
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    ConnectionStatusIndicator(
+                        isConnected = isConnected,
+                        modifier = Modifier.size(Dimens.iconSizeXs)
                     )
-                    Clock(
-                        records[0].mac,
-                        lastRecordTime = records[0].timestamp,
-                        connectState = records[0].connectState,
-                        viewModel = viewModel
+                    Spacer(modifier = Modifier.width(Dimens.spacingSm))
+                    Text(
+                        style = MaterialTheme.typography.titleLarge,
+                        text = latestRecord?.name ?: "未知设备"
                     )
                 }
 
+                Spacer(modifier = Modifier.height(Dimens.spacingXs))
+
+                // MAC 地址
                 Text(
                     color = MaterialTheme.colorScheme.outline,
-                    text = "连接总时长：${getDurationString(records[0].totalConnectionTime ?: 0)}"
+                    style = MaterialTheme.typography.labelMedium,
+                    text = latestRecord?.mac ?: ""
                 )
 
-                Text(
-                    color = MaterialTheme.colorScheme.outline,
-                    text = "断开总时长：${getDurationString(records[0].totalDisConnectionTime ?: 0)}"
-                )
+                Spacer(modifier = Modifier.height(Dimens.spacingMd))
 
-                Text(
-                    color = MaterialTheme.colorScheme.outline,
-                    text = "设备类型：${
-                        when (records[0]?.deviceType) {
-                            BluetoothDevice.DEVICE_TYPE_CLASSIC -> "经典蓝牙设备"
-                            BluetoothDevice.DEVICE_TYPE_LE -> "低功耗蓝牙设备"
-                            BluetoothDevice.DEVICE_TYPE_DUAL -> "支持经典蓝牙和低功耗蓝牙的设备"
+                // 连接/断开时长进度条
+                val recordList = viewModel.recordInfoList.observeAsState().value.orEmpty()
+                if (recordList.isNotEmpty()) {
+                    DurationProgressBar(
+                        connectionTime = recordList[0].totalConnectionTime ?: 0,
+                        disconnectionTime = recordList[0].totalDisConnectionTime ?: 0
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(Dimens.spacingMd))
+
+                // 状态指标行
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(Dimens.spacingLg)
+                ) {
+                    // 电量
+                    if ((latestRecord?.batteryLevel ?: 0) > 0) {
+                        BatteryIndicator(level = latestRecord?.batteryLevel ?: 0)
+                    }
+
+                    // 音量
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.icon_volue),
+                            contentDescription = "音量",
+                            modifier = Modifier.size(Dimens.iconSizeSm),
+                            tint = MaterialTheme.colorScheme.outline
+                        )
+                        Spacer(modifier = Modifier.width(2.dp))
+                        Text(
+                            text = "${latestRecord?.volume ?: 0}%",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outline
+                        )
+                    }
+
+                    // 播放状态徽章
+                    StatusBadge(
+                        text = if (latestRecord?.isPlaying == 1) "播放中" else "已暂停",
+                        type = if (latestRecord?.isPlaying == 1) BadgeType.Playing else BadgeType.Paused
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(Dimens.spacingMd))
+
+                // 统计卡片
+                StatCard(
+                    items = listOf(
+                        StatItem("连接次数", "${records.count { it?.connectState == 2 }}次"),
+                        StatItem("设备类型", when (latestRecord?.deviceType) {
+                            BluetoothDevice.DEVICE_TYPE_CLASSIC -> "经典"
+                            BluetoothDevice.DEVICE_TYPE_LE -> "低功耗"
+                            BluetoothDevice.DEVICE_TYPE_DUAL -> "双模"
                             else -> "其他"
-                        }
-                    }"
-                )
-                Text(
-                    color = MaterialTheme.colorScheme.outline,
-                    text = "绑定状态：${
-                        when (records[0]?.bondState) {
-                            BluetoothDevice.BOND_NONE -> "未配对"
-                            BluetoothDevice.BOND_BONDING -> "正在配对"
+                        }),
+                        StatItem("绑定状态", when (latestRecord?.bondState) {
                             BluetoothDevice.BOND_BONDED -> "已配对"
-                            BluetoothDevice.ERROR -> "出错"
-                            else -> "其他"
-                        }
-                    }"
+                            BluetoothDevice.BOND_BONDING -> "配对中"
+                            else -> "未配对"
+                        })
+                    )
                 )
+
+                Spacer(modifier = Modifier.height(Dimens.spacingMd))
+
+                // 电量趋势图表
+                BatteryTrendChart(records = records.filterNotNull())
             }
+
             Divider()
+
             Text(
-                modifier = Modifier.padding(start = 18.dp, top = 16.dp, bottom = 4.dp),
+                modifier = Modifier.padding(start = Dimens.spacingLg, top = Dimens.spacingLg, bottom = Dimens.spacingXs),
                 color = MaterialTheme.colorScheme.outline,
-                text = "历史记录"
+                style = MaterialTheme.typography.labelMedium,
+                text = "历史记录 (${records.size}条)"
             )
         }
+
         items(records) {
-            // FIXME: 入场动画不起作用为何？
             AnimatedVisibility(
                 visible = showRecordState,
                 enter = fadeIn(animationSpec = tween(durationMillis = 300, delayMillis = 150)),
@@ -654,16 +709,14 @@ fun RecordItem(modifier: Modifier = Modifier, record: RecordInfo?, viewModel: Ma
     val context = LocalContext.current
     val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
     val showDialogDelItem = remember { mutableStateOf(false) }
-
+    val isConnected = record?.connectState == 2
 
     ElevatedCard(modifier = modifier
-        .padding(start = 10.dp, end = 10.dp, bottom = 10.dp)
+        .padding(horizontal = Dimens.spacingMd, vertical = Dimens.spacingXs)
         .fillMaxWidth()
         .wrapContentHeight()
-        .clip(shape = RoundedCornerShape(20.dp))
-        .padding(top = 4.dp)
+        .clip(shape = RoundedCornerShape(Dimens.cardCornerRadius))
         .combinedClickable(onLongClick = {
-
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 val effect =
                     VibrationEffect.createOneShot(1, VibrationEffect.DEFAULT_AMPLITUDE)
@@ -672,8 +725,8 @@ fun RecordItem(modifier: Modifier = Modifier, record: RecordInfo?, viewModel: Ma
             showDialogDelItem.value = true
         }) {},
         colors = CardDefaults.cardColors(
-            containerColor = if (record?.connectState == 2) {
-                if (isSystemInDarkTheme()) Color(0xFF33691E) else Color(0xFFDCE5CD)
+            containerColor = if (isConnected) {
+                if (isSystemInDarkTheme()) ConnectedGreenDark else ConnectedGreenLight
             } else MaterialTheme.colorScheme.surface,
         )
 
@@ -682,79 +735,92 @@ fun RecordItem(modifier: Modifier = Modifier, record: RecordInfo?, viewModel: Ma
             ShowDialog(
                 openDialog = showDialogDelItem,
                 title = "删除此条记录？",
-                content = "确定要删除 ${record?.name} 在 ${TimeUtils.millis2String(record?.timestamp ?: 0)} 的【${if (record?.connectState == 2) "连接" else "断开"}】记录吗? 删除的数据将无法恢复，是否继续？",
+                content = "确定要删除 ${record?.name} 在 ${TimeUtils.millis2String(record?.timestamp ?: 0)} 的【${if (isConnected) "连接" else "断开"}】记录吗? 删除的数据将无法恢复，是否继续？",
                 onConfirm = {
                     showDialogDelItem.value = false
                     viewModel.deleteRecordById(record?.id ?: -1)
                 }) {
                 showDialogDelItem.value = false
-
             }
         }
 
         Column(
             modifier = Modifier
-                .padding(12.dp)
+                .padding(Dimens.cardPadding)
                 .fillMaxWidth()
         ) {
-            Text(
-                fontWeight = FontWeight.Bold,
-                fontSize = 18.sp,
-                text = "蓝牙已${if (record?.connectState == 2) "连接" else "断开"}"
-            )
-            Text(
-                color = MaterialTheme.colorScheme.outline,
-                fontSize = 14.sp, text = "正在播放：${if (record?.isPlaying == 1) "是" else "否"}"
-            )
-            Text(
-                color = MaterialTheme.colorScheme.outline,
-                fontSize = 14.sp,
-                text = "${if (record?.connectState == 2) "耳" else "手"}机音量：${record?.volume}%"
-            )
-            Text(
-                color = MaterialTheme.colorScheme.outline,
-                fontSize = 14.sp, text = "电池剩余：${record?.batteryLevel}"
-            )
+            // 第一行：状态 + 时间戳（右对齐）
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    ConnectionStatusIndicator(isConnected = isConnected)
+                    Spacer(modifier = Modifier.width(Dimens.spacingSm))
+                    Text(
+                        style = MaterialTheme.typography.titleMedium,
+                        text = if (isConnected) "蓝牙已连接" else "蓝牙已断开"
+                    )
+                }
+                Text(
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline,
+                    text = TimeUtils.millis2String(record?.timestamp ?: 0, "MM-dd HH:mm:ss")
+                )
+            }
 
-            Text(
-                color = MaterialTheme.colorScheme.outline,
-                fontSize = 14.sp,
-                text = "记录时间：${TimeUtils.millis2String(record?.timestamp ?: 0)}"
-            )
-            Row {
+            Spacer(modifier = Modifier.height(Dimens.spacingSm))
 
-                val annotatedString = buildAnnotatedString {
-                    if (record?.timestamp == record?.lastRecordTime) {
-                        withStyle(style = SpanStyle(fontSize = 14.sp)) {
-                            withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
-                                append("这是第一条记录")
-                            }
-                        }
-                        return@buildAnnotatedString
-                    }
-                    append(if (record?.connectState == 2) "断开间隔：" else "本次连接时长：")
-
-                    withStyle(SpanStyle(fontWeight = FontWeight.Normal)) {
-                        append(
-                            getDurationString(
-                                (record?.timestamp ?: 0) - (record?.lastRecordTime ?: 0)
-                            )
-                        )
-                    }
-
-//                    withStyle(SpanStyle(fontWeight = FontWeight.Normal)) {
-//                        append(if (record?.connectState == 2) "之前" else "")
-//
-//                    }
+            // 第二行：指标横向排列
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(Dimens.spacingMd)
+            ) {
+                // 电量
+                if ((record?.batteryLevel ?: 0) > 0) {
+                    BatteryIndicator(level = record?.batteryLevel ?: 0)
                 }
 
-                Text(
-                    color = if (record?.connectState == 2) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.onBackground,
-                    fontSize = if (record?.connectState == 2) 14.sp else 14.sp,
-                    text = annotatedString
-                )
+                // 音量
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.icon_volue),
+                        contentDescription = "音量",
+                        modifier = Modifier.size(Dimens.iconSizeSm),
+                        tint = MaterialTheme.colorScheme.outline
+                    )
+                    Spacer(modifier = Modifier.width(2.dp))
+                    Text(
+                        text = "${record?.volume ?: 0}%",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline
+                    )
+                }
 
+                // 播放状态
+                StatusBadge(
+                    text = if (record?.isPlaying == 1) "播放中" else "已暂停",
+                    type = if (record?.isPlaying == 1) BadgeType.Playing else BadgeType.Paused
+                )
             }
+
+            Spacer(modifier = Modifier.height(Dimens.spacingSm))
+
+            // 第三行：时长信息
+            val durationText = if (record?.timestamp == record?.lastRecordTime) {
+                "首条记录"
+            } else {
+                val duration = getDurationString((record?.timestamp ?: 0) - (record?.lastRecordTime ?: 0))
+                if (isConnected) "断开间隔：$duration" else "本次连接：$duration"
+            }
+
+            Text(
+                style = MaterialTheme.typography.labelMedium,
+                color = if (isConnected) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.primary,
+                fontWeight = if (!isConnected) FontWeight.Medium else FontWeight.Normal,
+                text = durationText
+            )
         }
     }
 }
@@ -785,13 +851,14 @@ fun DeviceItem(device: DeviceInfo?, viewModel: MainViewModel) {
     val context = LocalContext.current
     val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
     val showDialogDelItem = remember { mutableStateOf(false) }
+    val isConnected = device?.connectState == 2
 
     ElevatedCard(
         modifier = Modifier
             .fillMaxWidth()
             .wrapContentHeight()
-            .clip(shape = RoundedCornerShape(20.dp))
-            .padding(4.dp)
+            .clip(shape = RoundedCornerShape(Dimens.cardCornerRadius))
+            .padding(Dimens.spacingXs)
             .combinedClickable(
                 onLongClick = {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -807,8 +874,8 @@ fun DeviceItem(device: DeviceInfo?, viewModel: MainViewModel) {
 
             },
         colors = CardDefaults.cardColors(
-            containerColor = if (device?.connectState == 2) {
-                if (isSystemInDarkTheme()) Color(0xFF33691E) else Color(0xFFDCE5CD)
+            containerColor = if (isConnected) {
+                if (isSystemInDarkTheme()) ConnectedGreenDark else ConnectedGreenLight
             } else MaterialTheme.colorScheme.surface,
 
             )
@@ -817,64 +884,71 @@ fun DeviceItem(device: DeviceInfo?, viewModel: MainViewModel) {
 
         Box(
             modifier = Modifier
-                .padding(12.dp)
+                .padding(Dimens.cardPadding)
                 .fillMaxWidth()
         ) {
             Column(
                 modifier = Modifier.align(alignment = Alignment.CenterStart),
             ) {
-
-                Row {
-                    Text(fontSize = 18.sp, fontWeight = FontWeight.Bold, text = "设备名称：")
+                // 第一行：状态指示器 + 设备名称
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    ConnectionStatusIndicator(isConnected = isConnected)
+                    Spacer(modifier = Modifier.width(Dimens.spacingSm))
                     Text(
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        text = "${device?.name}"
+                        style = MaterialTheme.typography.titleMedium,
+                        text = device?.name ?: "未知设备",
+                        modifier = Modifier.weight(1f)
                     )
                 }
 
+                Spacer(modifier = Modifier.height(Dimens.spacingXs))
+
+                // 第二行：MAC 地址
                 Text(
                     color = MaterialTheme.colorScheme.outline,
-                    fontSize = 13.sp,
-                    text = "Mac 地址：${device?.mac}"
+                    style = MaterialTheme.typography.labelSmall,
+                    text = device?.mac ?: ""
                 )
-                Text(
-                    color = MaterialTheme.colorScheme.outline,
-                    fontSize = 14.sp,
-                    text = "首次记录：${TimeUtils.millis2String(device?.firstRecordTime ?: 0)}"
-                )
-                Text(
-                    color = MaterialTheme.colorScheme.outline,
-                    fontSize = 14.sp,
-                    text = "最近记录：${TimeUtils.millis2String(device?.lastRecordTime ?: 0)}  "
-                )
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
 
-// FIXME: 每条数据不能独立显示，待修复后放开
-//                    Text(
-//                        fontSize = 14.sp,
-//                        text = "总连接时长：${getDurationString(viewModel.pairTimeDuration.value?.first ?: 0)}"
-//                    )
-//                    Text(
-//                        color = MaterialTheme.colorScheme.outline,
-//                        fontSize = 14.sp,
-//                        text = "总断开时长：${getDurationString(viewModel.pairTimeDuration.value?.second ?: 0)}"
-//                    )
-                    val deviceInfos = viewModel.deviceInfoList.observeAsState().value.orEmpty()
+                Spacer(modifier = Modifier.height(Dimens.spacingSm))
 
-                    Row {
-                        Text(
-                            color = MaterialTheme.colorScheme.outline,
-                            fontSize = 14.sp,
-                            text = "当前状态：${if (device?.connectState == 2) "已连接" else "已断开"}"
-                        )
+                // 第三行：时间信息
+                Row {
+                    Text(
+                        color = MaterialTheme.colorScheme.outline,
+                        style = MaterialTheme.typography.labelMedium,
+                        text = "首次 ${TimeUtils.millis2String(device?.firstRecordTime ?: 0, "MM-dd HH:mm")}"
+                    )
+                    Spacer(modifier = Modifier.width(Dimens.spacingMd))
+                    Text(
+                        color = MaterialTheme.colorScheme.outline,
+                        style = MaterialTheme.typography.labelMedium,
+                        text = "最近 ${TimeUtils.millis2String(device?.lastRecordTime ?: 0, "MM-dd HH:mm")}"
+                    )
+                }
 
-                        if (device?.connectState == 2 && device.connectState == viewModel.currDevice.value?.connectState) {
+                Spacer(modifier = Modifier.height(Dimens.spacingSm))
+
+                // 第四行：状态徽章
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(Dimens.spacingSm)
+                ) {
+                    StatusBadge(
+                        text = if (isConnected) "已连接" else "已断开",
+                        type = if (isConnected) BadgeType.Connected else BadgeType.Disconnected
+                    )
+
+                    if (isConnected) {
+                        val deviceInfos = viewModel.deviceInfoList.observeAsState().value.orEmpty()
+                        if (deviceInfos.isNotEmpty() && device?.connectState == viewModel.currDevice.value?.connectState) {
                             Clock(
                                 deviceId = deviceInfos[0].mac,
-                                fontSize = 14.sp,
-                                color = MaterialTheme.colorScheme.outline,
-                                lastRecordTime = device.lastRecordTime,
+                                fontSize = 11.sp,
+                                color = ConnectedGreen,
+                                lastRecordTime = device?.lastRecordTime ?: 0,
                                 connectState = deviceInfos[0].connectState,
                                 viewModel = viewModel
                             )

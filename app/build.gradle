@@ -15,7 +15,7 @@ def vCode = (int) (((new Date().getTime() / 1000) - 1680386071) / 10)
 
 android {
     namespace 'com.xingkeqi.btlogger'
-    compileSdk 33
+    compileSdk 34
 
     defaultConfig {
         applicationId "com.xingkeqi.btlogger"
@@ -115,6 +115,9 @@ dependencies {
     // https://developer.android.com/training/dependency-injection/hilt-android?hl=zh-cn#groovy
     implementation libs.hilt.android
     kapt libs.hilt.compiler
+
+    // Vico 图表库
+    implementation "com.patrykandpatrick.vico:compose-m3:2.0.0-beta.1"
 }
 
 // Allow references to generated code
