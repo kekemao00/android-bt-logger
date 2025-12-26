@@ -398,9 +398,9 @@ fun MainScreen(viewModel: MainViewModel) {
 
                         IconButton(onClick = { context.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) }) {
                             Icon(
-                                Icons.Filled.Settings,
+                                painter = painterResource(id = R.drawable.ic_bluetooth_settings),
                                 tint = MaterialTheme.colorScheme.primary,
-                                contentDescription = "设置"
+                                contentDescription = "蓝牙设置"
                             )
                         }
                         // Add your actions here
