@@ -607,12 +607,12 @@ fun RecordCards(
 
                 Spacer(modifier = Modifier.height(Dimens.spacingMd))
 
-                // 连接/断开时长进度条
-                val recordList = viewModel.recordInfoList.observeAsState().value.orEmpty()
-                if (recordList.isNotEmpty()) {
+                // 连接/断开时长进度条（直接使用传入的 records 参数）
+                if (records.isNotEmpty()) {
+                    val firstRecord = records[0]
                     DurationProgressBar(
-                        connectionTime = recordList[0].totalConnectionTime ?: 0,
-                        disconnectionTime = recordList[0].totalDisConnectionTime ?: 0
+                        connectionTime = firstRecord?.totalConnectionTime ?: 0,
+                        disconnectionTime = firstRecord?.totalDisConnectionTime ?: 0
                     )
                 }
 
@@ -673,8 +673,8 @@ fun RecordCards(
 
                 Spacer(modifier = Modifier.height(Dimens.spacingMd))
 
-                // 电量趋势图表
-                BatteryTrendChart(records = records.filterNotNull())
+                // 电量趋势图表（按时间升序排列，确保 x 轴从旧到新）
+                BatteryTrendChart(records = records.filterNotNull().reversed())
             }
 
             Divider()
@@ -941,18 +941,15 @@ fun DeviceItem(device: DeviceInfo?, viewModel: MainViewModel) {
                         type = if (isConnected) BadgeType.Connected else BadgeType.Disconnected
                     )
 
-                    if (isConnected) {
-                        val deviceInfos = viewModel.deviceInfoList.observeAsState().value.orEmpty()
-                        if (deviceInfos.isNotEmpty() && device?.connectState == viewModel.currDevice.value?.connectState) {
-                            Clock(
-                                deviceId = deviceInfos[0].mac,
-                                fontSize = 11.sp,
-                                color = ConnectedGreen,
-                                lastRecordTime = device?.lastRecordTime ?: 0,
-                                connectState = deviceInfos[0].connectState,
-                                viewModel = viewModel
-                            )
-                        }
+                    if (isConnected && device != null) {
+                        Clock(
+                            deviceId = device.mac,
+                            fontSize = 11.sp,
+                            color = ConnectedGreen,
+                            lastRecordTime = device.lastRecordTime,
+                            connectState = device.connectState,
+                            viewModel = viewModel
+                        )
                     }
                 }
 
