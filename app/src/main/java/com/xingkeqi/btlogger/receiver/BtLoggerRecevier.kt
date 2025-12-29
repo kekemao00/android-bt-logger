@@ -108,7 +108,7 @@ class BtLoggerReceiver : BroadcastReceiver() {
             mac = address,
             name = name ?: "",
             bondState = bondState,
-            rssi = Short.MIN_VALUE, // 连接状态变化时无法获取 RSSI
+            rssi = null, // 连接状态变化时无法获取 RSSI
             alias = alias ?: "",
             deviceType = type,
             uuids = uuids?.joinToString() ?: ""

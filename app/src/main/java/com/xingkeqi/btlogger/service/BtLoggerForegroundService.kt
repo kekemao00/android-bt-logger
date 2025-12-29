@@ -140,7 +140,7 @@ class BtLoggerForegroundService : Service() {
             mac = address,
             name = name,
             bondState = bondState,
-            rssi = Short.MIN_VALUE,
+            rssi = null, // 连接状态变化时无法获取 RSSI
             alias = alias,
             deviceType = type,
             uuids = uuids?.joinToString() ?: ""

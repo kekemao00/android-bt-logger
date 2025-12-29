@@ -168,16 +168,21 @@ class MainActivity : ComponentActivity() {
 
                 }
             }
+
+            // 权限授予后才启动前台服务，避免 Android 12+ SecurityException
+            val context = LocalContext.current
+            LaunchedEffect(bluetoothPermissionGranted) {
+                if (bluetoothPermissionGranted) {
+                    BtLoggerForegroundService.start(context)
+                    Log.i(tag, "onCreate: 权限已授予，启动前台服务")
+                }
+            }
         }
 
         // 避免 Activity 重建时重复注册
         if (!EventBus.getDefault().isRegistered(this)) {
             EventBus.getDefault().register(this)
         }
-
-        // 启动前台服务，保持应用存活并监听蓝牙连接状态
-        BtLoggerForegroundService.start(this)
-        Log.i(tag, "onCreate: 已启动前台服务")
 
     }
 

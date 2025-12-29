@@ -73,7 +73,7 @@ data class Device(
     @ColumnInfo(name = "bond_state")
     val bondState: Int,
     @ColumnInfo(name = "rssi")
-    val rssi: Short,
+    val rssi: Short?, // 可空：连接状态变化时无法获取 RSSI
     @ColumnInfo(name = "alias")
     val alias: String,
     @ColumnInfo(name = "device_type")
