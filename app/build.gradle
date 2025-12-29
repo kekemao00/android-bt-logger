@@ -15,7 +15,7 @@ def vCode = (int) (((new Date().getTime() / 1000) - 1680386071) / 10)
 
 android {
     namespace 'com.xingkeqi.btlogger'
-    compileSdk 34
+    compileSdk 36
 
     defaultConfig {
         applicationId "com.xingkeqi.btlogger"
@@ -38,22 +38,22 @@ android {
             }
     }
 
-	buildTypes {
-			debug {
-				applicationVariants.all { variant ->
-					variant.outputs.all {
-						outputFileName = "MyApp-debug.apk"
-					}
-				}
-			}
-			release {
-				applicationVariants.all { variant ->
-					variant.outputs.all {
-						outputFileName = "MyApp-release.apk"
-					}
-				}
-			}
-		}
+    buildTypes {
+        debug {
+            applicationVariants.all { variant ->
+                variant.outputs.all {
+                    outputFileName = "MyApp-debug.apk"
+                }
+            }
+        }
+        release {
+            applicationVariants.all { variant ->
+                variant.outputs.all {
+                    outputFileName = "MyApp-release.apk"
+                }
+            }
+        }
+    }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
