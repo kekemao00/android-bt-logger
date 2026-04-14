@@ -16,16 +16,17 @@ import android.os.BatteryManager
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
+import androidx.annotation.RequiresApi
 import androidx.core.app.NotificationCompat
 import com.blankj.utilcode.util.ToastUtils
 import com.blankj.utilcode.util.VolumeUtils
-import com.xingkeqi.btlogger.BtLoggerApplication
 import com.xingkeqi.btlogger.MainActivity
 import com.xingkeqi.btlogger.R
 import com.xingkeqi.btlogger.data.Device
 import com.xingkeqi.btlogger.data.DeviceConnectionRecord
 import com.xingkeqi.btlogger.data.DeviceDao
 import com.xingkeqi.btlogger.data.MessageEvent
+import com.xingkeqi.btlogger.data.RecordEventType
 import com.xingkeqi.btlogger.data.RecordDao
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
@@ -33,6 +34,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import org.greenrobot.eventbus.EventBus
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 
 /**
@@ -47,6 +49,7 @@ import javax.inject.Inject
 class BtLoggerForegroundService : Service() {
 
     private val tag = "BtLoggerService"
+    private val latestCodecSnapshots = ConcurrentHashMap<String, CodecSnapshot>()
 
     @Inject
     lateinit var deviceDao: DeviceDao
@@ -59,20 +62,39 @@ class BtLoggerForegroundService : Service() {
     private val btReceiver = object : BroadcastReceiver() {
         @SuppressLint("MissingPermission")
         override fun onReceive(context: Context, intent: Intent) {
-            if (intent.action != BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED) return
+            when (intent.action) {
+                BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED -> {
+                    val state = intent.getIntExtra(BluetoothProfile.EXTRA_STATE, -1)
+                    if (state != BluetoothProfile.STATE_CONNECTED && state != BluetoothProfile.STATE_DISCONNECTED) {
+                        return
+                    }
 
-            val state = intent.getIntExtra(BluetoothProfile.EXTRA_STATE, -1)
-            if (state != BluetoothProfile.STATE_CONNECTED && state != BluetoothProfile.STATE_DISCONNECTED) {
-                return
+                    val bluetoothDevice =
+                        intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
+                    if (bluetoothDevice == null) {
+                        Log.w(tag, "[BtLoggerForegroundService] onReceive -> BluetoothDevice is null")
+                        return
+                    }
+
+                    handleConnectionStateChanged(bluetoothDevice, state)
+                }
+
+                ACTION_A2DP_CODEC_CONFIG_CHANGED -> {
+                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+                        Log.w(tag, "[BtLoggerForegroundService] onReceive -> codec action ignored below API 28")
+                        return
+                    }
+
+                    val bluetoothDevice =
+                        intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
+                    if (bluetoothDevice == null) {
+                        Log.w(tag, "[BtLoggerForegroundService] onReceive -> codec device is null")
+                        return
+                    }
+
+                    handleCodecConfigChanged(bluetoothDevice, intent)
+                }
             }
-
-            val bluetoothDevice = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
-            if (bluetoothDevice == null) {
-                Log.w(tag, "onReceive: BluetoothDevice is null")
-                return
-            }
-
-            handleConnectionStateChanged(bluetoothDevice, state)
         }
     }
 
@@ -81,7 +103,10 @@ class BtLoggerForegroundService : Service() {
         Log.i(tag, "onCreate: 前台服务启动")
 
         // 动态注册蓝牙广播接收器
-        val intentFilter = IntentFilter(BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED)
+        val intentFilter = IntentFilter().apply {
+            addAction(BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED)
+            addAction(ACTION_A2DP_CODEC_CONFIG_CHANGED)
+        }
         registerReceiver(btReceiver, intentFilter)
         Log.i(tag, "onCreate: 已注册蓝牙广播接收器")
     }
@@ -130,44 +155,129 @@ class BtLoggerForegroundService : Service() {
         } else {
             BluetoothA2dp.STATE_DISCONNECTED
         }
-
-        Log.i(tag, "[A2DP] ${if (isConnected) "已连接" else "已断开"} $name[$address], " +
-                "音量：$volume, 电量：$batteryLevel")
-
-        ToastUtils.showLong("$name - ${if (isConnected) "已连接" else "已断开"}")
-
-        val device = Device(
-            mac = address,
-            name = name,
-            bondState = bondState,
-            rssi = null, // 连接状态变化时无法获取 RSSI
-            alias = alias,
-            deviceType = type,
-            uuids = uuids?.joinToString() ?: ""
-        )
-
-        val record = DeviceConnectionRecord(
-            deviceMac = address,
-            timestamp = now,
-            connectState = connectStatus,
-            batteryLevel = batteryLevel,
-            isPlaying = isPlaying,
-            volume = volume
-        )
-
-        // 直接保存到数据库
         serviceScope.launch {
-            try {
-                deviceDao.insert(device)
-                recordDao.insert(record)
-                Log.d(tag, "数据已保存: $address, state=$connectStatus")
-            } catch (e: Exception) {
-                Log.e(tag, "保存数据失败", e)
-            }
+            val codecSnapshot = resolveCodecSnapshot(address)
+            val device = Device(
+                mac = address,
+                name = name,
+                bondState = bondState,
+                rssi = null,
+                alias = alias,
+                deviceType = type,
+                uuids = uuids?.joinToString() ?: "",
+                latestPhoneSupportedCodecs = codecSnapshot.phoneSupportedCodecs,
+                latestNegotiableCodecs = codecSnapshot.negotiableCodecs,
+                latestActiveCodec = codecSnapshot.activeCodec,
+                latestCodecUpdatedAt = codecSnapshot.updatedAt
+            )
+
+            val record = DeviceConnectionRecord(
+                deviceMac = address,
+                timestamp = now,
+                connectState = connectStatus,
+                batteryLevel = batteryLevel,
+                isPlaying = isPlaying,
+                volume = volume,
+                eventType = if (isConnected) RecordEventType.CONNECTED else RecordEventType.DISCONNECTED,
+                phoneSupportedCodecs = codecSnapshot.phoneSupportedCodecs,
+                negotiableCodecs = codecSnapshot.negotiableCodecs,
+                activeCodec = codecSnapshot.activeCodec
+            )
+
+            Log.i(
+                tag,
+                "[BtLoggerForegroundService] handleConnectionStateChanged -> state=${record.eventType}, device=$name[$address], activeCodec=${codecSnapshot.activeCodec}, battery=$batteryLevel, volume=$volume"
+            )
+            ToastUtils.showLong("$name - ${if (isConnected) "已连接" else "已断开"}")
+            persistDeviceAndRecord(device, record)
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.P)
+    @SuppressLint("MissingPermission")
+    private fun handleCodecConfigChanged(bluetoothDevice: BluetoothDevice, intent: Intent) {
+        val snapshot = BluetoothCodecFormatter.parseCodecStatus(intent)
+        if (snapshot == null) {
+            Log.w(
+                tag,
+                "[BtLoggerForegroundService] handleCodecConfigChanged -> codec status missing for ${bluetoothDevice.address}"
+            )
+            return
         }
 
-        // 同时发送 EventBus 通知 UI 更新
-        EventBus.getDefault().post(MessageEvent("ADD_RECORD", device, record))
+        val timestamp = System.currentTimeMillis()
+        val resolvedSnapshot = snapshot.copy(updatedAt = timestamp)
+        latestCodecSnapshots[bluetoothDevice.address] = resolvedSnapshot
+
+        serviceScope.launch {
+            val existingDevice = deviceDao.getDeviceByMacSnapshot(bluetoothDevice.address)
+            val device = Device(
+                mac = bluetoothDevice.address,
+                name = bluetoothDevice.name ?: existingDevice?.name.orEmpty(),
+                bondState = bluetoothDevice.bondState,
+                rssi = existingDevice?.rssi,
+                alias = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    bluetoothDevice.alias ?: existingDevice?.alias.orEmpty()
+                } else {
+                    existingDevice?.alias.orEmpty()
+                },
+                deviceType = bluetoothDevice.type,
+                uuids = bluetoothDevice.uuids?.joinToString() ?: existingDevice?.uuids.orEmpty(),
+                latestPhoneSupportedCodecs = resolvedSnapshot.phoneSupportedCodecs,
+                latestNegotiableCodecs = resolvedSnapshot.negotiableCodecs,
+                latestActiveCodec = resolvedSnapshot.activeCodec,
+                latestCodecUpdatedAt = resolvedSnapshot.updatedAt
+            )
+            val record = DeviceConnectionRecord(
+                deviceMac = bluetoothDevice.address,
+                timestamp = timestamp,
+                connectState = BluetoothA2dp.STATE_CONNECTED,
+                batteryLevel = getBatteryLevel(),
+                volume = getCurrVolume(),
+                isPlaying = isPlaying(),
+                eventType = RecordEventType.CODEC_CHANGED,
+                phoneSupportedCodecs = resolvedSnapshot.phoneSupportedCodecs,
+                negotiableCodecs = resolvedSnapshot.negotiableCodecs,
+                activeCodec = resolvedSnapshot.activeCodec
+            )
+
+            Log.i(
+                tag,
+                "[BtLoggerForegroundService] handleCodecConfigChanged -> device=${device.name}[${device.mac}], activeCodec=${resolvedSnapshot.activeCodec}, negotiable=${resolvedSnapshot.negotiableCodecs}"
+            )
+            persistDeviceAndRecord(device, record)
+        }
+    }
+
+    private suspend fun resolveCodecSnapshot(address: String): CodecSnapshot {
+        latestCodecSnapshots[address]?.let { return it }
+        val existingDevice = deviceDao.getDeviceByMacSnapshot(address) ?: return BluetoothCodecFormatter.emptySnapshot()
+        return CodecSnapshot(
+            phoneSupportedCodecs = existingDevice.latestPhoneSupportedCodecs,
+            negotiableCodecs = existingDevice.latestNegotiableCodecs,
+            activeCodec = existingDevice.latestActiveCodec,
+            updatedAt = existingDevice.latestCodecUpdatedAt
+        ).also {
+            latestCodecSnapshots[address] = it
+        }
+    }
+
+    private suspend fun persistDeviceAndRecord(device: Device, record: DeviceConnectionRecord) {
+        try {
+            deviceDao.insert(device)
+            recordDao.insert(record)
+            Log.d(
+                tag,
+                "[BtLoggerForegroundService] persistDeviceAndRecord -> saved ${record.eventType} for ${device.mac}"
+            )
+            EventBus.getDefault().post(MessageEvent("ADD_RECORD", device, record))
+        } catch (e: Exception) {
+            Log.e(
+                tag,
+                "[BtLoggerForegroundService] persistDeviceAndRecord -> failed for ${device.mac}",
+                e
+            )
+        }
     }
 
     private fun createNotification(): Notification {

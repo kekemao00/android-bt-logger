@@ -1,11 +1,10 @@
 package com.xingkeqi.btlogger.utils
 
 import android.bluetooth.BluetoothDevice
-import androidx.compose.ui.text.toLowerCase
 import com.blankj.utilcode.util.TimeUtils
-import com.blankj.utilcode.util.ToastUtils
 import com.xingkeqi.btlogger.BtLoggerApplication
 import com.xingkeqi.btlogger.data.DeviceInfo
+import com.xingkeqi.btlogger.data.RecordEventType
 import com.xingkeqi.btlogger.data.RecordInfo
 import jxl.Workbook
 import jxl.write.Label
@@ -48,6 +47,9 @@ fun saveDataToSheet(
     val labelBatteryLevel = Label(7, 0, "手机电量")
     val labelIsPlaying = Label(8, 0, "正在播放")
     val labelUuid = Label(9, 0, "UUID")
+    val labelPhoneCodecs = Label(10, 0, "手机支持编解码")
+    val labelNegotiableCodecs = Label(11, 0, "双方可用编解码")
+    val labelActiveCodec = Label(12, 0, "当前使用编解码")
 
     sheet.addCell(labelName)
     sheet.addCell(labelAlias)
@@ -59,6 +61,9 @@ fun saveDataToSheet(
     sheet.addCell(labelBatteryLevel)
     sheet.addCell(labelIsPlaying)
     sheet.addCell(labelUuid)
+    sheet.addCell(labelPhoneCodecs)
+    sheet.addCell(labelNegotiableCodecs)
+    sheet.addCell(labelActiveCodec)
 
 // 迭代数据并将其添加到表格中
     for (i in records.indices) {
@@ -84,10 +89,13 @@ fun saveDataToSheet(
                 else -> "其他"
             }
         )
-        val connState = Label(6, i + 1, if (item.connectState == 2) "已连接" else "已断开")
+        val connState = Label(6, i + 1, getRecordEventLabel(item))
         val batteryLevel = Label(7, i + 1, item.batteryLevel.toString())
         val isPlaying = Label(8, i + 1, if (item.isPlaying == 1) "是" else "否")
         val uuids = Label(9, i + 1, item.uuids)
+        val phoneSupportedCodecs = Label(10, i + 1, item.phoneSupportedCodecs)
+        val negotiableCodecs = Label(11, i + 1, item.negotiableCodecs)
+        val activeCodec = Label(12, i + 1, item.activeCodec)
 
         sheet.addCell(name)
         sheet.addCell(alias)
@@ -99,6 +107,9 @@ fun saveDataToSheet(
         sheet.addCell(batteryLevel)
         sheet.addCell(isPlaying)
         sheet.addCell(uuids)
+        sheet.addCell(phoneSupportedCodecs)
+        sheet.addCell(negotiableCodecs)
+        sheet.addCell(activeCodec)
     }
 
 // 将工作簿保存为Excel文件
@@ -113,4 +124,13 @@ private fun getCurrentDateTime(): String {
     val sdf = SimpleDateFormat("yyyy_MM_dd_HH_mm_ss", Locale.getDefault())
     val currentDate = Date()
     return sdf.format(currentDate)
+}
+
+private fun getRecordEventLabel(record: RecordInfo): String {
+    return when (record.eventType) {
+        RecordEventType.CONNECTED -> "已连接"
+        RecordEventType.DISCONNECTED -> "已断开"
+        RecordEventType.CODEC_CHANGED -> "编解码切换"
+        else -> "未知事件"
+    }
 }

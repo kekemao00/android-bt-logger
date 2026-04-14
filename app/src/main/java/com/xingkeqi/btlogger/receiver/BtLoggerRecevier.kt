@@ -18,9 +18,12 @@ import android.util.Log
 import com.blankj.utilcode.util.ToastUtils
 import com.blankj.utilcode.util.VolumeUtils
 import com.xingkeqi.btlogger.BtLoggerApplication
+import com.xingkeqi.btlogger.data.CODEC_LIST_UNAVAILABLE
+import com.xingkeqi.btlogger.data.CODEC_UNKNOWN
 import com.xingkeqi.btlogger.data.Device
 import com.xingkeqi.btlogger.data.DeviceConnectionRecord
 import com.xingkeqi.btlogger.data.MessageEvent
+import com.xingkeqi.btlogger.data.RecordEventType
 import org.greenrobot.eventbus.EventBus
 
 
@@ -120,7 +123,11 @@ class BtLoggerReceiver : BroadcastReceiver() {
             connectState = connectStatus,
             batteryLevel = batteryLevel,
             isPlaying = isPlaying,
-            volume = volume
+            volume = volume,
+            eventType = if (isConnected) RecordEventType.CONNECTED else RecordEventType.DISCONNECTED,
+            phoneSupportedCodecs = CODEC_LIST_UNAVAILABLE,
+            negotiableCodecs = CODEC_LIST_UNAVAILABLE,
+            activeCodec = CODEC_UNKNOWN
         )
 
         // 直接发送事件，移除延迟保存机制以避免数据丢失

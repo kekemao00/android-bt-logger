@@ -13,7 +13,7 @@ import androidx.room.RoomDatabase
  */
 @Database(
     entities = [Device::class, DeviceConnectionRecord::class],
-    version = 4
+    version = 5
 )
 abstract class BtLoggerDatabase : RoomDatabase() {
     abstract fun deviceDao(): DeviceDao

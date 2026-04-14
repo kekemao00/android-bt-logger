@@ -94,8 +94,10 @@ import com.blankj.utilcode.util.AppUtils
 import com.blankj.utilcode.util.TimeUtils
 import com.blankj.utilcode.util.ToastUtils
 import com.blankj.utilcode.util.VolumeUtils
+import com.xingkeqi.btlogger.data.CODEC_UNKNOWN
 import com.xingkeqi.btlogger.data.DeviceInfo
 import com.xingkeqi.btlogger.data.MessageEvent
+import com.xingkeqi.btlogger.data.RecordEventType
 import com.xingkeqi.btlogger.data.RecordInfo
 import com.xingkeqi.btlogger.receiver.getCurrVolume
 import com.xingkeqi.btlogger.service.BtLoggerForegroundService
@@ -194,7 +196,11 @@ class MainActivity : ComponentActivity() {
         )
         if (event.message == "ADD_RECORD") {
             // 数据已由前台服务保存，此处仅处理音量调整
-            if (viewModel.customVolumeSwitch.value == true && event.record.connectState == BluetoothA2dp.STATE_CONNECTED) {
+            if (
+                viewModel.customVolumeSwitch.value == true &&
+                event.record.eventType == RecordEventType.CONNECTED &&
+                event.record.connectState == BluetoothA2dp.STATE_CONNECTED
+            ) {
                 VolumeUtils.setVolume(
                     AudioManager.STREAM_MUSIC,
                     ((viewModel.presetTestVolume.toFloat() / 100) * VolumeUtils.getMaxVolume(
@@ -661,7 +667,7 @@ fun RecordCards(
                 // 统计卡片
                 StatCard(
                     items = listOf(
-                        StatItem("连接次数", "${records.count { it?.connectState == 2 }}次"),
+                        StatItem("连接次数", "${records.count { it?.eventType == RecordEventType.CONNECTED }}次"),
                         StatItem("设备类型", when (latestRecord?.deviceType) {
                             BluetoothDevice.DEVICE_TYPE_CLASSIC -> "经典"
                             BluetoothDevice.DEVICE_TYPE_LE -> "低功耗"
@@ -674,6 +680,14 @@ fun RecordCards(
                             else -> "未配对"
                         })
                     )
+                )
+
+                Spacer(modifier = Modifier.height(Dimens.spacingMd))
+
+                CodecInfoSection(
+                    phoneSupportedCodecs = latestRecord?.phoneSupportedCodecs ?: "",
+                    negotiableCodecs = latestRecord?.negotiableCodecs ?: "",
+                    activeCodec = latestRecord?.activeCodec ?: CODEC_UNKNOWN
                 )
 
                 Spacer(modifier = Modifier.height(Dimens.spacingMd))
@@ -714,6 +728,7 @@ fun RecordItem(modifier: Modifier = Modifier, record: RecordInfo?, viewModel: Ma
     val context = LocalContext.current
     val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
     val showDialogDelItem = remember { mutableStateOf(false) }
+    val isCodecChanged = record?.eventType == RecordEventType.CODEC_CHANGED
     val isConnected = record?.connectState == 2
 
     ElevatedCard(modifier = modifier
@@ -730,7 +745,9 @@ fun RecordItem(modifier: Modifier = Modifier, record: RecordInfo?, viewModel: Ma
             showDialogDelItem.value = true
         }) {},
         colors = CardDefaults.cardColors(
-            containerColor = if (isConnected) {
+            containerColor = if (isCodecChanged) {
+                MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.35f)
+            } else if (isConnected) {
                 if (isSystemInDarkTheme()) ConnectedGreenDark else ConnectedGreenLight
             } else MaterialTheme.colorScheme.surface,
         )
@@ -740,7 +757,7 @@ fun RecordItem(modifier: Modifier = Modifier, record: RecordInfo?, viewModel: Ma
             ShowDialog(
                 openDialog = showDialogDelItem,
                 title = "删除此条记录？",
-                content = "确定要删除 ${record?.name} 在 ${TimeUtils.millis2String(record?.timestamp ?: 0)} 的【${if (isConnected) "连接" else "断开"}】记录吗? 删除的数据将无法恢复，是否继续？",
+                content = "确定要删除 ${record?.name} 在 ${TimeUtils.millis2String(record?.timestamp ?: 0)} 的【${record.getRecordEventLabel()}】记录吗? 删除的数据将无法恢复，是否继续？",
                 onConfirm = {
                     showDialogDelItem.value = false
                     viewModel.deleteRecordById(record?.id ?: -1)
@@ -761,12 +778,25 @@ fun RecordItem(modifier: Modifier = Modifier, record: RecordInfo?, viewModel: Ma
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    ConnectionStatusIndicator(isConnected = isConnected)
-                    Spacer(modifier = Modifier.width(Dimens.spacingSm))
-                    Text(
-                        style = MaterialTheme.typography.titleMedium,
-                        text = if (isConnected) "蓝牙已连接" else "蓝牙已断开"
-                    )
+                    if (isCodecChanged) {
+                        Icon(
+                            imageVector = Icons.Filled.Settings,
+                            contentDescription = "编解码切换",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.width(Dimens.spacingSm))
+                        Text(
+                            style = MaterialTheme.typography.titleMedium,
+                            text = "编解码切换"
+                        )
+                    } else {
+                        ConnectionStatusIndicator(isConnected = isConnected)
+                        Spacer(modifier = Modifier.width(Dimens.spacingSm))
+                        Text(
+                            style = MaterialTheme.typography.titleMedium,
+                            text = if (isConnected) "蓝牙已连接" else "蓝牙已断开"
+                        )
+                    }
                 }
                 Text(
                     style = MaterialTheme.typography.labelSmall,
@@ -813,7 +843,9 @@ fun RecordItem(modifier: Modifier = Modifier, record: RecordInfo?, viewModel: Ma
             Spacer(modifier = Modifier.height(Dimens.spacingSm))
 
             // 第三行：时长信息
-            val durationText = if (record?.timestamp == record?.lastRecordTime) {
+            val durationText = if (isCodecChanged) {
+                "当前使用：${record?.activeCodec ?: CODEC_UNKNOWN}"
+            } else if (record?.timestamp == record?.lastRecordTime) {
                 "首条记录"
             } else {
                 val duration = getDurationString((record?.timestamp ?: 0) - (record?.lastRecordTime ?: 0))
@@ -826,6 +858,22 @@ fun RecordItem(modifier: Modifier = Modifier, record: RecordInfo?, viewModel: Ma
                 fontWeight = if (!isConnected) FontWeight.Medium else FontWeight.Normal,
                 text = durationText
             )
+
+            Spacer(modifier = Modifier.height(Dimens.spacingSm))
+
+            if (isCodecChanged) {
+                CodecInfoSection(
+                    phoneSupportedCodecs = record?.phoneSupportedCodecs ?: "",
+                    negotiableCodecs = record?.negotiableCodecs ?: "",
+                    activeCodec = record?.activeCodec ?: CODEC_UNKNOWN
+                )
+            } else {
+                Text(
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline,
+                    text = "当前编解码：${record?.activeCodec ?: CODEC_UNKNOWN}"
+                )
+            }
         }
     }
 }
@@ -1014,6 +1062,58 @@ fun UpdateDialog(onDismiss: () -> Unit, viewModel: MainViewModel) {
             Button(onClick = onDismiss) {
                 Text(text = "稍后再说")
             }
+        }
+    )
+}
+
+private fun RecordInfo?.getRecordEventLabel(): String {
+    return when (this?.eventType) {
+        RecordEventType.CONNECTED -> "连接"
+        RecordEventType.DISCONNECTED -> "断开"
+        RecordEventType.CODEC_CHANGED -> "编解码切换"
+        else -> "未知事件"
+    }
+}
+
+@Composable
+private fun CodecInfoSection(
+    phoneSupportedCodecs: String,
+    negotiableCodecs: String,
+    activeCodec: String,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        shape = RoundedCornerShape(Dimens.cardCornerRadius),
+        modifier = modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(Dimens.cardPadding)
+        ) {
+            CodecInfoLine(label = "手机支持", value = phoneSupportedCodecs)
+            Spacer(modifier = Modifier.height(Dimens.spacingXs))
+            CodecInfoLine(label = "双方可用", value = negotiableCodecs)
+            Spacer(modifier = Modifier.height(Dimens.spacingXs))
+            CodecInfoLine(label = "当前使用", value = activeCodec)
+        }
+    }
+}
+
+@Composable
+private fun CodecInfoLine(label: String, value: String) {
+    Text(
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurface,
+        text = buildAnnotatedString {
+            withStyle(
+                SpanStyle(
+                    color = MaterialTheme.colorScheme.outline,
+                    fontWeight = FontWeight.Medium
+                )
+            ) {
+                append("$label：")
+            }
+            append(if (value.isBlank()) CODEC_UNKNOWN else value)
         }
     )
 }

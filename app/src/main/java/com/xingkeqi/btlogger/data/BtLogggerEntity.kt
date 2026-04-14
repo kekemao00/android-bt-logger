@@ -1,20 +1,28 @@
 package com.xingkeqi.btlogger.data
 
-import android.os.ParcelUuid
-import android.os.Parcelable
 import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
-import java.util.Date
-import javax.crypto.Mac
+
+const val CODEC_LIST_UNAVAILABLE = "不可用"
+const val CODEC_UNKNOWN = "未知"
+
+object RecordEventType {
+    const val CONNECTED = "CONNECTED"
+    const val DISCONNECTED = "DISCONNECTED"
+    const val CODEC_CHANGED = "CODEC_CHANGED"
+}
 
 data class DeviceInfo(
     val mac: String = "",
     val name: String = "",
     val deviceType: Int = -1,
     val uuids: String = "",
+    val latestPhoneSupportedCodecs: String = CODEC_LIST_UNAVAILABLE,
+    val latestNegotiableCodecs: String = CODEC_LIST_UNAVAILABLE,
+    val latestActiveCodec: String = CODEC_UNKNOWN,
     val firstRecordTime: Long = 0,
     val lastRecordTime: Long = 0,
     val connectState: Int = 0
@@ -35,6 +43,10 @@ data class RecordInfo(
     val isPlaying: Int = 0,
     // 手机电量（0~100）
     val batteryLevel: Int = 0,
+    val eventType: String = RecordEventType.CONNECTED,
+    val phoneSupportedCodecs: String = CODEC_LIST_UNAVAILABLE,
+    val negotiableCodecs: String = CODEC_LIST_UNAVAILABLE,
+    val activeCodec: String = CODEC_UNKNOWN,
 
     val deviceType: Int = -1,
     val uuids: String = "",
@@ -79,7 +91,15 @@ data class Device(
     @ColumnInfo(name = "device_type")
     val deviceType: Int,
     @ColumnInfo(name = "uuids")
-    val uuids: String
+    val uuids: String,
+    @ColumnInfo(name = "latest_phone_supported_codecs")
+    val latestPhoneSupportedCodecs: String = CODEC_LIST_UNAVAILABLE,
+    @ColumnInfo(name = "latest_negotiable_codecs")
+    val latestNegotiableCodecs: String = CODEC_LIST_UNAVAILABLE,
+    @ColumnInfo(name = "latest_active_codec")
+    val latestActiveCodec: String = CODEC_UNKNOWN,
+    @ColumnInfo(name = "latest_codec_updated_at")
+    val latestCodecUpdatedAt: Long = 0L
 )
 
 /**
@@ -113,5 +133,13 @@ data class DeviceConnectionRecord(
     @ColumnInfo(name = "volume")
     var volume: Int,
     @ColumnInfo(name = "is_playing")
-    val isPlaying: Boolean
+    val isPlaying: Boolean,
+    @ColumnInfo(name = "event_type")
+    val eventType: String = RecordEventType.CONNECTED,
+    @ColumnInfo(name = "phone_supported_codecs")
+    val phoneSupportedCodecs: String = CODEC_LIST_UNAVAILABLE,
+    @ColumnInfo(name = "negotiable_codecs")
+    val negotiableCodecs: String = CODEC_LIST_UNAVAILABLE,
+    @ColumnInfo(name = "active_codec")
+    val activeCodec: String = CODEC_UNKNOWN
 )

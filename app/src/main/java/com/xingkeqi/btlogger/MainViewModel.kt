@@ -1,5 +1,6 @@
 package com.xingkeqi.btlogger
 
+import android.bluetooth.BluetoothA2dp
 import android.util.Log
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
@@ -16,6 +17,7 @@ import com.xingkeqi.btlogger.data.DeviceConnectionRecord
 import com.xingkeqi.btlogger.data.DeviceDao
 import com.xingkeqi.btlogger.data.DeviceInfo
 import com.xingkeqi.btlogger.data.DeviceWithRecordsDao
+import com.xingkeqi.btlogger.data.RecordEventType
 import com.xingkeqi.btlogger.data.RecordDao
 import com.xingkeqi.btlogger.data.RecordInfo
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -60,27 +62,30 @@ class MainViewModel @Inject constructor(
      */
     val recordInfoList: LiveData<List<RecordInfo>> =
         currDevice.switchMap { device ->
-            var lastTimestamp = 0L
+            var lastStateTimestamp = 0L
             var connectionTime = 0L
             var disconnectionTime = 0L
             recordDao.getRecordInfoListByMac(device?.mac ?: "").map { it ->
                 it.sortedBy { it.timestamp }.map {
-                    it.lastRecordTime = if (lastTimestamp < 1) it.timestamp else lastTimestamp
-                    val timeDiff = it.timestamp - (it.lastRecordTime ?: 0)
-                    if (it.connectState == 2) {
-                        disconnectionTime += timeDiff
-                    } else {
-                        connectionTime += timeDiff
+                    val isStateEvent = it.eventType != RecordEventType.CODEC_CHANGED
+                    it.lastRecordTime = if (lastStateTimestamp < 1) it.timestamp else lastStateTimestamp
+                    if (isStateEvent) {
+                        val timeDiff = it.timestamp - (it.lastRecordTime ?: 0)
+                        if (it.connectState == BluetoothA2dp.STATE_CONNECTED) {
+                            disconnectionTime += timeDiff
+                        } else {
+                            connectionTime += timeDiff
+                        }
+                        lastStateTimestamp = it.timestamp
                     }
                     it.totalConnectionTime = connectionTime
                     it.totalDisConnectionTime = disconnectionTime
                     pairTimeDuration.value = Pair(connectionTime, disconnectionTime)
 
-                    lastTimestamp = it.timestamp
                     it
                 }.sortedByDescending { it.timestamp }.also {
                     // 处理完成初始化临时变量，为下次计算做准备
-                    lastTimestamp = 0L
+                    lastStateTimestamp = 0L
                     connectionTime = 0L
                     disconnectionTime = 0L
                 }
