@@ -18,6 +18,7 @@ import com.blankj.utilcode.util.ToastUtils
 import com.xingkeqi.btlogger.BtLoggerApplication
 import com.xingkeqi.btlogger.data.CODEC_LIST_UNAVAILABLE
 import com.xingkeqi.btlogger.data.CODEC_UNKNOWN
+import com.xingkeqi.btlogger.data.DEVICE_BATTERY_LEVEL_UNKNOWN
 import com.xingkeqi.btlogger.data.Device
 import com.xingkeqi.btlogger.data.DeviceConnectionRecord
 import com.xingkeqi.btlogger.data.MessageEvent
@@ -122,6 +123,7 @@ class BtLoggerReceiver : BroadcastReceiver() {
             timestamp = now,
             connectState = connectStatus,
             batteryLevel = batteryLevel,
+            headsetBatteryLevel = DEVICE_BATTERY_LEVEL_UNKNOWN,
             isPlaying = isPlaying,
             volume = volume,
             eventType = if (isConnected) RecordEventType.CONNECTED else RecordEventType.DISCONNECTED,

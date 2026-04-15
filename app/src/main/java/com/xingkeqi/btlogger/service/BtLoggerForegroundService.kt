@@ -6,6 +6,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.bluetooth.BluetoothA2dp
 import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothHeadset
 import android.bluetooth.BluetoothProfile
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -21,17 +22,22 @@ import androidx.core.app.NotificationCompat
 import com.blankj.utilcode.util.ToastUtils
 import com.xingkeqi.btlogger.MainActivity
 import com.xingkeqi.btlogger.R
+import com.xingkeqi.btlogger.data.DEVICE_BATTERY_LEVEL_UNKNOWN
 import com.xingkeqi.btlogger.data.Device
 import com.xingkeqi.btlogger.data.DeviceConnectionRecord
 import com.xingkeqi.btlogger.data.DeviceDao
 import com.xingkeqi.btlogger.data.MessageEvent
 import com.xingkeqi.btlogger.data.RecordEventType
 import com.xingkeqi.btlogger.data.RecordDao
+import com.xingkeqi.btlogger.utils.ACTION_BLUETOOTH_DEVICE_BATTERY_LEVEL_CHANGED
+import com.xingkeqi.btlogger.utils.BluetoothBatteryUtils
+import com.xingkeqi.btlogger.utils.HeadsetBatterySnapshot
 import com.xingkeqi.btlogger.utils.readMediaVolumeSnapshot
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -52,7 +58,24 @@ class BtLoggerForegroundService : Service() {
 
     private val tag = "BtLoggerService"
     private val latestCodecSnapshots = ConcurrentHashMap<String, CodecSnapshot>()
+    private val connectedDevices = ConcurrentHashMap<String, ConnectedDeviceState>()
+    private val latestHeadsetBatteryLevels = ConcurrentHashMap<String, Int>()
+    private val latestPersistedBatterySnapshots = ConcurrentHashMap<String, PersistedBatterySnapshot>()
     private val codecSnapshotMutex = Mutex()
+    private val batterySnapshotMutex = Mutex()
+    private val batteryProbeManager by lazy {
+        BluetoothBatteryProbeManager(
+            context = applicationContext,
+            scope = serviceScope
+        ) { device, snapshot ->
+            serviceScope.launch {
+                handleHeadsetBatteryChanged(device, snapshot)
+            }
+        }
+    }
+
+    @Volatile
+    private var latestPhoneBatteryLevel: Int = 0
 
     @Inject
     lateinit var deviceDao: DeviceDao
@@ -97,32 +120,60 @@ class BtLoggerForegroundService : Service() {
 
                     handleCodecConfigChanged(bluetoothDevice, intent)
                 }
+
+                Intent.ACTION_BATTERY_CHANGED -> {
+                    val phoneBatteryLevel = BluetoothBatteryUtils.extractPhoneBatteryLevel(intent) ?: return
+                    serviceScope.launch {
+                        handlePhoneBatteryChanged(phoneBatteryLevel)
+                    }
+                }
+
+                ACTION_BLUETOOTH_DEVICE_BATTERY_LEVEL_CHANGED,
+                BluetoothHeadset.ACTION_VENDOR_SPECIFIC_HEADSET_EVENT -> {
+                    val bluetoothDevice = BluetoothBatteryUtils.extractBluetoothDevice(intent)
+                    if (bluetoothDevice == null) {
+                        Log.w(
+                            tag,
+                            "[BtLoggerForegroundService] onReceive -> battery device missing for action=${intent.action}"
+                        )
+                        return
+                    }
+
+                    val snapshot = BluetoothBatteryUtils.extractHeadsetBatterySnapshot(intent) ?: return
+                    serviceScope.launch {
+                        handleHeadsetBatteryChanged(bluetoothDevice, snapshot)
+                    }
+                }
             }
         }
     }
 
     override fun onCreate() {
         super.onCreate()
+        latestPhoneBatteryLevel = getPhoneBatteryLevel()
         Log.i(tag, "onCreate: 前台服务启动")
 
-        // 动态注册蓝牙广播接收器
         val intentFilter = IntentFilter().apply {
             addAction(BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED)
             addAction(ACTION_A2DP_CODEC_CONFIG_CHANGED)
+            addAction(Intent.ACTION_BATTERY_CHANGED)
+            addAction(ACTION_BLUETOOTH_DEVICE_BATTERY_LEVEL_CHANGED)
+            addAction(BluetoothHeadset.ACTION_VENDOR_SPECIFIC_HEADSET_EVENT)
         }
         registerReceiver(btReceiver, intentFilter)
-        Log.i(tag, "onCreate: 已注册蓝牙广播接收器")
+        Log.i(tag, "onCreate: 已注册蓝牙与电量广播接收器")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // 启动前台服务
         startForeground(NOTIFICATION_ID, createNotification())
         Log.i(tag, "onStartCommand: 前台服务已启动")
-        return START_STICKY // 服务被杀死后自动重启
+        return START_STICKY
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        batteryProbeManager.stopAll()
+        serviceScope.cancel()
         try {
             unregisterReceiver(btReceiver)
             Log.i(tag, "onDestroy: 已取消注册蓝牙广播接收器")
@@ -134,66 +185,65 @@ class BtLoggerForegroundService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     /**
-     * 处理蓝牙连接状态变化
+     * 连接状态变化必须立即落库，同时把当前已知的耳机电量快照一并写入，避免详情页只显示手机电量。
      */
     @SuppressLint("MissingPermission")
     private fun handleConnectionStateChanged(bluetoothDevice: BluetoothDevice, state: Int) {
-        val name = bluetoothDevice.name ?: ""
         val address = bluetoothDevice.address
-        val type = bluetoothDevice.type
-        val bondState = bluetoothDevice.bondState
-        val uuids = bluetoothDevice.uuids
-        val alias = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            bluetoothDevice.alias ?: ""
-        } else ""
-
-        val isPlaying = isPlaying()
-        val volumeSnapshot = readMediaVolumeSnapshot(this)
-        val volume = volumeSnapshot.percent
-        val now = System.currentTimeMillis()
-        val batteryLevel = getBatteryLevel()
-
+        val deviceState = buildConnectedDeviceState(bluetoothDevice)
         val isConnected = state == BluetoothProfile.STATE_CONNECTED
         val connectStatus = if (isConnected) {
             BluetoothA2dp.STATE_CONNECTED
         } else {
             BluetoothA2dp.STATE_DISCONNECTED
         }
+
+        if (isConnected) {
+            connectedDevices[address] = deviceState
+            BluetoothBatteryUtils.readBatteryLevelReflectively(bluetoothDevice)?.let { snapshot ->
+                latestHeadsetBatteryLevels[address] = snapshot.level
+                Log.i(
+                    tag,
+                    "[BtLoggerForegroundService] handleConnectionStateChanged -> preload reflection battery: device=${bluetoothDevice.name.orEmpty()}[$address], battery=${snapshot.level}"
+                )
+            }
+            batteryProbeManager.startMonitoring(bluetoothDevice)
+        }
+
         serviceScope.launch {
             val codecSnapshot = resolveCodecSnapshot(address)
-            val device = Device(
-                mac = address,
-                name = name,
-                bondState = bondState,
-                rssi = null,
-                alias = alias,
-                deviceType = type,
-                uuids = uuids?.joinToString() ?: "",
-                latestPhoneSupportedCodecs = codecSnapshot.phoneSupportedCodecs,
-                latestNegotiableCodecs = codecSnapshot.negotiableCodecs,
-                latestActiveCodec = codecSnapshot.activeCodec,
-                latestCodecUpdatedAt = codecSnapshot.updatedAt
-            )
-
+            val phoneBatteryLevel = getPhoneBatteryLevel().also { latestPhoneBatteryLevel = it }
+            val headsetBatteryLevel = resolveHeadsetBatteryLevel(address)
+            val volumeSnapshot = readMediaVolumeSnapshot(this@BtLoggerForegroundService)
             val record = DeviceConnectionRecord(
                 deviceMac = address,
-                timestamp = now,
+                timestamp = System.currentTimeMillis(),
                 connectState = connectStatus,
-                batteryLevel = batteryLevel,
-                isPlaying = isPlaying,
-                volume = volume,
+                batteryLevel = phoneBatteryLevel,
+                headsetBatteryLevel = headsetBatteryLevel,
+                isPlaying = isPlaying(),
+                volume = volumeSnapshot.percent,
                 eventType = if (isConnected) RecordEventType.CONNECTED else RecordEventType.DISCONNECTED,
                 phoneSupportedCodecs = codecSnapshot.phoneSupportedCodecs,
                 negotiableCodecs = codecSnapshot.negotiableCodecs,
                 activeCodec = codecSnapshot.activeCodec
             )
+            val device = buildDevice(deviceState, codecSnapshot)
 
             Log.i(
                 tag,
-                "[BtLoggerForegroundService] handleConnectionStateChanged -> state=${record.eventType}, device=$name[$address], activeCodec=${codecSnapshot.activeCodec}, battery=$batteryLevel, volume=$volume(${volumeSnapshot.currentLevel}/${volumeSnapshot.maxLevel}), bluetoothConnected=${volumeSnapshot.hasBluetoothOutput}"
+                "[BtLoggerForegroundService] handleConnectionStateChanged -> state=${record.eventType}, device=${device.name}[${device.mac}], activeCodec=${codecSnapshot.activeCodec}, phoneBattery=$phoneBatteryLevel, headsetBattery=$headsetBatteryLevel, volume=${volumeSnapshot.percent}(${volumeSnapshot.currentLevel}/${volumeSnapshot.maxLevel}), bluetoothConnected=${volumeSnapshot.hasBluetoothOutput}"
             )
-            ToastUtils.showLong("$name - ${if (isConnected) "已连接" else "已断开"}")
-            persistDeviceAndRecord(device, record)
+            ToastUtils.showLong("${device.name} - ${if (isConnected) "已连接" else "已断开"}")
+            if (persistDeviceAndRecord(device, record)) {
+                rememberPersistedBatterySnapshot(address, phoneBatteryLevel, headsetBatteryLevel)
+            }
+
+            if (!isConnected) {
+                batteryProbeManager.stopMonitoring(address)
+                connectedDevices.remove(address)
+                latestPersistedBatterySnapshots.remove(address)
+            }
         }
     }
 
@@ -231,22 +281,13 @@ class BtLoggerForegroundService : Service() {
                 }
 
                 val existingDevice = deviceDao.getDeviceByMacSnapshot(address)
-                val device = Device(
-                    mac = address,
-                    name = bluetoothDevice.name ?: existingDevice?.name.orEmpty(),
-                    bondState = bluetoothDevice.bondState,
-                    rssi = existingDevice?.rssi,
-                    alias = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                        bluetoothDevice.alias ?: existingDevice?.alias.orEmpty()
-                    } else {
-                        existingDevice?.alias.orEmpty()
-                    },
-                    deviceType = bluetoothDevice.type,
-                    uuids = bluetoothDevice.uuids?.joinToString() ?: existingDevice?.uuids.orEmpty(),
-                    latestPhoneSupportedCodecs = resolvedSnapshot.phoneSupportedCodecs,
-                    latestNegotiableCodecs = resolvedSnapshot.negotiableCodecs,
-                    latestActiveCodec = resolvedSnapshot.activeCodec,
-                    latestCodecUpdatedAt = resolvedSnapshot.updatedAt
+                val deviceState = buildConnectedDeviceState(bluetoothDevice, existingDevice)
+                connectedDevices[address] = deviceState
+                batteryProbeManager.startMonitoring(bluetoothDevice)
+                val device = buildDevice(
+                    deviceState = deviceState,
+                    codecSnapshot = resolvedSnapshot,
+                    fallbackRssi = existingDevice?.rssi
                 )
 
                 if (!shouldPersistHistory) {
@@ -261,11 +302,14 @@ class BtLoggerForegroundService : Service() {
                 }
 
                 val volumeSnapshot = readMediaVolumeSnapshot(this@BtLoggerForegroundService)
+                val phoneBatteryLevel = getPhoneBatteryLevel().also { latestPhoneBatteryLevel = it }
+                val headsetBatteryLevel = resolveHeadsetBatteryLevel(address)
                 val record = DeviceConnectionRecord(
                     deviceMac = address,
                     timestamp = resolvedSnapshot.updatedAt,
                     connectState = BluetoothA2dp.STATE_CONNECTED,
-                    batteryLevel = getBatteryLevel(),
+                    batteryLevel = phoneBatteryLevel,
+                    headsetBatteryLevel = headsetBatteryLevel,
                     volume = volumeSnapshot.percent,
                     isPlaying = isPlaying(),
                     eventType = RecordEventType.CODEC_CHANGED,
@@ -276,12 +320,127 @@ class BtLoggerForegroundService : Service() {
 
                 Log.i(
                     tag,
-                    "[BtLoggerForegroundService] handleCodecConfigChanged -> persist codec change: device=${device.name}[${device.mac}], activeCodec=${previousSnapshot.activeCodec} -> ${resolvedSnapshot.activeCodec}, negotiable=${resolvedSnapshot.negotiableCodecs}, volume=${volumeSnapshot.percent}(${volumeSnapshot.currentLevel}/${volumeSnapshot.maxLevel}), bluetoothConnected=${volumeSnapshot.hasBluetoothOutput}"
+                    "[BtLoggerForegroundService] handleCodecConfigChanged -> persist codec change: device=${device.name}[${device.mac}], activeCodec=${previousSnapshot.activeCodec} -> ${resolvedSnapshot.activeCodec}, negotiable=${resolvedSnapshot.negotiableCodecs}, phoneBattery=$phoneBatteryLevel, headsetBattery=$headsetBatteryLevel, volume=${volumeSnapshot.percent}(${volumeSnapshot.currentLevel}/${volumeSnapshot.maxLevel}), bluetoothConnected=${volumeSnapshot.hasBluetoothOutput}"
                 )
                 if (persistDeviceAndRecord(device, record)) {
                     latestCodecSnapshots[address] = resolvedSnapshot
+                    rememberPersistedBatterySnapshot(address, phoneBatteryLevel, headsetBatteryLevel)
                 }
             }
+        }
+    }
+
+    private suspend fun handlePhoneBatteryChanged(phoneBatteryLevel: Int) {
+        val previousPhoneBatteryLevel = latestPhoneBatteryLevel
+        latestPhoneBatteryLevel = phoneBatteryLevel
+        if (previousPhoneBatteryLevel == phoneBatteryLevel) {
+            Log.d(
+                tag,
+                "[BtLoggerForegroundService] handlePhoneBatteryChanged -> skip duplicate phone battery: level=$phoneBatteryLevel"
+            )
+            return
+        }
+
+        val connectedAddresses = connectedDevices.keys.toList()
+        if (connectedAddresses.isEmpty()) {
+            Log.d(
+                tag,
+                "[BtLoggerForegroundService] handlePhoneBatteryChanged -> no connected device, cache phone battery only: level=$phoneBatteryLevel"
+            )
+            return
+        }
+
+        Log.i(
+            tag,
+            "[BtLoggerForegroundService] handlePhoneBatteryChanged -> phoneBattery=$phoneBatteryLevel, connectedDevices=${connectedAddresses.size}"
+        )
+        batterySnapshotMutex.withLock {
+            connectedAddresses.forEach { address ->
+                persistBatterySample(address = address, reason = "phone-battery")
+            }
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private suspend fun handleHeadsetBatteryChanged(
+        bluetoothDevice: BluetoothDevice,
+        snapshot: HeadsetBatterySnapshot
+    ) {
+        val address = bluetoothDevice.address
+        val previousHeadsetBatteryLevel = latestHeadsetBatteryLevels.put(address, snapshot.level)
+        if (previousHeadsetBatteryLevel == snapshot.level) {
+            Log.d(
+                tag,
+                "[BtLoggerForegroundService] handleHeadsetBatteryChanged -> skip duplicate headset battery: device=${bluetoothDevice.name.orEmpty()}[$address], level=${snapshot.level}, source=${snapshot.source}"
+            )
+            return
+        }
+
+        Log.i(
+            tag,
+            "[BtLoggerForegroundService] handleHeadsetBatteryChanged -> device=${bluetoothDevice.name.orEmpty()}[$address], battery=${previousHeadsetBatteryLevel ?: DEVICE_BATTERY_LEVEL_UNKNOWN} -> ${snapshot.level}, source=${snapshot.source}"
+        )
+
+        if (!connectedDevices.containsKey(address)) {
+            Log.d(
+                tag,
+                "[BtLoggerForegroundService] handleHeadsetBatteryChanged -> device not tracked as connected, cache only: device=$address, level=${snapshot.level}"
+            )
+            return
+        }
+
+        batterySnapshotMutex.withLock {
+            persistBatterySample(address = address, reason = snapshot.source)
+        }
+    }
+
+    private suspend fun persistBatterySample(address: String, reason: String) {
+        val deviceState = connectedDevices[address]
+        if (deviceState == null) {
+            Log.d(
+                tag,
+                "[BtLoggerForegroundService] persistBatterySample -> skip because device is no longer connected: device=$address, reason=$reason"
+            )
+            return
+        }
+
+        val phoneBatteryLevel = latestPhoneBatteryLevel
+        val headsetBatteryLevel = resolveHeadsetBatteryLevel(address)
+        val pendingSnapshot = PersistedBatterySnapshot(
+            phoneBatteryLevel = phoneBatteryLevel,
+            headsetBatteryLevel = headsetBatteryLevel
+        )
+        if (latestPersistedBatterySnapshots[address] == pendingSnapshot) {
+            Log.d(
+                tag,
+                "[BtLoggerForegroundService] persistBatterySample -> skip duplicate persisted snapshot: device=$address, reason=$reason, phoneBattery=$phoneBatteryLevel, headsetBattery=$headsetBatteryLevel"
+            )
+            return
+        }
+
+        val codecSnapshot = resolveCodecSnapshot(address)
+        val volumeSnapshot = readMediaVolumeSnapshot(this)
+        val device = buildDevice(deviceState, codecSnapshot)
+        val record = DeviceConnectionRecord(
+            deviceMac = address,
+            timestamp = System.currentTimeMillis(),
+            connectState = BluetoothA2dp.STATE_CONNECTED,
+            batteryLevel = phoneBatteryLevel,
+            headsetBatteryLevel = headsetBatteryLevel,
+            volume = volumeSnapshot.percent,
+            isPlaying = isPlaying(),
+            eventType = RecordEventType.BATTERY_CHANGED,
+            phoneSupportedCodecs = codecSnapshot.phoneSupportedCodecs,
+            negotiableCodecs = codecSnapshot.negotiableCodecs,
+            activeCodec = codecSnapshot.activeCodec
+        )
+
+        Log.i(
+            tag,
+            "[BtLoggerForegroundService] persistBatterySample -> persist battery sample: device=${device.name}[${device.mac}], reason=$reason, phoneBattery=$phoneBatteryLevel, headsetBattery=$headsetBatteryLevel, activeCodec=${codecSnapshot.activeCodec}, volume=${volumeSnapshot.percent}(${volumeSnapshot.currentLevel}/${volumeSnapshot.maxLevel})"
+        )
+        if (persistDeviceAndRecord(device, record)) {
+            rememberPersistedBatterySnapshot(address, phoneBatteryLevel, headsetBatteryLevel)
         }
     }
 
@@ -298,6 +457,64 @@ class BtLoggerForegroundService : Service() {
         ).also {
             latestCodecSnapshots[address] = it
         }
+    }
+
+    private fun resolveHeadsetBatteryLevel(address: String): Int {
+        return latestHeadsetBatteryLevels[address] ?: DEVICE_BATTERY_LEVEL_UNKNOWN
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun buildConnectedDeviceState(
+        bluetoothDevice: BluetoothDevice,
+        existingDevice: Device? = null
+    ): ConnectedDeviceState {
+        return ConnectedDeviceState(
+            mac = bluetoothDevice.address,
+            name = bluetoothDevice.name ?: existingDevice?.name.orEmpty(),
+            bondState = bluetoothDevice.bondState,
+            alias = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                bluetoothDevice.alias ?: existingDevice?.alias.orEmpty()
+            } else {
+                existingDevice?.alias.orEmpty()
+            },
+            deviceType = if (bluetoothDevice.type != BluetoothDevice.DEVICE_TYPE_UNKNOWN) {
+                bluetoothDevice.type
+            } else {
+                existingDevice?.deviceType ?: BluetoothDevice.DEVICE_TYPE_UNKNOWN
+            },
+            uuids = bluetoothDevice.uuids?.joinToString() ?: existingDevice?.uuids.orEmpty()
+        )
+    }
+
+    private fun buildDevice(
+        deviceState: ConnectedDeviceState,
+        codecSnapshot: CodecSnapshot,
+        fallbackRssi: Short? = null
+    ): Device {
+        return Device(
+            mac = deviceState.mac,
+            name = deviceState.name,
+            bondState = deviceState.bondState,
+            rssi = fallbackRssi,
+            alias = deviceState.alias,
+            deviceType = deviceState.deviceType,
+            uuids = deviceState.uuids,
+            latestPhoneSupportedCodecs = codecSnapshot.phoneSupportedCodecs,
+            latestNegotiableCodecs = codecSnapshot.negotiableCodecs,
+            latestActiveCodec = codecSnapshot.activeCodec,
+            latestCodecUpdatedAt = codecSnapshot.updatedAt
+        )
+    }
+
+    private fun rememberPersistedBatterySnapshot(
+        address: String,
+        phoneBatteryLevel: Int,
+        headsetBatteryLevel: Int
+    ) {
+        latestPersistedBatterySnapshots[address] = PersistedBatterySnapshot(
+            phoneBatteryLevel = phoneBatteryLevel,
+            headsetBatteryLevel = headsetBatteryLevel
+        )
     }
 
     private suspend fun persistDevice(device: Device): Boolean {
@@ -361,9 +578,10 @@ class BtLoggerForegroundService : Service() {
         return audioManager.isMusicActive
     }
 
-    private fun getBatteryLevel(): Int {
+    private fun getPhoneBatteryLevel(): Int {
         val batteryManager = getSystemService(Context.BATTERY_SERVICE) as BatteryManager
         return batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+            .coerceIn(0, 100)
     }
 
     companion object {
@@ -384,3 +602,17 @@ class BtLoggerForegroundService : Service() {
         }
     }
 }
+
+private data class ConnectedDeviceState(
+    val mac: String,
+    val name: String,
+    val bondState: Int,
+    val alias: String,
+    val deviceType: Int,
+    val uuids: String
+)
+
+private data class PersistedBatterySnapshot(
+    val phoneBatteryLevel: Int,
+    val headsetBatteryLevel: Int
+)

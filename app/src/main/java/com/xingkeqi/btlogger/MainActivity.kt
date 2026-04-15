@@ -89,6 +89,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -755,6 +756,8 @@ fun RecordCards(
     records: List<RecordInfo?>,
     viewModel: MainViewModel
 ) {
+    val visibleHistoryRecords = records.filterNot { it?.eventType == RecordEventType.BATTERY_CHANGED }
+
     LazyColumn(modifier = modifier) {
         if (records.isEmpty()) return@LazyColumn
 
@@ -822,10 +825,23 @@ fun RecordCards(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(Dimens.spacingLg)
                 ) {
-                    // 电量
-                    if ((latestRecord?.batteryLevel ?: 0) > 0) {
-                        BatteryIndicator(level = latestRecord?.batteryLevel ?: 0)
-                    }
+                    latestRecord?.batteryLevel
+                        ?.takeIf { it in 0..100 }
+                        ?.let { level ->
+                            BatteryIndicator(
+                                level = level,
+                                label = stringResource(id = R.string.phone_battery_label)
+                            )
+                        }
+
+                    latestRecord?.headsetBatteryLevel
+                        ?.takeIf { it in 0..100 }
+                        ?.let { level ->
+                            BatteryIndicator(
+                                level = level,
+                                label = stringResource(id = R.string.headset_battery_label)
+                            )
+                        }
 
                     // 音量
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -890,11 +906,11 @@ fun RecordCards(
                 modifier = Modifier.padding(start = Dimens.spacingLg, top = Dimens.spacingLg, bottom = Dimens.spacingXs),
                 color = MaterialTheme.colorScheme.outline,
                 style = MaterialTheme.typography.labelMedium,
-                text = "历史记录 (${records.size}条)"
+                text = "历史记录 (${visibleHistoryRecords.size}条)"
             )
         }
 
-        items(records) {
+        items(visibleHistoryRecords) {
             AnimatedVisibility(
                 visible = showRecordState,
                 enter = fadeIn(animationSpec = tween(durationMillis = 300, delayMillis = 150)),
@@ -917,6 +933,7 @@ fun RecordItem(modifier: Modifier = Modifier, record: RecordInfo?, viewModel: Ma
     val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
     val showDialogDelItem = remember { mutableStateOf(false) }
     val isCodecChanged = record?.eventType == RecordEventType.CODEC_CHANGED
+    val isBatteryChanged = record?.eventType == RecordEventType.BATTERY_CHANGED
     val isConnected = record?.connectState == 2
 
     ElevatedCard(modifier = modifier
@@ -935,6 +952,8 @@ fun RecordItem(modifier: Modifier = Modifier, record: RecordInfo?, viewModel: Ma
         colors = CardDefaults.cardColors(
             containerColor = if (isCodecChanged) {
                 MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.35f)
+            } else if (isBatteryChanged) {
+                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
             } else if (isConnected) {
                 if (isSystemInDarkTheme()) ConnectedGreenDark else ConnectedGreenLight
             } else MaterialTheme.colorScheme.surface,
@@ -977,6 +996,17 @@ fun RecordItem(modifier: Modifier = Modifier, record: RecordInfo?, viewModel: Ma
                             style = MaterialTheme.typography.titleMedium,
                             text = "编解码切换"
                         )
+                    } else if (isBatteryChanged) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_battery),
+                            contentDescription = "电量更新",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.width(Dimens.spacingSm))
+                        Text(
+                            style = MaterialTheme.typography.titleMedium,
+                            text = "电量更新"
+                        )
                     } else {
                         ConnectionStatusIndicator(isConnected = isConnected)
                         Spacer(modifier = Modifier.width(Dimens.spacingSm))
@@ -1000,10 +1030,23 @@ fun RecordItem(modifier: Modifier = Modifier, record: RecordInfo?, viewModel: Ma
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(Dimens.spacingMd)
             ) {
-                // 电量
-                if ((record?.batteryLevel ?: 0) > 0) {
-                    BatteryIndicator(level = record?.batteryLevel ?: 0)
-                }
+                record?.batteryLevel
+                    ?.takeIf { it in 0..100 }
+                    ?.let { level ->
+                        BatteryIndicator(
+                            level = level,
+                            label = stringResource(id = R.string.phone_battery_label)
+                        )
+                    }
+
+                record?.headsetBatteryLevel
+                    ?.takeIf { it in 0..100 }
+                    ?.let { level ->
+                        BatteryIndicator(
+                            level = level,
+                            label = stringResource(id = R.string.headset_battery_label)
+                        )
+                    }
 
                 // 音量
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1031,13 +1074,14 @@ fun RecordItem(modifier: Modifier = Modifier, record: RecordInfo?, viewModel: Ma
             Spacer(modifier = Modifier.height(Dimens.spacingSm))
 
             // 第三行：时长信息
-            val durationText = if (isCodecChanged) {
-                "当前使用：${record?.activeCodec ?: CODEC_UNKNOWN}"
-            } else if (record?.timestamp == record?.lastRecordTime) {
-                "首条记录"
-            } else {
-                val duration = getDurationString((record?.timestamp ?: 0) - (record?.lastRecordTime ?: 0))
-                if (isConnected) "断开间隔：$duration" else "本次连接：$duration"
+            val durationText = when {
+                isCodecChanged -> "当前使用：${record?.activeCodec ?: CODEC_UNKNOWN}"
+                isBatteryChanged -> record.getBatteryRecordSummary()
+                record?.timestamp == record?.lastRecordTime -> "首条记录"
+                else -> {
+                    val duration = getDurationString((record?.timestamp ?: 0) - (record?.lastRecordTime ?: 0))
+                    if (isConnected) "断开间隔：$duration" else "本次连接：$duration"
+                }
             }
 
             Text(
@@ -1259,8 +1303,19 @@ private fun RecordInfo?.getRecordEventLabel(): String {
         RecordEventType.CONNECTED -> "连接"
         RecordEventType.DISCONNECTED -> "断开"
         RecordEventType.CODEC_CHANGED -> "编解码切换"
+        RecordEventType.BATTERY_CHANGED -> "电量更新"
         else -> "未知事件"
     }
+}
+
+private fun RecordInfo?.getBatteryRecordSummary(): String {
+    if (this == null) return "电量采样"
+    val phoneBatterySummary = batteryLevel.takeIf { it in 0..100 }?.let { "手机 ${it}%" } ?: "手机 --"
+    val headsetBatterySummary = headsetBatteryLevel
+        .takeIf { it in 0..100 }
+        ?.let { "耳机 ${it}%" }
+        ?: "耳机未上报"
+    return "电量采样：$phoneBatterySummary，$headsetBatterySummary"
 }
 
 @Composable

@@ -8,11 +8,13 @@ import androidx.room.PrimaryKey
 
 const val CODEC_LIST_UNAVAILABLE = "不可用"
 const val CODEC_UNKNOWN = "未知"
+const val DEVICE_BATTERY_LEVEL_UNKNOWN = -1
 
 object RecordEventType {
     const val CONNECTED = "CONNECTED"
     const val DISCONNECTED = "DISCONNECTED"
     const val CODEC_CHANGED = "CODEC_CHANGED"
+    const val BATTERY_CHANGED = "BATTERY_CHANGED"
 }
 
 data class DeviceInfo(
@@ -43,6 +45,8 @@ data class RecordInfo(
     val isPlaying: Int = 0,
     // 手机电量（0~100）
     val batteryLevel: Int = 0,
+    // 耳机电量（0~100，-1 表示当前机型或链路未上报）
+    val headsetBatteryLevel: Int = DEVICE_BATTERY_LEVEL_UNKNOWN,
     val eventType: String = RecordEventType.CONNECTED,
     val phoneSupportedCodecs: String = CODEC_LIST_UNAVAILABLE,
     val negotiableCodecs: String = CODEC_LIST_UNAVAILABLE,
@@ -130,6 +134,8 @@ data class DeviceConnectionRecord(
     val connectState: Int,
     @ColumnInfo(name = "battery_level")
     val batteryLevel: Int,
+    @ColumnInfo(name = "headset_battery_level")
+    val headsetBatteryLevel: Int = DEVICE_BATTERY_LEVEL_UNKNOWN,
     @ColumnInfo(name = "volume")
     var volume: Int,
     @ColumnInfo(name = "is_playing")

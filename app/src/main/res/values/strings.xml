@@ -1,3 +1,7 @@
 <resources>
     <string name="app_name">BtLogger</string>
+    <string name="battery_trend_title">电量趋势</string>
+    <string name="phone_battery_label">手机电量</string>
+    <string name="headset_battery_label">耳机电量</string>
+    <string name="headset_battery_gap_note">耳机电量依赖设备主动上报，未上报的时间段会显示断线。</string>
 </resources>

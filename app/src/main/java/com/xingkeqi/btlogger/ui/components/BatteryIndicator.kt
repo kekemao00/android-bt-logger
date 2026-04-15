@@ -27,7 +27,8 @@ import com.xingkeqi.btlogger.ui.theme.Dimens
 fun BatteryIndicator(
     level: Int,
     modifier: Modifier = Modifier,
-    showText: Boolean = true
+    showText: Boolean = true,
+    label: String? = null
 ) {
     val color = when {
         level < 20 -> BatteryLow
@@ -48,7 +49,14 @@ fun BatteryIndicator(
         if (showText) {
             Spacer(modifier = Modifier.width(2.dp))
             Text(
-                text = "$level%",
+                text = buildString {
+                    if (!label.isNullOrBlank()) {
+                        append(label)
+                        append(' ')
+                    }
+                    append(level)
+                    append('%')
+                },
                 style = MaterialTheme.typography.labelSmall,
                 color = color
             )

@@ -90,7 +90,9 @@ class MainViewModel @Inject constructor(
             var disconnectionTime = 0L
             recordDao.getRecordInfoListByMac(device?.mac ?: "").map { it ->
                 it.sortedBy { it.timestamp }.map {
-                    val isStateEvent = it.eventType != RecordEventType.CODEC_CHANGED
+                    val isStateEvent =
+                        it.eventType != RecordEventType.CODEC_CHANGED &&
+                            it.eventType != RecordEventType.BATTERY_CHANGED
                     it.lastRecordTime = if (lastStateTimestamp < 1) it.timestamp else lastStateTimestamp
                     if (isStateEvent) {
                         val timeDiff = it.timestamp - (it.lastRecordTime ?: 0)

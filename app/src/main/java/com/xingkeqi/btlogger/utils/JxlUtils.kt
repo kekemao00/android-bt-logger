@@ -45,11 +45,12 @@ fun saveDataToSheet(
     val labelDeviceType = Label(5, 0, "设备类型")
     val labelConnState = Label(6, 0, "连接状态")
     val labelBatteryLevel = Label(7, 0, "手机电量")
-    val labelIsPlaying = Label(8, 0, "正在播放")
-    val labelUuid = Label(9, 0, "UUID")
-    val labelPhoneCodecs = Label(10, 0, "手机支持编解码")
-    val labelNegotiableCodecs = Label(11, 0, "双方可用编解码")
-    val labelActiveCodec = Label(12, 0, "当前使用编解码")
+    val labelHeadsetBatteryLevel = Label(8, 0, "耳机电量")
+    val labelIsPlaying = Label(9, 0, "正在播放")
+    val labelUuid = Label(10, 0, "UUID")
+    val labelPhoneCodecs = Label(11, 0, "手机支持编解码")
+    val labelNegotiableCodecs = Label(12, 0, "双方可用编解码")
+    val labelActiveCodec = Label(13, 0, "当前使用编解码")
 
     sheet.addCell(labelName)
     sheet.addCell(labelAlias)
@@ -59,6 +60,7 @@ fun saveDataToSheet(
     sheet.addCell(labelDeviceType)
     sheet.addCell(labelConnState)
     sheet.addCell(labelBatteryLevel)
+    sheet.addCell(labelHeadsetBatteryLevel)
     sheet.addCell(labelIsPlaying)
     sheet.addCell(labelUuid)
     sheet.addCell(labelPhoneCodecs)
@@ -91,11 +93,16 @@ fun saveDataToSheet(
         )
         val connState = Label(6, i + 1, getRecordEventLabel(item))
         val batteryLevel = Label(7, i + 1, item.batteryLevel.toString())
-        val isPlaying = Label(8, i + 1, if (item.isPlaying == 1) "是" else "否")
-        val uuids = Label(9, i + 1, item.uuids)
-        val phoneSupportedCodecs = Label(10, i + 1, item.phoneSupportedCodecs)
-        val negotiableCodecs = Label(11, i + 1, item.negotiableCodecs)
-        val activeCodec = Label(12, i + 1, item.activeCodec)
+        val headsetBatteryLevel = Label(
+            8,
+            i + 1,
+            item.headsetBatteryLevel.takeIf { it in 0..100 }?.toString() ?: "未上报"
+        )
+        val isPlaying = Label(9, i + 1, if (item.isPlaying == 1) "是" else "否")
+        val uuids = Label(10, i + 1, item.uuids)
+        val phoneSupportedCodecs = Label(11, i + 1, item.phoneSupportedCodecs)
+        val negotiableCodecs = Label(12, i + 1, item.negotiableCodecs)
+        val activeCodec = Label(13, i + 1, item.activeCodec)
 
         sheet.addCell(name)
         sheet.addCell(alias)
@@ -105,6 +112,7 @@ fun saveDataToSheet(
         sheet.addCell(deviceType)
         sheet.addCell(connState)
         sheet.addCell(batteryLevel)
+        sheet.addCell(headsetBatteryLevel)
         sheet.addCell(isPlaying)
         sheet.addCell(uuids)
         sheet.addCell(phoneSupportedCodecs)
@@ -131,6 +139,7 @@ private fun getRecordEventLabel(record: RecordInfo): String {
         RecordEventType.CONNECTED -> "已连接"
         RecordEventType.DISCONNECTED -> "已断开"
         RecordEventType.CODEC_CHANGED -> "编解码切换"
+        RecordEventType.BATTERY_CHANGED -> "电量更新"
         else -> "未知事件"
     }
 }
