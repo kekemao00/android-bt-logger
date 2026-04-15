@@ -19,7 +19,6 @@ import android.util.Log
 import androidx.annotation.RequiresApi
 import androidx.core.app.NotificationCompat
 import com.blankj.utilcode.util.ToastUtils
-import com.blankj.utilcode.util.VolumeUtils
 import com.xingkeqi.btlogger.MainActivity
 import com.xingkeqi.btlogger.R
 import com.xingkeqi.btlogger.data.Device
@@ -28,6 +27,7 @@ import com.xingkeqi.btlogger.data.DeviceDao
 import com.xingkeqi.btlogger.data.MessageEvent
 import com.xingkeqi.btlogger.data.RecordEventType
 import com.xingkeqi.btlogger.data.RecordDao
+import com.xingkeqi.btlogger.utils.readMediaVolumeSnapshot
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -148,7 +148,8 @@ class BtLoggerForegroundService : Service() {
         } else ""
 
         val isPlaying = isPlaying()
-        val volume = getCurrVolume()
+        val volumeSnapshot = readMediaVolumeSnapshot(this)
+        val volume = volumeSnapshot.percent
         val now = System.currentTimeMillis()
         val batteryLevel = getBatteryLevel()
 
@@ -189,7 +190,7 @@ class BtLoggerForegroundService : Service() {
 
             Log.i(
                 tag,
-                "[BtLoggerForegroundService] handleConnectionStateChanged -> state=${record.eventType}, device=$name[$address], activeCodec=${codecSnapshot.activeCodec}, battery=$batteryLevel, volume=$volume"
+                "[BtLoggerForegroundService] handleConnectionStateChanged -> state=${record.eventType}, device=$name[$address], activeCodec=${codecSnapshot.activeCodec}, battery=$batteryLevel, volume=$volume(${volumeSnapshot.currentLevel}/${volumeSnapshot.maxLevel}), bluetoothConnected=${volumeSnapshot.hasBluetoothOutput}"
             )
             ToastUtils.showLong("$name - ${if (isConnected) "已连接" else "已断开"}")
             persistDeviceAndRecord(device, record)
@@ -259,12 +260,13 @@ class BtLoggerForegroundService : Service() {
                     return@withLock
                 }
 
+                val volumeSnapshot = readMediaVolumeSnapshot(this@BtLoggerForegroundService)
                 val record = DeviceConnectionRecord(
                     deviceMac = address,
                     timestamp = resolvedSnapshot.updatedAt,
                     connectState = BluetoothA2dp.STATE_CONNECTED,
                     batteryLevel = getBatteryLevel(),
-                    volume = getCurrVolume(),
+                    volume = volumeSnapshot.percent,
                     isPlaying = isPlaying(),
                     eventType = RecordEventType.CODEC_CHANGED,
                     phoneSupportedCodecs = resolvedSnapshot.phoneSupportedCodecs,
@@ -274,7 +276,7 @@ class BtLoggerForegroundService : Service() {
 
                 Log.i(
                     tag,
-                    "[BtLoggerForegroundService] handleCodecConfigChanged -> persist codec change: device=${device.name}[${device.mac}], activeCodec=${previousSnapshot.activeCodec} -> ${resolvedSnapshot.activeCodec}, negotiable=${resolvedSnapshot.negotiableCodecs}"
+                    "[BtLoggerForegroundService] handleCodecConfigChanged -> persist codec change: device=${device.name}[${device.mac}], activeCodec=${previousSnapshot.activeCodec} -> ${resolvedSnapshot.activeCodec}, negotiable=${resolvedSnapshot.negotiableCodecs}, volume=${volumeSnapshot.percent}(${volumeSnapshot.currentLevel}/${volumeSnapshot.maxLevel}), bluetoothConnected=${volumeSnapshot.hasBluetoothOutput}"
                 )
                 if (persistDeviceAndRecord(device, record)) {
                     latestCodecSnapshots[address] = resolvedSnapshot
@@ -353,9 +355,6 @@ class BtLoggerForegroundService : Service() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
     }
-
-    private fun getCurrVolume() =
-        (VolumeUtils.getVolume(AudioManager.STREAM_MUSIC) * 100) / VolumeUtils.getMaxVolume(AudioManager.STREAM_MUSIC)
 
     private fun isPlaying(): Boolean {
         val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager

@@ -5,9 +5,15 @@ import android.bluetooth.BluetoothA2dp
 import android.bluetooth.BluetoothDevice
 import android.content.Context
 import android.content.Intent
+import android.database.ContentObserver
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
 import android.media.AudioManager
+import android.media.AudioPlaybackConfiguration
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.provider.Settings
@@ -66,12 +72,14 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -90,16 +98,15 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
+import androidx.lifecycle.lifecycleScope
 import com.blankj.utilcode.util.AppUtils
 import com.blankj.utilcode.util.TimeUtils
 import com.blankj.utilcode.util.ToastUtils
-import com.blankj.utilcode.util.VolumeUtils
 import com.xingkeqi.btlogger.data.CODEC_UNKNOWN
 import com.xingkeqi.btlogger.data.DeviceInfo
 import com.xingkeqi.btlogger.data.MessageEvent
 import com.xingkeqi.btlogger.data.RecordEventType
 import com.xingkeqi.btlogger.data.RecordInfo
-import com.xingkeqi.btlogger.receiver.getCurrVolume
 import com.xingkeqi.btlogger.service.BtLoggerForegroundService
 import com.xingkeqi.btlogger.ui.theme.BtLoggerTheme
 import com.xingkeqi.btlogger.ui.theme.ConnectedGreen
@@ -115,15 +122,21 @@ import com.xingkeqi.btlogger.ui.components.StatCard
 import com.xingkeqi.btlogger.ui.components.StatItem
 import com.xingkeqi.btlogger.ui.components.StatusBadge
 import com.xingkeqi.btlogger.utils.getDurationString
+import com.xingkeqi.btlogger.utils.readMediaVolumeSnapshot
 import com.xingkeqi.btlogger.utils.saveDataToSheet
+import com.xingkeqi.btlogger.utils.setMediaVolumePercent
+import com.xingkeqi.btlogger.utils.shouldApplyFixedVolumeForBluetooth
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.ObsoleteCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.ticker
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import org.greenrobot.eventbus.EventBus
 import org.greenrobot.eventbus.Subscribe
 import org.greenrobot.eventbus.ThreadMode
 import java.util.Calendar
+import kotlin.math.roundToInt
 import kotlin.text.*
 
 @AndroidEntryPoint
@@ -135,6 +148,7 @@ class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
 
     private var bluetoothPermissionGranted by mutableStateOf(false)
+    private var pendingFixedVolumeJob: Job? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         Log.d("@@@", "onCreate: MainActivity")
@@ -177,6 +191,7 @@ class MainActivity : ComponentActivity() {
                 if (bluetoothPermissionGranted) {
                     BtLoggerForegroundService.start(context)
                     Log.i(tag, "onCreate: 权限已授予，启动前台服务")
+                    refreshMediaVolumeSnapshot()
                 }
             }
         }
@@ -195,20 +210,24 @@ class MainActivity : ComponentActivity() {
             "onMessageEvent: msg=${event.message},device=${event.device},record=${event.record}"
         )
         if (event.message == "ADD_RECORD") {
+            val isConnectionEvent =
+                event.record.eventType == RecordEventType.CONNECTED ||
+                    event.record.eventType == RecordEventType.DISCONNECTED
+
             // 数据已由前台服务保存，此处仅处理音量调整
             if (
                 viewModel.customVolumeSwitch.value == true &&
                 event.record.eventType == RecordEventType.CONNECTED &&
                 event.record.connectState == BluetoothA2dp.STATE_CONNECTED
             ) {
-                VolumeUtils.setVolume(
-                    AudioManager.STREAM_MUSIC,
-                    ((viewModel.presetTestVolume.toFloat() / 100) * VolumeUtils.getMaxVolume(
-                        AudioManager.STREAM_MUSIC
-                    )).toInt(),
-                    0x01
-                )
-                Log.i(tag, "onMessageEvent: 已调整音量至 ${viewModel.presetTestVolume}%")
+                scheduleFixedMediaVolumeApply(viewModel.presetTestVolume)
+            } else if (event.record.eventType == RecordEventType.DISCONNECTED) {
+                pendingFixedVolumeJob?.cancel()
+                pendingFixedVolumeJob = null
+            }
+
+            if (isConnectionEvent) {
+                refreshMediaVolumeSnapshot(delayMillis = 350L)
             }
         }
     }
@@ -232,9 +251,15 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        pendingFixedVolumeJob?.cancel()
         // 注意：不停止前台服务，让它继续在后台运行
         // 只有用户主动退出应用时才停止服务
         EventBus.getDefault().unregister(this)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        refreshMediaVolumeSnapshot()
     }
 
     private var lastBackPressTime: Long = 0
@@ -250,6 +275,57 @@ class MainActivity : ComponentActivity() {
         }
         super.onBackPressed()
     }
+
+    private fun refreshMediaVolumeSnapshot(delayMillis: Long = 0L) {
+        lifecycleScope.launch {
+            if (delayMillis > 0) {
+                delay(delayMillis)
+            }
+            val snapshot = readMediaVolumeSnapshot(this@MainActivity)
+            viewModel.updateMediaVolumeSnapshot(snapshot)
+            Log.i(
+                tag,
+                "[MainActivity] refreshMediaVolumeSnapshot -> Route/Volume: bluetoothConnected=${snapshot.hasBluetoothOutput}, playing=${snapshot.isMusicActive}, current=${snapshot.currentLevel}, max=${snapshot.maxLevel}, percent=${snapshot.percent}"
+            )
+        }
+    }
+
+    private fun scheduleFixedMediaVolumeApply(targetPercent: Int) {
+        pendingFixedVolumeJob?.cancel()
+        pendingFixedVolumeJob = lifecycleScope.launch {
+            val maxAttempts = 8
+            repeat(maxAttempts) { attempt ->
+                val snapshot = readMediaVolumeSnapshot(this@MainActivity)
+                val shouldApply = shouldApplyFixedVolumeForBluetooth(
+                    snapshot = snapshot,
+                    attempt = attempt,
+                    maxAttempts = maxAttempts
+                )
+                Log.i(
+                    tag,
+                    "[MainActivity] scheduleFixedMediaVolumeApply -> State: attempt=${attempt + 1}/$maxAttempts, bluetoothConnected=${snapshot.hasBluetoothOutput}, playing=${snapshot.isMusicActive}, current=${snapshot.currentLevel}/${snapshot.maxLevel}(${snapshot.percent}%), target=$targetPercent%"
+                )
+                if (shouldApply) {
+                    setMediaVolumePercent(this@MainActivity, targetPercent)
+                    delay(160L)
+                    val appliedSnapshot = readMediaVolumeSnapshot(this@MainActivity)
+                    viewModel.updateMediaVolumeSnapshot(appliedSnapshot)
+                    if (appliedSnapshot.hasBluetoothOutput && appliedSnapshot.percent == targetPercent) {
+                        Log.i(
+                            tag,
+                            "[MainActivity] scheduleFixedMediaVolumeApply -> Applied: percent=${appliedSnapshot.percent}, playing=${appliedSnapshot.isMusicActive}"
+                        )
+                        return@launch
+                    }
+                }
+                delay(320L)
+            }
+            Log.w(
+                tag,
+                "[MainActivity] scheduleFixedMediaVolumeApply -> Timeout: failed to reach target=$targetPercent%"
+            )
+        }
+    }
 }
 
 @SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
@@ -258,12 +334,29 @@ class MainActivity : ComponentActivity() {
 fun MainScreen(viewModel: MainViewModel) {
     val context = LocalContext.current
     val openDialog = remember { mutableStateOf(false) }
+    val mediaVolumeSnapshot =
+        viewModel.mediaVolumeSnapshot.observeAsState().value ?: readMediaVolumeSnapshot(context)
 
     Column {
 
         var showDialog by remember { mutableStateOf(false) }
+        var dialogVolumePercent by remember { mutableStateOf(viewModel.presetTestVolume.toFloat()) }
 
-        var stepSliderPosition by remember { mutableStateOf(viewModel.presetTestVolume.toFloat()) }
+        ObserveMediaVolumeDialog(
+            enabled = showDialog,
+            onSnapshotChanged = { snapshot ->
+                viewModel.updateMediaVolumeSnapshot(snapshot)
+                dialogVolumePercent = snapshot.percent.toFloat()
+                viewModel.updatePresetTestVolume(snapshot.percent)
+            }
+        )
+
+        LaunchedEffect(showDialog, mediaVolumeSnapshot.percent) {
+            if (showDialog) {
+                dialogVolumePercent = mediaVolumeSnapshot.percent.toFloat()
+            }
+        }
+
         Box(contentAlignment = Alignment.Center) {
             if (showDialog) {
                 AlertDialog(title = {
@@ -296,8 +389,19 @@ fun MainScreen(viewModel: MainViewModel) {
                         ) {
 
                             Text(
-                                text = "连接时固定音量为 " + stepSliderPosition.toInt()
-                                    .toString() + "%"
+                                text = "当前系统媒体音量：${mediaVolumeSnapshot.percent}%"
+                            )
+
+                            Text(
+                                text = "${mediaVolumeSnapshot.routeLabel}（${mediaVolumeSnapshot.currentLevel}/${mediaVolumeSnapshot.maxLevel}，${if (mediaVolumeSnapshot.isMusicActive) "正在播放" else "未播放"}）",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.outline
+                            )
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Text(
+                                text = "连接后固定音量为 ${dialogVolumePercent.roundToInt()}%"
                             )
 
                             Row {
@@ -309,17 +413,25 @@ fun MainScreen(viewModel: MainViewModel) {
                                     contentDescription = "音量图标"
                                 )
                                 Slider(
-                                    value = stepSliderPosition,
-                                    onValueChange = { stepSliderPosition = it },
+                                    value = dialogVolumePercent,
+                                    onValueChange = {
+                                        dialogVolumePercent = it
+                                        val targetPercent = it.roundToInt()
+                                        setMediaVolumePercent(context, targetPercent)
+                                        viewModel.updatePresetTestVolume(targetPercent)
+                                    },
                                     valueRange = 0f..100f,
                                     onValueChangeFinished = {
-                                        // launch some business logic update with the state you hold
-                                        // viewModel.updateSelectedSliderValue(sliderPosition)
-                                        Log.d("@@@", "MainScreen: $stepSliderPosition")
-                                        viewModel.presetTestVolume = stepSliderPosition.toInt()
-
+                                        val snapshot = readMediaVolumeSnapshot(context)
+                                        viewModel.updateMediaVolumeSnapshot(snapshot)
+                                        viewModel.updatePresetTestVolume(snapshot.percent)
+                                        dialogVolumePercent = snapshot.percent.toFloat()
+                                        Log.i(
+                                            "MainScreen",
+                                            "[MainScreen] Slider -> VolumeApplied: percent=${snapshot.percent}, bluetoothConnected=${snapshot.hasBluetoothOutput}, playing=${snapshot.isMusicActive}"
+                                        )
                                     },
-                                    steps = 9,
+                                    steps = 99,
                                     colors = SliderDefaults.colors(
                                         thumbColor = MaterialTheme.colorScheme.secondary,
                                         activeTrackColor = MaterialTheme.colorScheme.secondary
@@ -394,6 +506,10 @@ fun MainScreen(viewModel: MainViewModel) {
                             }
                         }
                         IconButton(onClick = {
+                            val snapshot = readMediaVolumeSnapshot(context)
+                            viewModel.updateMediaVolumeSnapshot(snapshot)
+                            dialogVolumePercent = snapshot.percent.toFloat()
+                            viewModel.updatePresetTestVolume(snapshot.percent)
                             ToastUtils.showShort("设置连接时的音量百分比")
                             showDialog = true
                         }) {
@@ -500,6 +616,78 @@ fun MainScreen(viewModel: MainViewModel) {
             }
         }
 
+    }
+}
+
+@Composable
+private fun ObserveMediaVolumeDialog(
+    enabled: Boolean,
+    onSnapshotChanged: (com.xingkeqi.btlogger.utils.MediaVolumeSnapshot) -> Unit
+) {
+    val context = LocalContext.current
+    val latestCallback = rememberUpdatedState(onSnapshotChanged)
+
+    DisposableEffect(enabled, context) {
+        if (!enabled) {
+            return@DisposableEffect onDispose {}
+        }
+
+        val handler = Handler(Looper.getMainLooper())
+        val notifySnapshotChanged = {
+            latestCallback.value(readMediaVolumeSnapshot(context))
+        }
+        val contentObserver = object : ContentObserver(handler) {
+            override fun onChange(selfChange: Boolean) {
+                notifySnapshotChanged()
+            }
+        }
+        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val audioDeviceCallback = object : AudioDeviceCallback() {
+            override fun onAudioDevicesAdded(addedDevices: Array<AudioDeviceInfo>) {
+                notifySnapshotChanged()
+            }
+
+            override fun onAudioDevicesRemoved(removedDevices: Array<AudioDeviceInfo>) {
+                notifySnapshotChanged()
+            }
+        }
+        val audioPlaybackCallback =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                object : AudioManager.AudioPlaybackCallback() {
+                    override fun onPlaybackConfigChanged(configs: MutableList<AudioPlaybackConfiguration>) {
+                        notifySnapshotChanged()
+                    }
+                }
+            } else {
+                null
+            }
+        val playbackPollingRunnable = object : Runnable {
+            override fun run() {
+                notifySnapshotChanged()
+                handler.postDelayed(this, 400L)
+            }
+        }
+
+        context.contentResolver.registerContentObserver(
+            Settings.System.CONTENT_URI,
+            true,
+            contentObserver
+        )
+        audioManager.registerAudioDeviceCallback(audioDeviceCallback, handler)
+        if (audioPlaybackCallback != null) {
+            audioManager.registerAudioPlaybackCallback(audioPlaybackCallback, handler)
+        }
+        handler.post(playbackPollingRunnable)
+        notifySnapshotChanged()
+
+        onDispose {
+            context.contentResolver.unregisterContentObserver(contentObserver)
+            audioManager.unregisterAudioDeviceCallback(audioDeviceCallback)
+            if (audioPlaybackCallback != null) {
+                audioManager.unregisterAudioPlaybackCallback(audioPlaybackCallback)
+            }
+            handler.removeCallbacks(playbackPollingRunnable)
+        }
     }
 }
 

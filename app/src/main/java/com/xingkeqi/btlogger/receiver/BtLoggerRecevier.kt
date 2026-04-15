@@ -11,12 +11,10 @@ import android.content.Context
 import android.content.Context.BATTERY_SERVICE
 import android.content.Intent
 import android.media.AudioManager
-import android.media.AudioManager.STREAM_MUSIC
 import android.os.BatteryManager
 import android.os.Build
 import android.util.Log
 import com.blankj.utilcode.util.ToastUtils
-import com.blankj.utilcode.util.VolumeUtils
 import com.xingkeqi.btlogger.BtLoggerApplication
 import com.xingkeqi.btlogger.data.CODEC_LIST_UNAVAILABLE
 import com.xingkeqi.btlogger.data.CODEC_UNKNOWN
@@ -24,6 +22,7 @@ import com.xingkeqi.btlogger.data.Device
 import com.xingkeqi.btlogger.data.DeviceConnectionRecord
 import com.xingkeqi.btlogger.data.MessageEvent
 import com.xingkeqi.btlogger.data.RecordEventType
+import com.xingkeqi.btlogger.utils.readMediaVolumeSnapshot
 import org.greenrobot.eventbus.EventBus
 
 
@@ -86,7 +85,8 @@ class BtLoggerReceiver : BroadcastReceiver() {
         }
 
         val isPlaying = isPlaying()
-        val volume = getCurrVolume()
+        val volumeSnapshot = readMediaVolumeSnapshot(BtLoggerApplication.instance)
+        val volume = volumeSnapshot.percent
         val now = System.currentTimeMillis()
         val batteryLevel = getBatteryLevel()
 
@@ -100,7 +100,7 @@ class BtLoggerReceiver : BroadcastReceiver() {
         Log.i(
             tag,
             "[$profileName] ${if (isConnected) "已连接" else "已断开"} $name[$address], " +
-                    "设备类型：$type, 当前音量：$volume, 是否在播放音乐：$isPlaying, " +
+                    "设备类型：$type, 当前音量：$volume(${volumeSnapshot.currentLevel}/${volumeSnapshot.maxLevel}), 蓝牙输出连接：${volumeSnapshot.hasBluetoothOutput}, 是否在播放音乐：$isPlaying, " +
                     "当前手机电量：$batteryLevel, 配对状态：$bondState, " +
                     "uuids=${uuids?.joinToString()}: $now"
         )
@@ -136,9 +136,7 @@ class BtLoggerReceiver : BroadcastReceiver() {
 }
 
 fun getCurrVolume() =
-    (VolumeUtils.getVolume(STREAM_MUSIC) * 100) / VolumeUtils.getMaxVolume(STREAM_MUSIC)
-
-fun setVolume() = VolumeUtils.setVolume(STREAM_MUSIC, 15, 0)
+    readMediaVolumeSnapshot(BtLoggerApplication.instance).percent
 
 fun isPlaying(): Boolean {
     val audioManager =

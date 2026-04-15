@@ -20,6 +20,7 @@ import com.xingkeqi.btlogger.data.DeviceWithRecordsDao
 import com.xingkeqi.btlogger.data.RecordEventType
 import com.xingkeqi.btlogger.data.RecordDao
 import com.xingkeqi.btlogger.data.RecordInfo
+import com.xingkeqi.btlogger.utils.MediaVolumeSnapshot
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.reactivex.android.schedulers.AndroidSchedulers
 import io.reactivex.rxkotlin.subscribeBy
@@ -39,6 +40,8 @@ class MainViewModel @Inject constructor(
     private val deviceWithRecordsDao: DeviceWithRecordsDao
 ) : ViewModel() {
 
+    private val tag = "MainViewModel"
+
     /**
      * 列表，包括当前状态，首次 尾次连接时间
      */
@@ -55,6 +58,26 @@ class MainViewModel @Inject constructor(
     var customVolumeSwitch = MutableLiveData(false)
 
     var presetTestVolume = 60
+
+    val mediaVolumeSnapshot = MutableLiveData(MediaVolumeSnapshot(percent = presetTestVolume))
+
+    fun updateMediaVolumeSnapshot(snapshot: MediaVolumeSnapshot) {
+        Log.i(
+            tag,
+            "[MainViewModel] updateMediaVolumeSnapshot -> Route/Volume: bluetoothConnected=${snapshot.hasBluetoothOutput}, playing=${snapshot.isMusicActive}, current=${snapshot.currentLevel}, max=${snapshot.maxLevel}, percent=${snapshot.percent}"
+        )
+        mediaVolumeSnapshot.value = snapshot
+    }
+
+    fun updatePresetTestVolume(percent: Int) {
+        val resolvedPercent = percent.coerceIn(0, 100)
+        if (presetTestVolume == resolvedPercent) return
+        Log.i(
+            tag,
+            "[MainViewModel] updatePresetTestVolume -> TargetVolume: old=$presetTestVolume, new=$resolvedPercent"
+        )
+        presetTestVolume = resolvedPercent
+    }
 
 
     /**
