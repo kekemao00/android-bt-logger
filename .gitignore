@@ -17,3 +17,7 @@ local.properties
 *.apk
 output-metadata.json
 bt-logger.jks
+.kotlin
+.codex
+.gradle-user-home
+Log.log
