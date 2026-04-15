@@ -5,6 +5,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
+import androidx.room.Update
 import androidx.room.Upsert
 import kotlinx.coroutines.flow.Flow
 
@@ -90,8 +91,43 @@ interface RecordDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(connectionRecord: DeviceConnectionRecord)
 
+    @Update
+    suspend fun update(connectionRecord: DeviceConnectionRecord)
+
     @Query("SELECT * FROM device_connection_records WHERE device_mac = :deviceMac ORDER BY timestamp DESC")
     fun getRecordsByDeviceMac(deviceMac: String): Flow<List<DeviceConnectionRecord>>
+
+    @Query(
+        """
+        SELECT *
+        FROM device_connection_records
+        WHERE device_mac = :deviceMac
+            AND connect_state = :connectState
+        ORDER BY timestamp DESC, id DESC
+        LIMIT 1
+        """
+    )
+    suspend fun getLatestRecordSnapshotByConnectState(
+        deviceMac: String,
+        connectState: Int
+    ): DeviceConnectionRecord?
+
+    @Query(
+        """
+        SELECT *
+        FROM device_connection_records
+        WHERE device_mac = :deviceMac
+            AND event_type = :eventType
+            AND connect_state = :connectState
+        ORDER BY timestamp DESC, id DESC
+        LIMIT 1
+        """
+    )
+    suspend fun getLatestRecordSnapshotByEventAndState(
+        deviceMac: String,
+        eventType: String,
+        connectState: Int
+    ): DeviceConnectionRecord?
 
     @Query(
         """

@@ -40,7 +40,7 @@ fun BatteryTrendChart(
     records: List<RecordInfo>,
     modifier: Modifier = Modifier
 ) {
-    if (records.size < 2) return
+    if (records.isEmpty()) return
 
     val timelinePoints = remember(records) {
         records.sortedBy { it.timestamp }.map {
@@ -54,7 +54,7 @@ fun BatteryTrendChart(
 
     val phonePointCount = timelinePoints.count { it.phoneBatteryLevel != null }
     val headsetPointCount = timelinePoints.count { it.headsetBatteryLevel != null }
-    if (phonePointCount < 2 && headsetPointCount < 2) return
+    if (phonePointCount < 1 && headsetPointCount < 1) return
 
     val firstTimestamp = timelinePoints.first().timestamp
     val lastTimestamp = timelinePoints.last().timestamp
@@ -280,7 +280,7 @@ private fun resolveXPosition(
     return when {
         totalDuration > 0L -> ((timestamp - firstTimestamp).toFloat() / totalDuration.toFloat()) * chartWidth
         lastIndex > 0 -> (index.toFloat() / lastIndex.toFloat()) * chartWidth
-        else -> 0f
+        else -> chartWidth / 2f
     }
 }
 

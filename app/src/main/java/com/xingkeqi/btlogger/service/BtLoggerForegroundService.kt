@@ -24,6 +24,8 @@ import com.xingkeqi.btlogger.MainActivity
 import com.xingkeqi.btlogger.R
 import com.xingkeqi.btlogger.data.BtLoggerDatabase
 import com.xingkeqi.btlogger.data.BLUETOOTH_VERSION_UNKNOWN
+import com.xingkeqi.btlogger.data.CODEC_LIST_UNAVAILABLE
+import com.xingkeqi.btlogger.data.CODEC_UNKNOWN
 import com.xingkeqi.btlogger.data.DEVICE_BATTERY_LEVEL_UNKNOWN
 import com.xingkeqi.btlogger.data.Device
 import com.xingkeqi.btlogger.data.DeviceConnectionRecord
@@ -339,6 +341,11 @@ class BtLoggerForegroundService : Service() {
                     )
                     if (persistDevice(device)) {
                         latestCodecSnapshots[address] = resolvedSnapshot
+                        backfillCurrentConnectionRecords(
+                            address = address,
+                            codecSnapshot = resolvedSnapshot,
+                            reason = "codec-refresh"
+                        )
                     }
                     return@withLock
                 }
@@ -463,6 +470,11 @@ class BtLoggerForegroundService : Service() {
         }
 
         batterySnapshotMutex.withLock {
+            backfillCurrentConnectionRecords(
+                address = address,
+                headsetBatteryLevel = snapshot.level,
+                reason = "headset-battery"
+            )
             persistBatterySample(address = address, reason = snapshot.source)
         }
     }
@@ -605,6 +617,93 @@ class BtLoggerForegroundService : Service() {
             phoneBatteryLevel = phoneBatteryLevel,
             headsetBatteryLevel = headsetBatteryLevel
         )
+    }
+
+    private suspend fun backfillCurrentConnectionRecords(
+        address: String,
+        codecSnapshot: CodecSnapshot? = null,
+        headsetBatteryLevel: Int? = null,
+        reason: String
+    ) {
+        val latestConnectedRecord = recordDao.getLatestRecordSnapshotByConnectState(
+            deviceMac = address,
+            connectState = BluetoothA2dp.STATE_CONNECTED
+        ) ?: return
+        val latestConnectedStateRecord = recordDao.getLatestRecordSnapshotByEventAndState(
+            deviceMac = address,
+            eventType = RecordEventType.CONNECTED,
+            connectState = BluetoothA2dp.STATE_CONNECTED
+        )
+
+        sequenceOf(latestConnectedRecord, latestConnectedStateRecord)
+            .filterNotNull()
+            .distinctBy { it.id }
+            .forEach { record ->
+                val updatedRecord = mergeConnectionRecordSnapshot(
+                    baseRecord = record,
+                    codecSnapshot = codecSnapshot,
+                    headsetBatteryLevel = headsetBatteryLevel
+                )
+                if (updatedRecord == record) {
+                    return@forEach
+                }
+
+                recordDao.update(updatedRecord)
+                Log.i(
+                    tag,
+                    "[BtLoggerForegroundService] backfillCurrentConnectionRecords -> updated: reason=$reason, device=$address, recordId=${record.id}, event=${record.eventType}, activeCodec=${record.activeCodec} -> ${updatedRecord.activeCodec}, headsetBattery=${record.headsetBatteryLevel} -> ${updatedRecord.headsetBatteryLevel}"
+                )
+            }
+    }
+
+    private fun mergeConnectionRecordSnapshot(
+        baseRecord: DeviceConnectionRecord,
+        codecSnapshot: CodecSnapshot? = null,
+        headsetBatteryLevel: Int? = null
+    ): DeviceConnectionRecord {
+        return baseRecord.copy(
+            phoneSupportedCodecs = mergeCodecListValue(
+                currentValue = baseRecord.phoneSupportedCodecs,
+                incomingValue = codecSnapshot?.phoneSupportedCodecs
+            ),
+            negotiableCodecs = mergeCodecListValue(
+                currentValue = baseRecord.negotiableCodecs,
+                incomingValue = codecSnapshot?.negotiableCodecs
+            ),
+            activeCodec = mergeCodecValue(
+                currentValue = baseRecord.activeCodec,
+                incomingValue = codecSnapshot?.activeCodec
+            ),
+            headsetBatteryLevel = mergeBatteryValue(
+                currentValue = baseRecord.headsetBatteryLevel,
+                incomingValue = headsetBatteryLevel
+            )
+        )
+    }
+
+    private fun mergeCodecListValue(
+        currentValue: String,
+        incomingValue: String?
+    ): String {
+        return incomingValue
+            ?.takeUnless { it == CODEC_LIST_UNAVAILABLE }
+            ?: currentValue
+    }
+
+    private fun mergeCodecValue(
+        currentValue: String,
+        incomingValue: String?
+    ): String {
+        return incomingValue
+            ?.takeUnless { it == CODEC_UNKNOWN }
+            ?: currentValue
+    }
+
+    private fun mergeBatteryValue(
+        currentValue: Int,
+        incomingValue: Int?
+    ): Int {
+        return incomingValue?.takeIf { it in 0..100 } ?: currentValue
     }
 
     private suspend fun persistDevice(device: Device): Boolean {
