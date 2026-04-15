@@ -1,10 +1,12 @@
 package com.xingkeqi.btlogger
 
 import android.bluetooth.BluetoothA2dp
+import android.content.Context
 import android.util.Log
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.asLiveData
 import androidx.lifecycle.switchMap
 import androidx.lifecycle.viewModelScope
@@ -12,6 +14,7 @@ import com.blankj.utilcode.util.AppUtils
 import com.pgyer.pgyersdk.PgyerSDKManager
 import com.pgyer.pgyersdk.callback.CheckoutVersionCallBack
 import com.pgyer.pgyersdk.model.CheckSoftModel
+import com.xingkeqi.btlogger.data.BtLoggerDatabase
 import com.xingkeqi.btlogger.data.Device
 import com.xingkeqi.btlogger.data.DeviceConnectionRecord
 import com.xingkeqi.btlogger.data.DeviceDao
@@ -21,7 +24,6 @@ import com.xingkeqi.btlogger.data.RecordEventType
 import com.xingkeqi.btlogger.data.RecordDao
 import com.xingkeqi.btlogger.data.RecordInfo
 import com.xingkeqi.btlogger.utils.MediaVolumeSnapshot
-import dagger.hilt.android.lifecycle.HiltViewModel
 import io.reactivex.android.schedulers.AndroidSchedulers
 import io.reactivex.rxkotlin.subscribeBy
 import kotlinx.coroutines.Dispatchers
@@ -31,10 +33,8 @@ import kotlinx.coroutines.withContext
 import zlc.season.rxdownload4.download
 import zlc.season.rxdownload4.file
 import java.io.File
-import javax.inject.Inject
 
-@HiltViewModel
-class MainViewModel @Inject constructor(
+class MainViewModel(
     private val deviceDao: DeviceDao,
     private val recordDao: RecordDao,
     private val deviceWithRecordsDao: DeviceWithRecordsDao
@@ -283,5 +283,25 @@ class MainViewModel @Inject constructor(
 
     private fun installApk(file: File) {
         AppUtils.installApp(file)
+    }
+
+    companion object {
+        fun provideFactory(appContext: Context): ViewModelProvider.Factory {
+            val applicationContext = appContext.applicationContext
+            return object : ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                    if (modelClass.isAssignableFrom(MainViewModel::class.java)) {
+                        val database = BtLoggerDatabase.getDatabase(applicationContext)
+                        return MainViewModel(
+                            deviceDao = database.deviceDao(),
+                            recordDao = database.connectionRecordDao(),
+                            deviceWithRecordsDao = database.deviceWithRecordsDao()
+                        ) as T
+                    }
+                    throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")
+                }
+            }
+        }
     }
 }

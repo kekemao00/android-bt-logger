@@ -3,6 +3,7 @@ package com.xingkeqi.btlogger.utils
 import android.bluetooth.BluetoothDevice
 import com.blankj.utilcode.util.TimeUtils
 import com.xingkeqi.btlogger.BtLoggerApplication
+import com.xingkeqi.btlogger.data.BLUETOOTH_VERSION_UNKNOWN
 import com.xingkeqi.btlogger.data.DeviceInfo
 import com.xingkeqi.btlogger.data.RecordEventType
 import com.xingkeqi.btlogger.data.RecordInfo
@@ -43,14 +44,15 @@ fun saveDataToSheet(
     val labelTime = Label(3, 0, "记录时间")
     val labelBondState = Label(4, 0, "绑定状态")
     val labelDeviceType = Label(5, 0, "设备类型")
-    val labelConnState = Label(6, 0, "连接状态")
-    val labelBatteryLevel = Label(7, 0, "手机电量")
-    val labelHeadsetBatteryLevel = Label(8, 0, "耳机电量")
-    val labelIsPlaying = Label(9, 0, "正在播放")
-    val labelUuid = Label(10, 0, "UUID")
-    val labelPhoneCodecs = Label(11, 0, "手机支持编解码")
-    val labelNegotiableCodecs = Label(12, 0, "双方可用编解码")
-    val labelActiveCodec = Label(13, 0, "当前使用编解码")
+    val labelBluetoothVersion = Label(6, 0, "蓝牙版本")
+    val labelConnState = Label(7, 0, "连接状态")
+    val labelBatteryLevel = Label(8, 0, "手机电量")
+    val labelHeadsetBatteryLevel = Label(9, 0, "耳机电量")
+    val labelIsPlaying = Label(10, 0, "正在播放")
+    val labelUuid = Label(11, 0, "UUID")
+    val labelPhoneCodecs = Label(12, 0, "手机支持编解码")
+    val labelNegotiableCodecs = Label(13, 0, "双方可用编解码")
+    val labelActiveCodec = Label(14, 0, "当前使用编解码")
 
     sheet.addCell(labelName)
     sheet.addCell(labelAlias)
@@ -58,6 +60,7 @@ fun saveDataToSheet(
     sheet.addCell(labelTime)
     sheet.addCell(labelBondState)
     sheet.addCell(labelDeviceType)
+    sheet.addCell(labelBluetoothVersion)
     sheet.addCell(labelConnState)
     sheet.addCell(labelBatteryLevel)
     sheet.addCell(labelHeadsetBatteryLevel)
@@ -91,18 +94,25 @@ fun saveDataToSheet(
                 else -> "其他"
             }
         )
-        val connState = Label(6, i + 1, getRecordEventLabel(item))
-        val batteryLevel = Label(7, i + 1, item.batteryLevel.toString())
+        val bluetoothVersion = Label(
+            6,
+            i + 1,
+            item.bluetoothVersion
+                .takeUnless { it == BLUETOOTH_VERSION_UNKNOWN }
+                ?: currDevice.bluetoothVersion
+        )
+        val connState = Label(7, i + 1, getRecordEventLabel(item))
+        val batteryLevel = Label(8, i + 1, item.batteryLevel.toString())
         val headsetBatteryLevel = Label(
-            8,
+            9,
             i + 1,
             item.headsetBatteryLevel.takeIf { it in 0..100 }?.toString() ?: "未上报"
         )
-        val isPlaying = Label(9, i + 1, if (item.isPlaying == 1) "是" else "否")
-        val uuids = Label(10, i + 1, item.uuids)
-        val phoneSupportedCodecs = Label(11, i + 1, item.phoneSupportedCodecs)
-        val negotiableCodecs = Label(12, i + 1, item.negotiableCodecs)
-        val activeCodec = Label(13, i + 1, item.activeCodec)
+        val isPlaying = Label(10, i + 1, if (item.isPlaying == 1) "是" else "否")
+        val uuids = Label(11, i + 1, item.uuids)
+        val phoneSupportedCodecs = Label(12, i + 1, item.phoneSupportedCodecs)
+        val negotiableCodecs = Label(13, i + 1, item.negotiableCodecs)
+        val activeCodec = Label(14, i + 1, item.activeCodec)
 
         sheet.addCell(name)
         sheet.addCell(alias)
@@ -110,6 +120,7 @@ fun saveDataToSheet(
         sheet.addCell(time)
         sheet.addCell(boundState)
         sheet.addCell(deviceType)
+        sheet.addCell(bluetoothVersion)
         sheet.addCell(connState)
         sheet.addCell(batteryLevel)
         sheet.addCell(headsetBatteryLevel)

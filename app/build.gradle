@@ -34,25 +34,13 @@ android {
         variant ->
             variant.outputs.configureEach {
                 //在这里修改apk文件名
-                outputFileName = "BtLogger-v${variant.versionName}-${variant.versionCode}(${applicationId}).apk"
+                outputFileName = "BtLogger-${variant.name}-v${variant.versionName}-${variant.versionCode}(${applicationId}).apk"
             }
     }
 
     buildTypes {
-        debug {
-            applicationVariants.all { variant ->
-                variant.outputs.all {
-                    outputFileName = "MyApp-debug.apk"
-                }
-            }
-        }
-        release {
-            applicationVariants.all { variant ->
-                variant.outputs.all {
-                    outputFileName = "MyApp-release.apk"
-                }
-            }
-        }
+        debug {}
+        release {}
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17

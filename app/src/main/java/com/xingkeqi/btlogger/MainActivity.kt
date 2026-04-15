@@ -103,6 +103,7 @@ import androidx.lifecycle.lifecycleScope
 import com.blankj.utilcode.util.AppUtils
 import com.blankj.utilcode.util.TimeUtils
 import com.blankj.utilcode.util.ToastUtils
+import com.xingkeqi.btlogger.data.BLUETOOTH_VERSION_UNKNOWN
 import com.xingkeqi.btlogger.data.CODEC_UNKNOWN
 import com.xingkeqi.btlogger.data.DeviceInfo
 import com.xingkeqi.btlogger.data.MessageEvent
@@ -127,7 +128,6 @@ import com.xingkeqi.btlogger.utils.readMediaVolumeSnapshot
 import com.xingkeqi.btlogger.utils.saveDataToSheet
 import com.xingkeqi.btlogger.utils.setMediaVolumePercent
 import com.xingkeqi.btlogger.utils.shouldApplyFixedVolumeForBluetooth
-import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.ObsoleteCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.ticker
@@ -140,13 +140,14 @@ import java.util.Calendar
 import kotlin.math.roundToInt
 import kotlin.text.*
 
-@AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
     private val tag: String = this.javaClass.simpleName
 
 
-    private val viewModel: MainViewModel by viewModels()
+    private val viewModel: MainViewModel by viewModels {
+        MainViewModel.provideFactory(applicationContext)
+    }
 
     private var bluetoothPermissionGranted by mutableStateOf(false)
     private var pendingFixedVolumeJob: Job? = null
@@ -172,7 +173,7 @@ class MainActivity : ComponentActivity() {
 
                         } else {
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                                // Android 12+ 需要 BLUETOOTH_CONNECT 权限
+                                // Android 12+ 连接依赖 BLUETOOTH_CONNECT，版本广播探测额外依赖 BLUETOOTH_SCAN
                                 RequestBluetoothPermission { bluetoothPermissionGranted = it }
                             } else {
                                 // Android 11 及以下版本，蓝牙权限在 Manifest 中声明即可
@@ -239,14 +240,27 @@ class MainActivity : ComponentActivity() {
         onPermissionResult: (Boolean) -> Unit
     ) {
         val launcher = rememberLauncherForActivityResult(
-            contract = ActivityResultContracts.RequestPermission(),
-            onResult = { isGranted ->
-                onPermissionResult(isGranted)
+            contract = ActivityResultContracts.RequestMultiplePermissions(),
+            onResult = { result ->
+                val connectGranted =
+                    result[android.Manifest.permission.BLUETOOTH_CONNECT] == true
+                val scanGranted =
+                    result[android.Manifest.permission.BLUETOOTH_SCAN] == true
+                Log.i(
+                    tag,
+                    "[MainActivity] RequestBluetoothPermission -> PermissionResult: connect=$connectGranted, scan=$scanGranted"
+                )
+                onPermissionResult(connectGranted)
             }
         )
 
         LaunchedEffect(Unit) {
-            launcher.launch(android.Manifest.permission.BLUETOOTH_CONNECT)
+            launcher.launch(
+                arrayOf(
+                    android.Manifest.permission.BLUETOOTH_CONNECT,
+                    android.Manifest.permission.BLUETOOTH_SCAN
+                )
+            )
         }
     }
 
@@ -757,12 +771,17 @@ fun RecordCards(
     viewModel: MainViewModel
 ) {
     val visibleHistoryRecords = records.filterNot { it?.eventType == RecordEventType.BATTERY_CHANGED }
+    val currentDevice = viewModel.currDevice.observeAsState().value
 
     LazyColumn(modifier = modifier) {
         if (records.isEmpty()) return@LazyColumn
 
         val latestRecord = records[0]
         val isConnected = latestRecord?.connectState == 2
+        val bluetoothVersion = latestRecord?.bluetoothVersion
+            ?.takeUnless { it == BLUETOOTH_VERSION_UNKNOWN }
+            ?: currentDevice?.bluetoothVersion
+            ?: BLUETOOTH_VERSION_UNKNOWN
 
         // 详情页头部
         item {
@@ -878,6 +897,7 @@ fun RecordCards(
                             BluetoothDevice.DEVICE_TYPE_DUAL -> "双模"
                             else -> "其他"
                         }),
+                        StatItem("蓝牙版本", bluetoothVersion),
                         StatItem("绑定状态", when (latestRecord?.bondState) {
                             BluetoothDevice.BOND_BONDED -> "已配对"
                             BluetoothDevice.BOND_BONDING -> "配对中"

@@ -8,9 +8,7 @@ import android.os.Build
 import com.pgyer.pgyersdk.PgyerSDKManager
 import com.pgyer.pgyersdk.pgyerenum.Features
 import com.xingkeqi.btlogger.service.BtLoggerForegroundService
-import dagger.hilt.android.HiltAndroidApp
 
-@HiltAndroidApp
 class BtLoggerApplication : Application() {
     val tag = this.javaClass.simpleName
 

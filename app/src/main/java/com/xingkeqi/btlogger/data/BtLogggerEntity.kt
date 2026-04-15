@@ -8,6 +8,7 @@ import androidx.room.PrimaryKey
 
 const val CODEC_LIST_UNAVAILABLE = "不可用"
 const val CODEC_UNKNOWN = "未知"
+const val BLUETOOTH_VERSION_UNKNOWN = "未知"
 const val DEVICE_BATTERY_LEVEL_UNKNOWN = -1
 
 object RecordEventType {
@@ -21,6 +22,7 @@ data class DeviceInfo(
     val mac: String = "",
     val name: String = "",
     val deviceType: Int = -1,
+    val bluetoothVersion: String = BLUETOOTH_VERSION_UNKNOWN,
     val uuids: String = "",
     val latestPhoneSupportedCodecs: String = CODEC_LIST_UNAVAILABLE,
     val latestNegotiableCodecs: String = CODEC_LIST_UNAVAILABLE,
@@ -53,6 +55,7 @@ data class RecordInfo(
     val activeCodec: String = CODEC_UNKNOWN,
 
     val deviceType: Int = -1,
+    val bluetoothVersion: String = BLUETOOTH_VERSION_UNKNOWN,
     val uuids: String = "",
     val bondState: Int = -1,
     val rssi: Short = -1,
@@ -94,6 +97,8 @@ data class Device(
     val alias: String,
     @ColumnInfo(name = "device_type")
     val deviceType: Int,
+    @ColumnInfo(name = "bluetooth_version")
+    val bluetoothVersion: String = BLUETOOTH_VERSION_UNKNOWN,
     @ColumnInfo(name = "uuids")
     val uuids: String,
     @ColumnInfo(name = "latest_phone_supported_codecs")

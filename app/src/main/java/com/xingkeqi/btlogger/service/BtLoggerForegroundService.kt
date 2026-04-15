@@ -22,6 +22,8 @@ import androidx.core.app.NotificationCompat
 import com.blankj.utilcode.util.ToastUtils
 import com.xingkeqi.btlogger.MainActivity
 import com.xingkeqi.btlogger.R
+import com.xingkeqi.btlogger.data.BtLoggerDatabase
+import com.xingkeqi.btlogger.data.BLUETOOTH_VERSION_UNKNOWN
 import com.xingkeqi.btlogger.data.DEVICE_BATTERY_LEVEL_UNKNOWN
 import com.xingkeqi.btlogger.data.Device
 import com.xingkeqi.btlogger.data.DeviceConnectionRecord
@@ -31,9 +33,10 @@ import com.xingkeqi.btlogger.data.RecordEventType
 import com.xingkeqi.btlogger.data.RecordDao
 import com.xingkeqi.btlogger.utils.ACTION_BLUETOOTH_DEVICE_BATTERY_LEVEL_CHANGED
 import com.xingkeqi.btlogger.utils.BluetoothBatteryUtils
+import com.xingkeqi.btlogger.utils.BluetoothVersionProbeResult
+import com.xingkeqi.btlogger.utils.BluetoothVersionUtils
 import com.xingkeqi.btlogger.utils.HeadsetBatterySnapshot
 import com.xingkeqi.btlogger.utils.readMediaVolumeSnapshot
-import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -43,7 +46,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.greenrobot.eventbus.EventBus
 import java.util.concurrent.ConcurrentHashMap
-import javax.inject.Inject
 
 /**
  * 前台服务，用于保持应用存活并监听蓝牙连接状态
@@ -53,7 +55,6 @@ import javax.inject.Inject
  * - Receiver 生命周期与 Service 绑定，独立于 Activity
  * - 通知栏常驻，用户可感知应用运行状态
  */
-@AndroidEntryPoint
 class BtLoggerForegroundService : Service() {
 
     private val tag = "BtLoggerService"
@@ -73,15 +74,33 @@ class BtLoggerForegroundService : Service() {
             }
         }
     }
+    private val versionProbeManager by lazy {
+        BluetoothVersionProbeManager(
+            context = applicationContext,
+            scope = serviceScope
+        ) { device, result ->
+            serviceScope.launch {
+                handleBluetoothVersionProbeResult(device, result)
+            }
+        }
+    }
+    private val versionAdvertisementProbeManager by lazy {
+        BluetoothVersionAdvertisementProbeManager(
+            context = applicationContext,
+            scope = serviceScope
+        ) { device, result ->
+            serviceScope.launch {
+                handleBluetoothVersionProbeResult(device, result)
+            }
+        }
+    }
 
     @Volatile
     private var latestPhoneBatteryLevel: Int = 0
 
-    @Inject
-    lateinit var deviceDao: DeviceDao
-
-    @Inject
-    lateinit var recordDao: RecordDao
+    private val database by lazy { BtLoggerDatabase.getDatabase(applicationContext) }
+    private val deviceDao: DeviceDao by lazy { database.deviceDao() }
+    private val recordDao: RecordDao by lazy { database.connectionRecordDao() }
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -173,6 +192,8 @@ class BtLoggerForegroundService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         batteryProbeManager.stopAll()
+        versionProbeManager.stopAll()
+        versionAdvertisementProbeManager.stopAll()
         serviceScope.cancel()
         try {
             unregisterReceiver(btReceiver)
@@ -190,7 +211,6 @@ class BtLoggerForegroundService : Service() {
     @SuppressLint("MissingPermission")
     private fun handleConnectionStateChanged(bluetoothDevice: BluetoothDevice, state: Int) {
         val address = bluetoothDevice.address
-        val deviceState = buildConnectedDeviceState(bluetoothDevice)
         val isConnected = state == BluetoothProfile.STATE_CONNECTED
         val connectStatus = if (isConnected) {
             BluetoothA2dp.STATE_CONNECTED
@@ -199,7 +219,6 @@ class BtLoggerForegroundService : Service() {
         }
 
         if (isConnected) {
-            connectedDevices[address] = deviceState
             BluetoothBatteryUtils.readBatteryLevelReflectively(bluetoothDevice)?.let { snapshot ->
                 latestHeadsetBatteryLevels[address] = snapshot.level
                 Log.i(
@@ -211,6 +230,19 @@ class BtLoggerForegroundService : Service() {
         }
 
         serviceScope.launch {
+            val existingDevice = deviceDao.getDeviceByMacSnapshot(address)
+            val deviceState = buildConnectedDeviceState(bluetoothDevice, existingDevice)
+            if (isConnected) {
+                connectedDevices[address] = deviceState
+                versionProbeManager.startMonitoring(
+                    device = bluetoothDevice,
+                    persistedVersion = deviceState.bluetoothVersion
+                )
+                versionAdvertisementProbeManager.startMonitoring(
+                    device = bluetoothDevice,
+                    persistedVersion = deviceState.bluetoothVersion
+                )
+            }
             val codecSnapshot = resolveCodecSnapshot(address)
             val phoneBatteryLevel = getPhoneBatteryLevel().also { latestPhoneBatteryLevel = it }
             val headsetBatteryLevel = resolveHeadsetBatteryLevel(address)
@@ -241,6 +273,8 @@ class BtLoggerForegroundService : Service() {
 
             if (!isConnected) {
                 batteryProbeManager.stopMonitoring(address)
+                versionProbeManager.stopMonitoring(address)
+                versionAdvertisementProbeManager.stopMonitoring(address)
                 connectedDevices.remove(address)
                 latestPersistedBatterySnapshots.remove(address)
             }
@@ -284,6 +318,14 @@ class BtLoggerForegroundService : Service() {
                 val deviceState = buildConnectedDeviceState(bluetoothDevice, existingDevice)
                 connectedDevices[address] = deviceState
                 batteryProbeManager.startMonitoring(bluetoothDevice)
+                versionProbeManager.startMonitoring(
+                    device = bluetoothDevice,
+                    persistedVersion = deviceState.bluetoothVersion
+                )
+                versionAdvertisementProbeManager.startMonitoring(
+                    device = bluetoothDevice,
+                    persistedVersion = deviceState.bluetoothVersion
+                )
                 val device = buildDevice(
                     deviceState = deviceState,
                     codecSnapshot = resolvedSnapshot,
@@ -328,6 +370,37 @@ class BtLoggerForegroundService : Service() {
                 }
             }
         }
+    }
+
+    @SuppressLint("MissingPermission")
+    private suspend fun handleBluetoothVersionProbeResult(
+        bluetoothDevice: BluetoothDevice,
+        result: BluetoothVersionProbeResult
+    ) {
+        val address = bluetoothDevice.address
+        val existingDevice = deviceDao.getDeviceByMacSnapshot(address)
+        val previousBluetoothVersion = existingDevice?.bluetoothVersion ?: BLUETOOTH_VERSION_UNKNOWN
+        val mergedBluetoothVersion = BluetoothVersionUtils.mergeBluetoothVersion(
+            persistedVersion = previousBluetoothVersion,
+            resolvedVersion = result.versionSnapshot.version
+        )
+        Log.i(
+            tag,
+            "[BtLoggerForegroundService] handleBluetoothVersionProbeResult -> device=${bluetoothDevice.name.orEmpty()}[$address], previous=$previousBluetoothVersion, resolved=${result.versionSnapshot.version}, merged=$mergedBluetoothVersion, source=${result.versionSnapshot.source}, info=${result.deviceInformation.summary()}, adv=${result.advertisementSnapshot.summary()}"
+        )
+        if (mergedBluetoothVersion == previousBluetoothVersion) {
+            return
+        }
+
+        val baseState = connectedDevices[address] ?: buildConnectedDeviceState(bluetoothDevice, existingDevice)
+        val updatedState = baseState.copy(bluetoothVersion = mergedBluetoothVersion)
+        connectedDevices[address] = updatedState
+        val device = buildDevice(
+            deviceState = updatedState,
+            codecSnapshot = resolveCodecSnapshot(address),
+            fallbackRssi = existingDevice?.rssi
+        )
+        persistDevice(device)
     }
 
     private suspend fun handlePhoneBatteryChanged(phoneBatteryLevel: Int) {
@@ -468,6 +541,21 @@ class BtLoggerForegroundService : Service() {
         bluetoothDevice: BluetoothDevice,
         existingDevice: Device? = null
     ): ConnectedDeviceState {
+        val previousBluetoothVersion = existingDevice?.bluetoothVersion ?: BLUETOOTH_VERSION_UNKNOWN
+        val resolvedBluetoothVersion = BluetoothVersionUtils.resolveBluetoothVersion(
+            device = bluetoothDevice,
+            persistedVersion = previousBluetoothVersion
+        )
+        val mergedBluetoothVersion = BluetoothVersionUtils.mergeBluetoothVersion(
+            persistedVersion = previousBluetoothVersion,
+            resolvedVersion = resolvedBluetoothVersion.version
+        )
+        if (previousBluetoothVersion != mergedBluetoothVersion || resolvedBluetoothVersion.source != "cache") {
+            Log.i(
+                tag,
+                "[BtLoggerForegroundService] buildConnectedDeviceState -> BluetoothVersion: device=${bluetoothDevice.name.orEmpty()}[${bluetoothDevice.address}], previous=$previousBluetoothVersion, resolved=$mergedBluetoothVersion, source=${resolvedBluetoothVersion.source}"
+            )
+        }
         return ConnectedDeviceState(
             mac = bluetoothDevice.address,
             name = bluetoothDevice.name ?: existingDevice?.name.orEmpty(),
@@ -482,6 +570,7 @@ class BtLoggerForegroundService : Service() {
             } else {
                 existingDevice?.deviceType ?: BluetoothDevice.DEVICE_TYPE_UNKNOWN
             },
+            bluetoothVersion = mergedBluetoothVersion,
             uuids = bluetoothDevice.uuids?.joinToString() ?: existingDevice?.uuids.orEmpty()
         )
     }
@@ -498,6 +587,7 @@ class BtLoggerForegroundService : Service() {
             rssi = fallbackRssi,
             alias = deviceState.alias,
             deviceType = deviceState.deviceType,
+            bluetoothVersion = deviceState.bluetoothVersion,
             uuids = deviceState.uuids,
             latestPhoneSupportedCodecs = codecSnapshot.phoneSupportedCodecs,
             latestNegotiableCodecs = codecSnapshot.negotiableCodecs,
@@ -522,7 +612,7 @@ class BtLoggerForegroundService : Service() {
             deviceDao.insert(device)
             Log.d(
                 tag,
-                "[BtLoggerForegroundService] persistDevice -> saved latest codec for ${device.mac}"
+                "[BtLoggerForegroundService] persistDevice -> Codec/BluetoothVersion: device=${device.mac}, activeCodec=${device.latestActiveCodec}, bluetoothVersion=${device.bluetoothVersion}"
             )
             true
         } catch (e: Exception) {
@@ -541,7 +631,7 @@ class BtLoggerForegroundService : Service() {
             recordDao.insert(record)
             Log.d(
                 tag,
-                "[BtLoggerForegroundService] persistDeviceAndRecord -> saved ${record.eventType} for ${device.mac}"
+                "[BtLoggerForegroundService] persistDeviceAndRecord -> Record/BluetoothVersion: event=${record.eventType}, device=${device.mac}, bluetoothVersion=${device.bluetoothVersion}"
             )
             EventBus.getDefault().post(MessageEvent("ADD_RECORD", device, record))
             true
@@ -609,6 +699,7 @@ private data class ConnectedDeviceState(
     val bondState: Int,
     val alias: String,
     val deviceType: Int,
+    val bluetoothVersion: String,
     val uuids: String
 )
 
