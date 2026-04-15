@@ -33,6 +33,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.greenrobot.eventbus.EventBus
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
@@ -50,6 +52,7 @@ class BtLoggerForegroundService : Service() {
 
     private val tag = "BtLoggerService"
     private val latestCodecSnapshots = ConcurrentHashMap<String, CodecSnapshot>()
+    private val codecSnapshotMutex = Mutex()
 
     @Inject
     lateinit var deviceDao: DeviceDao
@@ -196,8 +199,8 @@ class BtLoggerForegroundService : Service() {
     @RequiresApi(Build.VERSION_CODES.P)
     @SuppressLint("MissingPermission")
     private fun handleCodecConfigChanged(bluetoothDevice: BluetoothDevice, intent: Intent) {
-        val snapshot = BluetoothCodecFormatter.parseCodecStatus(intent)
-        if (snapshot == null) {
+        val parsedSnapshot = BluetoothCodecFormatter.parseCodecStatus(intent)
+        if (parsedSnapshot == null) {
             Log.w(
                 tag,
                 "[BtLoggerForegroundService] handleCodecConfigChanged -> codec status missing for ${bluetoothDevice.address}"
@@ -205,65 +208,116 @@ class BtLoggerForegroundService : Service() {
             return
         }
 
-        val timestamp = System.currentTimeMillis()
-        val resolvedSnapshot = snapshot.copy(updatedAt = timestamp)
-        latestCodecSnapshots[bluetoothDevice.address] = resolvedSnapshot
-
         serviceScope.launch {
-            val existingDevice = deviceDao.getDeviceByMacSnapshot(bluetoothDevice.address)
-            val device = Device(
-                mac = bluetoothDevice.address,
-                name = bluetoothDevice.name ?: existingDevice?.name.orEmpty(),
-                bondState = bluetoothDevice.bondState,
-                rssi = existingDevice?.rssi,
-                alias = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    bluetoothDevice.alias ?: existingDevice?.alias.orEmpty()
-                } else {
-                    existingDevice?.alias.orEmpty()
-                },
-                deviceType = bluetoothDevice.type,
-                uuids = bluetoothDevice.uuids?.joinToString() ?: existingDevice?.uuids.orEmpty(),
-                latestPhoneSupportedCodecs = resolvedSnapshot.phoneSupportedCodecs,
-                latestNegotiableCodecs = resolvedSnapshot.negotiableCodecs,
-                latestActiveCodec = resolvedSnapshot.activeCodec,
-                latestCodecUpdatedAt = resolvedSnapshot.updatedAt
-            )
-            val record = DeviceConnectionRecord(
-                deviceMac = bluetoothDevice.address,
-                timestamp = timestamp,
-                connectState = BluetoothA2dp.STATE_CONNECTED,
-                batteryLevel = getBatteryLevel(),
-                volume = getCurrVolume(),
-                isPlaying = isPlaying(),
-                eventType = RecordEventType.CODEC_CHANGED,
-                phoneSupportedCodecs = resolvedSnapshot.phoneSupportedCodecs,
-                negotiableCodecs = resolvedSnapshot.negotiableCodecs,
-                activeCodec = resolvedSnapshot.activeCodec
-            )
+            codecSnapshotMutex.withLock {
+                val address = bluetoothDevice.address
+                val previousSnapshot = resolveCodecSnapshot(address)
+                val resolvedSnapshot = BluetoothCodecFormatter.normalizeSnapshot(
+                    parsedSnapshot.copy(updatedAt = System.currentTimeMillis())
+                )
+                val hasSnapshotChanged =
+                    BluetoothCodecFormatter.hasCodecSnapshotChanged(previousSnapshot, resolvedSnapshot)
+                val shouldPersistHistory =
+                    BluetoothCodecFormatter.shouldPersistCodecHistory(previousSnapshot, resolvedSnapshot)
 
-            Log.i(
-                tag,
-                "[BtLoggerForegroundService] handleCodecConfigChanged -> device=${device.name}[${device.mac}], activeCodec=${resolvedSnapshot.activeCodec}, negotiable=${resolvedSnapshot.negotiableCodecs}"
-            )
-            persistDeviceAndRecord(device, record)
+                if (!hasSnapshotChanged) {
+                    latestCodecSnapshots[address] = resolvedSnapshot
+                    Log.d(
+                        tag,
+                        "[BtLoggerForegroundService] handleCodecConfigChanged -> skip duplicate snapshot: device=${bluetoothDevice.name.orEmpty()}[$address], activeCodec=${resolvedSnapshot.activeCodec}"
+                    )
+                    return@withLock
+                }
+
+                val existingDevice = deviceDao.getDeviceByMacSnapshot(address)
+                val device = Device(
+                    mac = address,
+                    name = bluetoothDevice.name ?: existingDevice?.name.orEmpty(),
+                    bondState = bluetoothDevice.bondState,
+                    rssi = existingDevice?.rssi,
+                    alias = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        bluetoothDevice.alias ?: existingDevice?.alias.orEmpty()
+                    } else {
+                        existingDevice?.alias.orEmpty()
+                    },
+                    deviceType = bluetoothDevice.type,
+                    uuids = bluetoothDevice.uuids?.joinToString() ?: existingDevice?.uuids.orEmpty(),
+                    latestPhoneSupportedCodecs = resolvedSnapshot.phoneSupportedCodecs,
+                    latestNegotiableCodecs = resolvedSnapshot.negotiableCodecs,
+                    latestActiveCodec = resolvedSnapshot.activeCodec,
+                    latestCodecUpdatedAt = resolvedSnapshot.updatedAt
+                )
+
+                if (!shouldPersistHistory) {
+                    Log.i(
+                        tag,
+                        "[BtLoggerForegroundService] handleCodecConfigChanged -> refresh latest codec only: device=${device.name}[${device.mac}], activeCodec=${previousSnapshot.activeCodec} -> ${resolvedSnapshot.activeCodec}"
+                    )
+                    if (persistDevice(device)) {
+                        latestCodecSnapshots[address] = resolvedSnapshot
+                    }
+                    return@withLock
+                }
+
+                val record = DeviceConnectionRecord(
+                    deviceMac = address,
+                    timestamp = resolvedSnapshot.updatedAt,
+                    connectState = BluetoothA2dp.STATE_CONNECTED,
+                    batteryLevel = getBatteryLevel(),
+                    volume = getCurrVolume(),
+                    isPlaying = isPlaying(),
+                    eventType = RecordEventType.CODEC_CHANGED,
+                    phoneSupportedCodecs = resolvedSnapshot.phoneSupportedCodecs,
+                    negotiableCodecs = resolvedSnapshot.negotiableCodecs,
+                    activeCodec = resolvedSnapshot.activeCodec
+                )
+
+                Log.i(
+                    tag,
+                    "[BtLoggerForegroundService] handleCodecConfigChanged -> persist codec change: device=${device.name}[${device.mac}], activeCodec=${previousSnapshot.activeCodec} -> ${resolvedSnapshot.activeCodec}, negotiable=${resolvedSnapshot.negotiableCodecs}"
+                )
+                if (persistDeviceAndRecord(device, record)) {
+                    latestCodecSnapshots[address] = resolvedSnapshot
+                }
+            }
         }
     }
 
     private suspend fun resolveCodecSnapshot(address: String): CodecSnapshot {
         latestCodecSnapshots[address]?.let { return it }
         val existingDevice = deviceDao.getDeviceByMacSnapshot(address) ?: return BluetoothCodecFormatter.emptySnapshot()
-        return CodecSnapshot(
-            phoneSupportedCodecs = existingDevice.latestPhoneSupportedCodecs,
-            negotiableCodecs = existingDevice.latestNegotiableCodecs,
-            activeCodec = existingDevice.latestActiveCodec,
-            updatedAt = existingDevice.latestCodecUpdatedAt
+        return BluetoothCodecFormatter.normalizeSnapshot(
+            CodecSnapshot(
+                phoneSupportedCodecs = existingDevice.latestPhoneSupportedCodecs,
+                negotiableCodecs = existingDevice.latestNegotiableCodecs,
+                activeCodec = existingDevice.latestActiveCodec,
+                updatedAt = existingDevice.latestCodecUpdatedAt
+            )
         ).also {
             latestCodecSnapshots[address] = it
         }
     }
 
-    private suspend fun persistDeviceAndRecord(device: Device, record: DeviceConnectionRecord) {
-        try {
+    private suspend fun persistDevice(device: Device): Boolean {
+        return try {
+            deviceDao.insert(device)
+            Log.d(
+                tag,
+                "[BtLoggerForegroundService] persistDevice -> saved latest codec for ${device.mac}"
+            )
+            true
+        } catch (e: Exception) {
+            Log.e(
+                tag,
+                "[BtLoggerForegroundService] persistDevice -> failed for ${device.mac}",
+                e
+            )
+            false
+        }
+    }
+
+    private suspend fun persistDeviceAndRecord(device: Device, record: DeviceConnectionRecord): Boolean {
+        return try {
             deviceDao.insert(device)
             recordDao.insert(record)
             Log.d(
@@ -271,12 +325,14 @@ class BtLoggerForegroundService : Service() {
                 "[BtLoggerForegroundService] persistDeviceAndRecord -> saved ${record.eventType} for ${device.mac}"
             )
             EventBus.getDefault().post(MessageEvent("ADD_RECORD", device, record))
+            true
         } catch (e: Exception) {
             Log.e(
                 tag,
                 "[BtLoggerForegroundService] persistDeviceAndRecord -> failed for ${device.mac}",
                 e
             )
+            false
         }
     }
 

@@ -25,6 +25,34 @@ object BluetoothCodecFormatter {
 
     fun emptySnapshot(): CodecSnapshot = CodecSnapshot()
 
+    /**
+     * 统一归一化编解码文本，避免系统广播顺序抖动导致的误判。
+     */
+    fun normalizeSnapshot(snapshot: CodecSnapshot): CodecSnapshot {
+        return snapshot.copy(
+            phoneSupportedCodecs = snapshot.phoneSupportedCodecs.normalizeCodecListValue(),
+            negotiableCodecs = snapshot.negotiableCodecs.normalizeCodecListValue(),
+            activeCodec = snapshot.activeCodec.normalizeCodecValue()
+        )
+    }
+
+    fun hasCodecSnapshotChanged(previous: CodecSnapshot?, current: CodecSnapshot): Boolean {
+        val normalizedCurrent = current.asComparableSnapshot()
+        val normalizedPrevious = previous?.asComparableSnapshot() ?: return normalizedCurrent != emptySnapshot().asComparableSnapshot()
+        return normalizedPrevious != normalizedCurrent
+    }
+
+    /**
+     * 仅在已知旧编解码且当前使用格式真实切换时，才落一条历史记录。
+     */
+    fun shouldPersistCodecHistory(previous: CodecSnapshot?, current: CodecSnapshot): Boolean {
+        val normalizedPrevious = previous?.asComparableSnapshot() ?: return false
+        val normalizedCurrent = current.asComparableSnapshot()
+        return normalizedPrevious.activeCodec != CODEC_UNKNOWN &&
+            normalizedCurrent.activeCodec != CODEC_UNKNOWN &&
+            normalizedPrevious.activeCodec != normalizedCurrent.activeCodec
+    }
+
     @RequiresApi(Build.VERSION_CODES.P)
     fun parseCodecStatus(intent: Intent): CodecSnapshot? {
         val codecStatus = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -42,10 +70,12 @@ object BluetoothCodecFormatter {
 
     @RequiresApi(Build.VERSION_CODES.P)
     fun fromCodecStatus(codecStatus: BluetoothCodecStatus): CodecSnapshot {
-        return CodecSnapshot(
-            phoneSupportedCodecs = formatCodecList(codecStatus.codecsLocalCapabilities),
-            negotiableCodecs = formatCodecList(codecStatus.codecsSelectableCapabilities),
-            activeCodec = formatActiveCodec(codecStatus.codecConfig)
+        return normalizeSnapshot(
+            CodecSnapshot(
+                phoneSupportedCodecs = formatCodecList(codecStatus.codecsLocalCapabilities),
+                negotiableCodecs = formatCodecList(codecStatus.codecsSelectableCapabilities),
+                activeCodec = formatActiveCodec(codecStatus.codecConfig)
+            )
         )
     }
 
@@ -55,6 +85,7 @@ object BluetoothCodecFormatter {
 
     fun formatCodecList(codecConfigs: List<BluetoothCodecConfig>?): String {
         val codecNames = codecConfigs.orEmpty()
+            .sortedBy { it.codecType }
             .map { formatCodecType(it.codecType) }
             .distinct()
             .filter { it.isNotBlank() }
@@ -74,5 +105,22 @@ object BluetoothCodecFormatter {
             BluetoothCodecConfig.SOURCE_CODEC_TYPE_INVALID -> CODEC_UNKNOWN
             else -> "Unknown($codecType)"
         }
+    }
+
+    private fun CodecSnapshot.asComparableSnapshot(): CodecSnapshot {
+        return normalizeSnapshot(copy(updatedAt = 0L))
+    }
+
+    private fun String.normalizeCodecListValue(): String {
+        val codecNames = split(",")
+            .map { it.trim() }
+            .filter { it.isNotBlank() && it != CODEC_LIST_UNAVAILABLE }
+            .distinct()
+            .sortedBy { it.lowercase() }
+        return codecNames.takeIf { it.isNotEmpty() }?.joinToString() ?: CODEC_LIST_UNAVAILABLE
+    }
+
+    private fun String.normalizeCodecValue(): String {
+        return trim().takeIf { it.isNotBlank() } ?: CODEC_UNKNOWN
     }
 }
