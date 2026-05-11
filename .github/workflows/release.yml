@@ -11,6 +11,9 @@ on:
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
+    # softprops/action-gh-release 创建 Release 需要 contents 写权限
+    permissions:
+      contents: write
     
     steps:
     # 1. 检出代码
@@ -64,90 +67,90 @@ jobs:
         VERSION_NAME: ${{ steps.version.outputs.VERSION }}
         VERSION_CODE: ${{ steps.version.outputs.VERSION_CODE }}
         
-    # 9. 签名APK (如果配置了签名)
-    - name: Sign APK
-      if: ${{ env.KEYSTORE_FILE != '' }}
+    # 9. 定位 Gradle 产出的 APK
+    # Why: app/build.gradle 通过 outputFileName 将 APK 重命名为
+    #   BtLogger-{variant}-v{versionName}-{versionCode}({applicationId}).apk，
+    # 因此不能再使用 app-debug.apk / app-release.apk 这些默认名字。
+    - name: Locate APK artifacts
+      id: locate
       run: |
+        set -euo pipefail
+        DEBUG_APK=$(find app/build/outputs/apk/debug -maxdepth 1 -name '*.apk' | head -n 1)
+        RELEASE_APK=$(find app/build/outputs/apk/release -maxdepth 1 -name '*.apk' | head -n 1)
+
+        if [ -z "${DEBUG_APK}" ] || [ -z "${RELEASE_APK}" ]; then
+          echo "::error::未找到构建产物: DEBUG_APK='${DEBUG_APK}' RELEASE_APK='${RELEASE_APK}'"
+          ls -R app/build/outputs/apk || true
+          exit 1
+        fi
+
+        echo "DEBUG_APK=${DEBUG_APK}" >> "$GITHUB_OUTPUT"
+        echo "RELEASE_APK=${RELEASE_APK}" >> "$GITHUB_OUTPUT"
+        echo "Debug APK:   ${DEBUG_APK}"
+        echo "Release APK: ${RELEASE_APK}"
+
+    # 10. 签名 Release APK（仅在配置了签名 Secrets 时执行）
+    # 前提：Release APK 必须是 unsigned 状态。若 build.gradle 已配置 signingConfig，跳过此步骤。
+    - name: Sign Release APK
+      if: ${{ secrets.KEYSTORE_FILE != '' }}
+      run: |
+        set -euo pipefail
         echo "${{ secrets.KEYSTORE_FILE }}" | base64 -d > keystore.jks
         jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 \
           -keystore keystore.jks \
           -storepass "${{ secrets.KEYSTORE_PASSWORD }}" \
           -keypass "${{ secrets.KEY_PASSWORD }}" \
-          app/build/outputs/apk/release/app-release-unsigned.apk \
+          "${{ steps.locate.outputs.RELEASE_APK }}" \
           "${{ secrets.KEY_ALIAS }}"
-      env:
-        KEYSTORE_FILE: ${{ secrets.KEYSTORE_FILE }}
-        
-    # 10. 重命名APK文件
-    - name: Rename APK files
-      run: |
-        VERSION=${{ steps.version.outputs.VERSION }}
-        mv app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/MyApp-${VERSION}-debug.apk
-        mv app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/MyApp-${VERSION}-release.apk
-        
-    # 11. 生成Changelog
+
+    # 11. 生成 Changelog
     - name: Generate Changelog
       id: changelog
       run: |
+        set -euo pipefail
         PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
         if [ -n "$PREVIOUS_TAG" ]; then
           CHANGELOG=$(git log ${PREVIOUS_TAG}..HEAD --pretty=format:"- %s" --no-merges)
         else
           CHANGELOG=$(git log --pretty=format:"- %s" --no-merges -10)
         fi
-        echo "CHANGELOG<<EOF" >> $GITHUB_OUTPUT
-        echo "$CHANGELOG" >> $GITHUB_OUTPUT
-        echo "EOF" >> $GITHUB_OUTPUT
-        
-    # 12. 创建GitHub Release
+        {
+          echo "CHANGELOG<<EOF"
+          echo "$CHANGELOG"
+          echo "EOF"
+        } >> "$GITHUB_OUTPUT"
+
+    # 12. 创建 Release 并上传所有 APK 资产
+    # Why: actions/create-release@v1 与 actions/upload-release-asset@v1 已归档，
+    # 改用仍在维护的 softprops/action-gh-release，通过 glob 一次性上传所有 APK。
     - name: Create GitHub Release
-      id: create_release
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ steps.version.outputs.VERSION }}
-        release_name: Release ${{ steps.version.outputs.VERSION }}
+        name: Release ${{ steps.version.outputs.VERSION }}
+        draft: false
+        prerelease: false
         body: |
           ## 🚀 Release ${{ steps.version.outputs.VERSION }}
-          
+
           ### 📱 Download
           - **Release APK**: For production use
           - **Debug APK**: For testing and debugging
-          
+
           ### 📋 Changes
           ${{ steps.changelog.outputs.CHANGELOG }}
-          
+
           ### 📊 Build Info
           - Version Code: ${{ steps.version.outputs.VERSION_CODE }}
           - Build Date: ${{ github.event.head_commit.timestamp }}
           - Commit: ${{ github.sha }}
-        draft: false
-        prerelease: false
-        
-    # 13. 上传Release APK
-    - name: Upload Release APK
-      uses: actions/upload-release-asset@v1
+        files: |
+          app/build/outputs/apk/release/*.apk
+          app/build/outputs/apk/debug/*.apk
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: app/build/outputs/apk/release/MyApp-${{ steps.version.outputs.VERSION }}-release.apk
-        asset_name: MyApp-${{ steps.version.outputs.VERSION }}-release.apk
-        asset_content_type: application/vnd.android.package-archive
-        
-    # 14. 上传Debug APK
-    - name: Upload Debug APK
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: app/build/outputs/apk/debug/MyApp-${{ steps.version.outputs.VERSION }}-debug.apk
-        asset_name: MyApp-${{ steps.version.outputs.VERSION }}-debug.apk
-        asset_content_type: application/vnd.android.package-archive
-        
-    # 15. 上传构建产物到Artifacts (备份)
+
+    # 13. 上传构建产物到 Artifacts（备份）
     - name: Upload APK Artifacts
       uses: actions/upload-artifact@v4
       with:
