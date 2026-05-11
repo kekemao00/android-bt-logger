@@ -14,6 +14,11 @@ jobs:
     # softprops/action-gh-release 创建 Release 需要 contents 写权限
     permissions:
       contents: write
+    # Why: step-level `if` 不支持直接读取 secrets context，必须先在 job env
+    # 里做存在性检查，后续步骤再消费该变量。四个签名 Secrets 缺一不可，
+    # 必须同时校验，否则校验逻辑与「拒绝发布 unsigned APK」的承诺会失配。
+    env:
+      HAS_RELEASE_SIGNING_SECRETS: ${{ secrets.KEYSTORE_FILE != '' && secrets.KEYSTORE_PASSWORD != '' && secrets.KEY_PASSWORD != '' && secrets.KEY_ALIAS != '' }}
     
     steps:
     # 1. 检出代码
@@ -89,21 +94,51 @@ jobs:
         echo "Debug APK:   ${DEBUG_APK}"
         echo "Release APK: ${RELEASE_APK}"
 
-    # 10. 签名 Release APK（仅在配置了签名 Secrets 时执行）
-    # 前提：Release APK 必须是 unsigned 状态。若 build.gradle 已配置 signingConfig，跳过此步骤。
+    # 10. 校验 Release 签名 Secrets
+    # Why: Release 页面对外标注为 production use，Android 7+ 会拒绝安装 unsigned APK。
+    # 缺失签名 Secrets 时必须直接 fail，避免发布用户无法安装的构建产物。
+    - name: Validate release signing secrets
+      if: ${{ env.HAS_RELEASE_SIGNING_SECRETS != 'true' }}
+      run: |
+        echo "::error::Release signing secrets 未完整配置（KEYSTORE_FILE/KEYSTORE_PASSWORD/KEY_PASSWORD/KEY_ALIAS），拒绝发布 unsigned APK"
+        exit 1
+
+    # 11. 签名 Release APK
+    # Why: 使用 Android SDK 的 apksigner 生成 v2+ 签名（targetSdk 30+ 必需），
+    # jarsigner 只能产生 v1(JAR) 签名。密码通过 `env:` 前缀读取环境变量，
+    # 避免 -storepass/-keypass 展开到 /proc/*/cmdline。
     - name: Sign Release APK
-      if: ${{ secrets.KEYSTORE_FILE != '' }}
+      if: ${{ env.HAS_RELEASE_SIGNING_SECRETS == 'true' }}
+      env:
+        KEYSTORE_FILE: ${{ secrets.KEYSTORE_FILE }}
+        KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        RELEASE_APK: ${{ steps.locate.outputs.RELEASE_APK }}
       run: |
         set -euo pipefail
-        echo "${{ secrets.KEYSTORE_FILE }}" | base64 -d > keystore.jks
-        jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 \
-          -keystore keystore.jks \
-          -storepass "${{ secrets.KEYSTORE_PASSWORD }}" \
-          -keypass "${{ secrets.KEY_PASSWORD }}" \
-          "${{ steps.locate.outputs.RELEASE_APK }}" \
-          "${{ secrets.KEY_ALIAS }}"
+        # trap 保证任何分支（包括签名/校验失败）都清理临时 keystore，降低泄漏风险
+        trap 'rm -f keystore.jks' EXIT
 
-    # 11. 生成 Changelog
+        printf '%s' "$KEYSTORE_FILE" | base64 -d > keystore.jks
+
+        # 选取最新版本的 apksigner，避免多版本 build-tools 并存时选到旧版
+        APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1)"
+        if [ -z "$APKSIGNER" ]; then
+          echo "::error::未找到 apksigner，请确认 Android build-tools 已安装"
+          exit 1
+        fi
+
+        "$APKSIGNER" sign \
+          --ks keystore.jks \
+          --ks-key-alias "$KEY_ALIAS" \
+          --ks-pass env:KEYSTORE_PASSWORD \
+          --key-pass env:KEY_PASSWORD \
+          "$RELEASE_APK"
+
+        "$APKSIGNER" verify --verbose "$RELEASE_APK"
+
+    # 12. 生成 Changelog
     - name: Generate Changelog
       id: changelog
       run: |
@@ -120,7 +155,7 @@ jobs:
           echo "EOF"
         } >> "$GITHUB_OUTPUT"
 
-    # 12. 创建 Release 并上传所有 APK 资产
+    # 13. 创建 Release 并上传所有 APK 资产
     # Why: actions/create-release@v1 与 actions/upload-release-asset@v1 已归档，
     # 改用仍在维护的 softprops/action-gh-release，通过 glob 一次性上传所有 APK。
     - name: Create GitHub Release
@@ -150,7 +185,7 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    # 13. 上传构建产物到 Artifacts（备份）
+    # 14. 上传构建产物到 Artifacts（备份）
     - name: Upload APK Artifacts
       uses: actions/upload-artifact@v4
       with:
