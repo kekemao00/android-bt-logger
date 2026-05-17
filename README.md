@@ -1,333 +1,814 @@
-# BtLogger - 安卓蓝牙连接日志记录与分析工具
+# BtLogger
 
-BtLogger 是一款面向测试与研发场景的 Android 应用，用于自动记录蓝牙音频设备的连接全链路信息。它不仅捕获连接/断开事件，还会主动探测耳机电量、蓝牙版本、音频编解码（Codec），并提供连接历史、趋势图表与 Excel 导出，帮助用户分析蓝牙设备的行为与稳定性。
+> Android 蓝牙连接日志记录、诊断与分析工具  
+> A Bluetooth connection logging, diagnostics and analysis tool for Android.
 
-当前版本：**v1.2.0**（数据库 schema v7）
+![Platform](https://img.shields.io/badge/platform-Android-brightgreen)
+![Language](https://img.shields.io/badge/language-Kotlin-blue)
+![UI](https://img.shields.io/badge/UI-Jetpack%20Compose-4285F4)
+![Database](https://img.shields.io/badge/database-Room-orange)
+![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
-## 目录
+---
 
-* [主要功能](#主要功能)
-* [屏幕截图/界面概览](#屏幕截图界面概览)
-* [技术栈与依赖库](#技术栈与依赖库)
-* [项目结构](#项目结构)
-* [核心实现逻辑](#核心实现逻辑)
-    * [前台服务与蓝牙事件监听](#前台服务与蓝牙事件监听)
-    * [耳机电量采集](#耳机电量采集)
-    * [蓝牙版本探测](#蓝牙版本探测)
-    * [音频 Codec 采集](#音频-codec-采集)
-    * [数据存储与管理](#数据存储与管理)
-    * [数据展示](#数据展示)
-    * [数据导出](#数据导出)
-    * [音量控制](#音量控制)
-    * [应用更新](#应用更新)
-* [权限说明](#权限说明)
-* [如何构建](#如何构建)
-* [CI/CD](#cicd)
-* [使用说明](#使用说明)
-* [已知问题与未来改进](#已知问题与未来改进)
+## 项目简介
 
-## 主要功能
+**BtLogger** 是一款面向 Android 蓝牙设备测试、研发和问题排查场景的工具型应用。
 
-* **前台服务保活**：核心监听逻辑迁移至前台服务 `BtLoggerForegroundService`，即使 UI 被回收也能持续记录事件；通知栏常驻提示运行状态。
-* **自动事件记录**：监听 A2DP 连接状态变化（`ACTION_CONNECTION_STATE_CHANGED`）、A2DP 编解码切换（`ACTION_CODEC_CONFIG_CHANGED`）、手机电量变化（`ACTION_BATTERY_CHANGED`），以及耳机电量广播与 HFP 厂商特定事件。
-* **详细日志信息**：为每条事件记录以下字段
-    * 事件类型：`CONNECTED` / `DISCONNECTED` / `CODEC_CHANGED` / `BATTERY_CHANGED`
-    * 设备名称、MAC、alias、bondState、deviceType、UUIDs
-    * 蓝牙版本（多源推断）
-    * 音频 Codec（手机支持、当前可协商、当前激活）
-    * 手机电量、耳机电量（0~100，-1 表示无法获取）
-    * 媒体音量（百分比 + 原始 level/maxLevel）、蓝牙是否为当前音频输出、是否正在播放
-    * 时间戳
-* **耳机电量多通道采集**：
-    * 反射读取 `BluetoothDevice.getBatteryLevel()` 系统缓存
-    * 解析 `android.bluetooth.device.action.BATTERY_LEVEL_CHANGED` 隐藏广播
-    * 解析 HFP 厂商事件 `+XEVENT` / `+IPHONEACCEV`（Vendor Specific Headset Event）
-    * 针对 LE/双模设备通过 GATT 订阅标准 Battery Service（`0x180F` / `0x2A19`）
-    * 多源合并去重，并对当前连接记录进行回填
-* **蓝牙版本探测**：
-    * 通过 `BluetoothClass`、`BluetoothAdapter.isLeXxxSupported()` 等公开 API 做特征推断
-    * 对 LE/双模设备额外 GATT 读取 Device Information Service，抓取厂商在特征值里明文上报的 `Bluetooth 5.x` 等字样
-    * 支持 BLE 广播扫描（Advertisement Probe）辅助识别
-    * 多源结果合并（`BluetoothVersionUtils.mergeBluetoothVersion`），只取信息量更高的值
-* **设备列表总览**：
-    * 列表形式展示所有历史设备，显示首次/末次记录时间、当前连接状态
-    * 连接中设备以绿色背景高亮
-    * 点击进入详情，长按可删除整个设备及其记录
-* **设备详情**：
-    * 展示设备元信息（名称、MAC、类型、bondState、蓝牙版本、UUIDs、最新 Codec 快照）
-    * 总连接时长 / 总断开时长统计
-    * 按时间倒序的事件列表，显示事件类型徽章、Codec、音量、手机电量、耳机电量、播放状态与时间间隔
-    * **电量趋势图表**：基于 Vico 2.0 绘制，展示耳机电量随时间的变化
-    * 长按记录可删除单条记录
-* **数据持久化**：Room 数据库（version 7）本地存储设备表与连接记录表；跨版本升级采用 `fallbackToDestructiveMigration`。
-* **Excel 数据导出**：通过 jxl 库导出指定设备的完整历史为 `.xls` 文件，并通过 `FileProvider` 提供系统分享入口。
-* **固定音量功能**：开启开关并设定百分比后，当蓝牙设备连接时自动将媒体音量调整到预设值；内部使用 `AudioManager` + `ContentObserver` + `AudioDeviceCallback` 监听音量变化并实时回显。
-* **应用内更新**：集成蒲公英 SDK (`com.pgyer:analytics`)，支持版本检查、下载（RxDownload4）、安装。
-* **Material 3 + Compose UI**：基于 Jetpack Compose 的现代化 UI，支持系统深色模式。
-* **数据清理**：单条删除、按设备删除、全量清空，关键操作均有二次确认。
+它可以在后台持续监听蓝牙音频设备的连接状态、断开事件、Codec 切换、手机电量、耳机电量、媒体音量、播放状态等关键数据，并将完整链路日志持久化到本地数据库中。
 
-## 屏幕截图/界面概览
+相比普通的蓝牙连接记录工具，BtLogger 更关注 **蓝牙连接行为分析** 与 **稳定性诊断**，适用于蓝牙耳机、音箱、车载音频、智能硬件等设备的测试验证场景。
 
-<img src="images/main.png" alt="main" width="200" /><img src="images/device_info.png" alt="device_info" width="200" /><img src="images/execl.png" alt="execl" width="200" />
+当前版本：**v1.2.0**  
+数据库版本：**schema v7**
 
-<img src="images/dialog1.png" alt="dialog1" width="200" /><img src="images/dialog_delete_3.png" alt="dialog_delete_3" width="200" /><img src="images/dialog_delete.png" alt="dialog_delete" width="200" /><img src="images/dialog_delete2.png" alt="dialog_delete2" width="200" />
+---
 
-1. **主屏幕（设备列表）**
-    * 顶部应用栏包含菜单（版本信息/检查更新）、音量预设、系统蓝牙设置跳转与全局清空按钮
-    * 列表展示所有历史设备，连接中设备以高亮背景标记
-    * 点击进入详情，长按弹出删除确认
-2. **设备详情**
-    * 顶部栏提供返回与 Excel 导出
-    * 头部展示设备元信息、总连接/断开时长、Codec、蓝牙版本
-    * 电量趋势图表展示耳机电量随时间变化
-    * 事件列表按时间倒序显示每一条记录，含事件徽章（连接/断开/Codec/电量）
-    * 长按列表项可删除单条记录
-3. **对话框**
-    * **音量预设**：开关控制是否启用固定音量，滑块设置目标百分比
-    * **删除确认**：全量清空 / 按设备删除 / 单条删除
-    * **版本更新**：有新版本时展示更新日志并提供立即更新/稍后
-    * **下载进度**：实时展示下载进度（基于 RxDownload4 的真实进度）
+## 为什么做这个项目
 
-## 技术栈与依赖库
+在蓝牙音频设备研发与测试过程中，经常会遇到以下问题：
 
-| 类别 | 组件 |
-|------|------|
-| 语言 | Kotlin 2.0.21 |
-| JVM | Java 17 |
-| 构建 | Android Gradle Plugin 8.2.2, Gradle Version Catalogs |
-| 编译配置 | compileSdk 36 / targetSdk 33 / minSdk 25 |
-| UI | Jetpack Compose (BOM 2022.10.00), Material 3, Compose Compiler Plugin 2.0.21 |
-| 架构 | MVVM + Repository + Hilt 依赖注入 |
-| 异步 | Kotlin Coroutines + Flow（`Dispatchers.IO`），LiveData |
-| 数据库 | Room 2.5.0（KSP 注解处理） |
-| 依赖注入 | Hilt 2.48（kapt） |
-| 事件总线 | GreenRobot EventBus 3.3.1 |
-| 图表 | Vico `compose-m3` 2.0.0-beta.1 |
-| 工具库 | `com.blankj:utilcodex` 1.31.0 |
-| Excel 导出 | `jxl.jar`（本地依赖） |
-| 应用分发 | 蒲公英 `com.pgyer:analytics` 4.3.3 + RxDownload4 1.1.4 |
+- 用户反馈「蓝牙偶现断连」，但没有完整日志支撑分析
+- 耳机电量显示异常，无法判断数据来源是否可靠
+- 不同手机厂商、不同 Android 版本下蓝牙行为不一致
+- Codec 切换、A2DP/HFP 状态变化难以复现和追踪
+- 测试人员需要手动记录连接时间、断开时间、音量、电量等信息
+- 研发人员需要导出结构化数据进行问题复盘
+
+BtLogger 的目标是将这些零散、不可见、难复现的蓝牙行为转化为**可记录、可追踪、可分析、可导出**的数据。
+
+---
+
+## 核心能力
+
+### 1. 蓝牙连接全链路记录
+
+BtLogger 会自动监听并记录蓝牙音频设备的关键状态变化：
+
+- A2DP 连接 / 断开事件
+- A2DP Codec 配置变化
+- 手机电量变化
+- 蓝牙耳机电量变化
+- 媒体音量变化
+- 当前蓝牙设备是否为音频输出
+- 当前是否处于媒体播放状态
+
+支持的事件类型包括：
+
+```kotlin
+CONNECTED
+DISCONNECTED
+CODEC_CHANGED
+BATTERY_CHANGED
+```
+
+每条日志记录包含：
+
+- 设备名称
+- MAC 地址
+- Alias
+- Bond State
+- Device Type
+- UUIDs
+- 蓝牙版本推断结果
+- 当前 Codec 信息
+- 手机电量
+- 耳机电量
+- 媒体音量百分比
+- 原始音量 level / maxLevel
+- 当前音频输出状态
+- 播放状态
+- 时间戳
+
+---
+
+### 2. 前台服务持续监听
+
+核心监听逻辑运行在前台服务中：
+
+```kotlin
+BtLoggerForegroundService
+```
+
+即使应用 UI 被系统回收，也可以持续记录蓝牙设备状态。
+
+主要能力：
+
+- 前台服务保活
+- 常驻通知栏展示运行状态
+- 蓝牙状态广播监听
+- 音频设备变化监听
+- 音量变化监听
+- 播放状态采集
+- 数据异步写入 Room 数据库
+
+适合长时间测试、压力测试、稳定性验证等场景。
+
+---
+
+### 3. 多通道耳机电量采集
+
+Android 蓝牙耳机电量获取在不同设备、厂商、系统版本上存在明显差异。BtLogger 针对该问题实现了多通道采集策略：
+
+#### 支持的数据来源
+
+- 反射读取系统缓存：
+
+```kotlin
+BluetoothDevice.getBatteryLevel()
+```
+
+- 监听隐藏广播：
+
+```kotlin
+android.bluetooth.device.action.BATTERY_LEVEL_CHANGED
+```
+
+- 解析 HFP Vendor Specific Event：
+
+```text
++XEVENT
++IPHONEACCEV
+```
+
+- BLE GATT Battery Service：
+
+```text
+Service:        0x180F
+Characteristic: 0x2A19
+```
+
+- LE / 双模设备 GATT 订阅
+- 多源数据合并、去重与回填
+
+#### 设计目标
+
+- 尽可能兼容不同品牌耳机
+- 优先使用可信度更高的数据源
+- 自动将后续采集到的电量回填到当前连接记录
+- 避免重复记录和无效数据污染
+
+---
+
+### 4. 蓝牙版本探测
+
+BtLogger 提供蓝牙版本推断能力，用于辅助判断设备能力和兼容性问题。
+
+#### 探测方式
+
+- 基于 `BluetoothClass` 做设备类型判断
+- 基于 `BluetoothAdapter` 能力判断手机侧特性
+- 读取 GATT Device Information Service
+- 分析厂商在特征值中明文上报的版本信息
+- BLE 广播扫描辅助识别
+- 多源结果合并
+
+核心工具类：
+
+```kotlin
+BluetoothVersionUtils.mergeBluetoothVersion()
+```
+
+该模块不会简单覆盖已有结果，而是选择信息量更高、更可信的版本描述。
+
+---
+
+### 5. Codec 信息记录
+
+BtLogger 支持记录 A2DP Codec 相关信息：
+
+- 当前激活 Codec
+- 当前可协商 Codec
+- 手机支持的 Codec 列表
+- Codec 配置变化事件
+
+可以用于分析：
+
+- SBC / AAC / aptX / LDAC 等 Codec 是否正确协商
+- 不同手机上的 Codec 表现差异
+- 连接后 Codec 是否发生切换
+- 音频质量问题是否与 Codec 有关
+
+---
+
+### 6. 设备列表总览
+
+主界面以设备为维度聚合展示所有历史记录。
+
+展示信息包括：
+
+- 设备名称
+- MAC 地址
+- 当前连接状态
+- 首次记录时间
+- 最近记录时间
+- 最新电量
+- 最新 Codec
+- 最新蓝牙版本
+
+交互能力：
+
+- 点击进入设备详情
+- 长按删除设备及其全部记录
+- 当前连接设备高亮展示
+- 支持空状态和加载状态处理
+
+---
+
+### 7. 设备详情分析
+
+设备详情页展示某个蓝牙设备的完整历史数据。
+
+包含：
+
+- 设备基础信息
+- 连接 / 断开时间线
+- 总连接时长
+- 总断开时长
+- 最新 Codec 快照
+- 最新电量
+- UUID 信息
+- 音量信息
+- 播放状态
+- 事件间隔
+- 单条记录删除
+
+适合用于复盘单个设备的长时间连接表现。
+
+---
+
+### 8. 电量趋势图表
+
+基于 Vico 2.0 绘制耳机电量趋势图。
+
+可以直观看到：
+
+- 电量下降趋势
+- 电量上报是否异常
+- 是否存在跳变
+- 是否存在长时间不上报
+- 设备断连前后电量变化
+
+适合测试人员与研发人员快速判断设备电量上报稳定性。
+
+---
+
+### 9. Excel 数据导出
+
+BtLogger 支持将指定设备的完整历史记录导出为 `.xls` 文件。
+
+实现方式：
+
+- 使用 `jxl` 生成 Excel 文件
+- 使用 `FileProvider` 提供安全文件分享
+- 支持通过系统分享面板发送到微信、邮箱、网盘等应用
+
+导出数据适合用于：
+
+- Bug 复现记录
+- 测试报告归档
+- 研发分析
+- 客诉问题排查
+- 设备稳定性对比
+
+---
+
+### 10. 固定音量功能
+
+BtLogger 提供固定媒体音量能力。
+
+开启后，当蓝牙设备连接时，应用会自动将媒体音量调整到用户设定的百分比。
+
+内部实现：
+
+- `AudioManager`
+- `ContentObserver`
+- `AudioDeviceCallback`
+- 媒体音量百分比换算
+- 连接状态联动
+
+适用于蓝牙设备测试过程中保持统一音量条件，减少人为变量干扰。
+
+---
+
+### 11. 应用内更新
+
+集成蒲公英 SDK，用于测试分发场景下的应用更新。
+
+相关能力：
+
+- 版本检查
+- 下载更新包
+- 安装 APK
+- 测试版本快速分发
+
+使用依赖：
+
+```kotlin
+com.pgyer:analytics
+RxDownload4
+```
+
+---
+
+## 技术栈
+
+### 核心语言与平台
+
+- Kotlin
+- Android SDK
+- Jetpack Compose
+- Material 3
+
+### Android Jetpack
+
+- Compose UI
+- ViewModel
+- Lifecycle
+- Room
+- Navigation
+- Coroutines
+- Flow
+- DataStore / SharedPreferences
+
+### 蓝牙与系统能力
+
+- BluetoothAdapter
+- BluetoothDevice
+- BluetoothA2dp
+- BluetoothHeadset
+- BluetoothGatt
+- BroadcastReceiver
+- Foreground Service
+- AudioManager
+- AudioDeviceCallback
+- ContentObserver
+
+### 数据与图表
+
+- Room Database
+- Vico Chart
+- jxl Excel Export
+- FileProvider
+
+### 工程化
+
+- Gradle
+- Kotlin DSL
+- GitHub Actions
+- CI 构建
+- APK Artifact 上传
+
+---
+
+## 架构设计
+
+BtLogger 采用较清晰的分层结构，将蓝牙监听、数据采集、数据持久化、UI 展示进行解耦。
+
+```text
+UI Layer
+├── Compose Screens
+├── ViewModel
+└── StateFlow / UI State
+
+Domain / Logic Layer
+├── Bluetooth event processing
+├── Battery aggregation
+├── Codec parsing
+├── Version detection
+└── Audio state collection
+
+Data Layer
+├── Room Database
+├── DAO
+├── Entity
+└── Repository
+
+System Layer
+├── Foreground Service
+├── BroadcastReceiver
+├── Bluetooth APIs
+├── AudioManager
+└── FileProvider
+```
+
+### 设计特点
+
+- 前台服务负责持续监听
+- Repository 统一封装数据访问
+- ViewModel 管理 UI 状态
+- Compose 负责声明式界面渲染
+- Room 保证本地数据持久化
+- Flow / Coroutines 处理异步数据流
+- 多源数据合并逻辑独立封装，避免 UI 层复杂化
+
+---
 
 ## 项目结构
 
-```
-com.xingkeqi.btlogger
-├── BtLoggerApplication.kt        # Application 入口，创建前台服务通知通道 + 初始化蒲公英 SDK
-├── MainActivity.kt               # Compose UI 入口（设备列表、详情、对话框）
-├── MainViewModel.kt              # UI 状态与数据订阅（LiveData/Flow）
-├── data/                         # 数据层
-│   ├── BtLoggerDatabase.kt       # Room 数据库（version 7，destructive migration）
-│   ├── BtLoggerDao.kt            # DeviceDao / RecordDao / DeviceWithRecordsDao
-│   ├── BtLogggerEntity.kt        # Device / DeviceConnectionRecord / DeviceInfo / RecordInfo / RecordEventType
-│   ├── MessageEvent.kt           # EventBus 事件类
-│   └── repo/                     # Repository 层（BtLoggerRepository / MainRepository）
-├── di/
-│   └── DatabaseModule.kt         # Hilt Module，提供 Database 与 DAO
-├── receiver/
-│   └── BtLoggerRecevier.kt       # 兼容保留的静态 Receiver（Android 8.0+ 隐式广播已失效）
-├── service/                      # 核心运行时
-│   ├── BtLoggerForegroundService.kt         # 前台服务，承载所有广播监听与落库逻辑
-│   ├── BluetoothCodecUtils.kt               # A2DP Codec 解析（CodecSnapshot + Formatter）
-│   ├── BluetoothBatteryProbeManager.kt      # 反射 + GATT 订阅耳机电量
-│   ├── BluetoothVersionProbeManager.kt      # 通过 DIS GATT 读取蓝牙版本
-│   └── BluetoothVersionAdvertisementProbeManager.kt  # BLE 广播扫描辅助识别版本
-├── ui/
-│   ├── AppComponent.kt           # 通用 Composable 组件
-│   ├── components/               # 业务组件
-│   │   ├── BatteryIndicator.kt   # 手机/耳机电量指示器
-│   │   ├── BatteryTrendChart.kt  # Vico 耳机电量趋势图
-│   │   ├── ConnectionStatusIndicator.kt
-│   │   ├── DurationProgressBar.kt
-│   │   ├── SignalStrengthIndicator.kt
-│   │   ├── StatCard.kt
-│   │   └── StatusBadge.kt
-│   ├── slider/SliderScreen.kt    # 示例/备用屏
-│   └── theme/                    # Color / Dimens / Theme / Type
-└── utils/
-    ├── BluetoothBatteryUtils.kt  # 耳机电量广播 + HFP 厂商事件解析
-    ├── BluetoothVersionUtils.kt  # 蓝牙版本推断与合并
-    ├── JxlUtils.kt               # Excel 导出
-    ├── MediaVolumeUtils.kt       # 媒体音量快照与路由信息
-    └── SimpleUtils.kt            # 时间格式化等
+```text
+android-bt-logger/
+├── app/
+│   ├── src/main/
+│   │   ├── java/...
+│   │   │   ├── service/
+│   │   │   │   └── BtLoggerForegroundService.kt
+│   │   │   ├── receiver/
+│   │   │   ├── data/
+│   │   │   │   ├── db/
+│   │   │   │   ├── dao/
+│   │   │   │   ├── entity/
+│   │   │   │   └── repository/
+│   │   │   ├── bluetooth/
+│   │   │   ├── audio/
+│   │   │   ├── ui/
+│   │   │   │   ├── screen/
+│   │   │   │   ├── component/
+│   │   │   │   └── theme/
+│   │   │   └── util/
+│   │   ├── res/
+│   │   └── AndroidManifest.xml
+│   └── build.gradle.kts
+├── .github/
+│   └── workflows/
+├── gradle/
+├── build.gradle.kts
+└── README.md
 ```
 
-关键 Manifest 配置（`app/src/main/AndroidManifest.xml`）：
-* `BtLoggerForegroundService`：`foregroundServiceType="connectedDevice"`
-* `BtLoggerReceiver`：保留静态注册，实际主要依赖前台服务动态注册
-* `FileProvider`：authorities=`${applicationId}.fileProvider`，路径配置在 `res/xml/excel_file_paths.xml`
+> 具体目录可能会随着版本演进略有调整，请以实际代码为准。
 
-## 核心实现逻辑
-
-### 前台服务与蓝牙事件监听
-
-* 应用启动后通过 `BtLoggerForegroundService.start(context)` 启动前台服务，`startForegroundService` 搭配 `NotificationChannel`（low importance）展示常驻通知。
-* 前台服务在 `onCreate` 时动态注册 `BroadcastReceiver`，监听以下 Action：
-    * `BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED`
-    * `android.bluetooth.a2dp.profile.action.CODEC_CONFIG_CHANGED`（API 28+）
-    * `Intent.ACTION_BATTERY_CHANGED`
-    * `android.bluetooth.device.action.BATTERY_LEVEL_CHANGED`（隐藏 API）
-    * `BluetoothHeadset.ACTION_VENDOR_SPECIFIC_HEADSET_EVENT`
-* 所有落库操作通过 `serviceScope`（`SupervisorJob + Dispatchers.IO`）异步执行；对同一设备的 codec/battery 快照使用 `Mutex` 保护并发。
-* 落库成功后通过 EventBus 发送 `MessageEvent("ADD_RECORD", device, record)` 通知 UI。
-* 静态 `BtLoggerReceiver` 仅保留兼容入口，Android 8.0+ 对隐式广播的限制已使其在大多数场景失效。
-
-### 耳机电量采集
-
-耳机电量没有稳定的公开 SDK API，`BluetoothBatteryProbeManager` 与 `BluetoothBatteryUtils` 协同做多通道采集：
-
-1. **系统广播**：`ACTION_BATTERY_LEVEL_CHANGED` 携带 `android.bluetooth.device.extra.BATTERY_LEVEL`。
-2. **HFP 厂商事件**：解析 `+XEVENT ... BATTERY,current,max` 与 Apple `+IPHONEACCEV` 电量指示（1 号子命令）。
-3. **反射回退**：在连接瞬间反射 `BluetoothDevice.getBatteryLevel()` 读取系统缓存值。
-4. **GATT 订阅**：对 LE / DUAL 设备建立 GATT 连接，读取 Battery Service `0x180F` 的 `0x2A19` 特征，并订阅 CCCD 通知。
-5. **去重与回填**：`latestHeadsetBatteryLevels` 缓存 + `latestPersistedBatterySnapshots` 做去重；当前连接中的最新 `CONNECTED` 事件会被回填最新耳机电量，避免详情页首行缺失数据。
-
-### 蓝牙版本探测
-
-`BluetoothVersionUtils` + `BluetoothVersionProbeManager` + `BluetoothVersionAdvertisementProbeManager` 组合：
-
-* 首先通过公开 API（`BluetoothClass`、`BluetoothAdapter.isLeXxxSupported` 等）做粗粒度推断。
-* 对 LE/双模设备进行 GATT 连接并读取 Device Information Service，从型号/固件/硬件特征值中识别明文 `Bluetooth 5.x` 字样。
-* 可选的 BLE 广播扫描解析 AD Type，补齐广播端信息。
-* 多源结果通过 `mergeBluetoothVersion` 合并，保留信息量更高的值（例如把 `Bluetooth 5` 升级为 `Bluetooth 5.2`）。
-* 已持久化的版本会跳过重复探测，避免无谓 GATT 连接。
-
-### 音频 Codec 采集
-
-* 监听 `ACTION_CODEC_CONFIG_CHANGED`（API 28+），解析 `BluetoothCodecStatus` / `BluetoothCodecConfig`，得到 `phoneSupportedCodecs` / `negotiableCodecs` / `activeCodec`。
-* `BluetoothCodecFormatter` 负责归一化（排序、去重），并区分两种落库策略：
-    * **刷新快照**：Codec 列表变化但 activeCodec 未变 —— 只更新设备最新缓存 + 回填当前 `CONNECTED` 记录。
-    * **写历史事件**：`activeCodec` 真正切换时写一条 `CODEC_CHANGED` 事件。
-* 首次连接时若没有 codec 信息会同步落 `CODEC_UNKNOWN`，并在后续 codec 广播到达后回填。
-
-### 数据存储与管理
-
-* 数据库 `bt_logger_database`，当前 version = **7**；不兼容迁移时采用 `fallbackToDestructiveMigration()` 重建。
-* 表结构：
-    * `devices`（主键 MAC）：name / bondState / rssi / alias / deviceType / bluetoothVersion / uuids / latestPhoneSupportedCodecs / latestNegotiableCodecs / latestActiveCodec / latestCodecUpdatedAt
-    * `device_connection_records`（自增 ID，外键级联删除）：deviceMac / timestamp / connectState / batteryLevel / headsetBatteryLevel / volume / isPlaying / eventType / phoneSupportedCodecs / negotiableCodecs / activeCodec
-* DAO 层提供事务保护的 `DeviceWithRecordsDao.deleteDeviceWithRecords()`，确保设备与其记录一致性。
-* `DeviceDao.getDeviceInfosWithConnectionRecords()` 使用 JOIN + 子查询一次性聚合每个设备的首末记录时间与最新连接状态。
-
-### 数据展示
-
-* `MainViewModel` 把 `DeviceDao` 与 `RecordDao` 的 Flow 转为 LiveData 供 Compose 观察。
-* `recordInfoList` 在 `switchMap` 中按时间升序遍历，累计连接/断开时长并写回 `RecordInfo.totalConnectionTime`，UI 反转为倒序展示。
-* `CODEC_CHANGED` / `BATTERY_CHANGED` 事件不计入连接/断开时长的累计（`isStateEvent` 过滤）。
-
-### 数据导出
-
-* 在设备详情点击导出按钮 → `JxlUtils.saveDataToSheet()` 使用 jxl 生成 `.xls`。
-* 文件保存在应用内部存储，通过 `FileProvider`（authorities = `${applicationId}.fileProvider`，配置在 `res/xml/excel_file_paths.xml`）以 content URI 共享，通过 `Intent.ACTION_VIEW` 打开。
-
-### 音量控制
-
-* 顶部栏音量按钮打开预设对话框，开关 `customVolumeSwitch` + 滑块 `presetTestVolume` 设定目标百分比。
-* 连接事件到达时若开关启用，使用 `AudioManager` 将 `STREAM_MUSIC` 设置到目标百分比。
-* `MediaVolumeUtils.readMediaVolumeSnapshot()` 统一读取当前音量（percent、current level、max level、是否有蓝牙音频输出、是否正在播放音乐），并通过 `ContentObserver`（监听 `Settings.System.VOLUME_SETTINGS`）+ `AudioDeviceCallback` 实时同步 UI。
-
-### 应用更新
-
-* 蒲公英 SDK 在 `Application.attachBaseContext` 中初始化，启用 `APP_LAUNCH_TIME` / `APP_PAGE_CATON` / `CHECK_UPDATE`。
-* `MainViewModel.checkUpdate()` 调用 `PgyerSDKManager.checkSoftwareUpdate`；有新版本时通过 `showDialogLD` 驱动对话框。
-* 下载使用 RxDownload4，`downloadProgressLD` 推送真实下载进度；完成后调用 `AppUtils.installApp(file)` 安装。
+---
 
 ## 权限说明
 
+由于应用需要监听蓝牙状态、读取蓝牙设备信息、执行 BLE 扫描、导出文件以及运行前台服务，因此需要以下权限。
+
+### Android 12 及以上
+
 ```xml
-<!-- 蓝牙 -->
+<uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+```
+
+### Android 12 以下
+
+```xml
 <uses-permission android:name="android.permission.BLUETOOTH" />
 <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
-<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-<uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
-
-<!-- 前台服务 -->
-<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-<uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
-
-<!-- 运行时与后台 -->
-<uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-<uses-permission android:name="android.permission.WAKE_LOCK" />
-<uses-permission android:name="android.permission.VIBRATE" />
-<uses-permission android:name="android.permission.WRITE_SETTINGS" tools:ignore="ProtectedPermissions" />
-
-<!-- 存储（Android 12 及以下用于外部共享） -->
-<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
-<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
-
-<!-- 蒲公英 SDK -->
-<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-<uses-permission android:name="android.permission.INTERNET" />
-<uses-permission android:name="android.permission.READ_PHONE_STATE" />
-<uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
-<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 ```
 
-关键点：
-* **Android 12+**：`BLUETOOTH_CONNECT`、`BLUETOOTH_SCAN` 为运行时权限，应用启动时会请求；`BLUETOOTH_SCAN` 使用 `neverForLocation` 声明，避免触发位置权限提示。
-* **前台服务**：`FOREGROUND_SERVICE_CONNECTED_DEVICE`（Android 14+ 必需）配合 manifest 的 `foregroundServiceType="connectedDevice"`。
-* **隐私敏感**：`WRITE_SETTINGS` 当前未被实际使用，但仍保留在 manifest。
+### 前台服务
 
-## 如何构建
+```xml
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+```
+
+### 文件导出
+
+通过 `FileProvider` 进行文件共享，不直接暴露私有路径。
+
+---
+
+## 构建方式
+
+### 环境要求
+
+- Android Studio
+- JDK 17+
+- Gradle 8+
+- Android Gradle Plugin 8+
+- Android SDK 35 或项目配置对应版本
+
+### 克隆项目
 
 ```bash
-# Debug APK
-./gradlew assembleDebug
-
-# Release APK（未配置签名时输出 app-release-unsigned.apk）
-./gradlew assembleRelease
-
-# 清理
-./gradlew clean
-
-# 单元测试
-./gradlew test
-
-# 仪器测试
-./gradlew connectedAndroidTest
+git clone https://github.com/kekemao00/android-bt-logger.git
+cd android-bt-logger
 ```
 
-* APK 输出路径：`app/build/outputs/apk/`，命名模板为 `BtLogger-{variant}-v{versionName}-{versionCode}({applicationId}).apk`。
-* `versionCode` 在 `app/build.gradle` 中按时间戳自动生成（每 10 秒 +1，可用到 ~680 年后）。
-* Java/Kotlin 目标 JVM = 17，确保本地 JDK ≥ 17。
-* 蒲公英 API Key 已写入 `AndroidManifest.xml` 的 `PGYER_API_KEY` meta-data。
+### 构建 Debug 包
+
+```bash
+./gradlew assembleDebug
+```
+
+### 构建 Release 包
+
+```bash
+./gradlew assembleRelease
+```
+
+### 安装到设备
+
+```bash
+./gradlew installDebug
+```
+
+---
 
 ## CI/CD
 
-仓库已配置 GitHub Actions 工作流 `.github/workflows/release.yml`：
+项目支持 GitHub Actions 自动构建。
 
-* **触发条件**：推送 `v*.*.*` 格式 tag，或 workflow_dispatch 手动触发
-* **执行内容**：
-    1. JDK 17 + Android SDK 环境准备
-    2. Gradle 缓存
-    3. 构建 Debug + Release APK
-    4. 可选签名（依赖仓库 Secrets `KEYSTORE_FILE` / `KEYSTORE_PASSWORD` / `KEY_PASSWORD` / `KEY_ALIAS`）
-    5. 基于上一个 tag 的 `git log` 自动生成 Changelog
-    6. 创建 GitHub Release，上传 Debug/Release APK 到 Release 资产与 Artifacts
+典型流程：
+
+```text
+Push / Pull Request
+        ↓
+Checkout Code
+        ↓
+Setup JDK
+        ↓
+Setup Gradle
+        ↓
+Build Debug APK
+        ↓
+Upload Artifact
+```
+
+适合用于：
+
+- 自动验证代码可构建
+- 快速生成测试包
+- 多端协作分发
+- 后续扩展自动发布流程
+
+---
 
 ## 使用说明
 
-1. **首次启动与权限**
-    * Android 12+ 会请求 `BLUETOOTH_CONNECT` / `BLUETOOTH_SCAN`，请授予以便应用正常工作。
-    * 通知栏会出现「蓝牙日志记录中」常驻通知，表示前台服务已启动。
-2. **自动记录**
-    * 应用在后台持续监听蓝牙事件，无需额外操作；建议保持前台或允许后台运行以避免被个别国产 ROM 杀死。
-3. **查看设备列表**：主屏幕按历史记录顺序展示所有设备，绿色背景代表当前已连接。
-4. **查看详细记录**：点击设备卡片进入详情，可查看元信息、总时长、电量趋势图、事件列表。
-5. **导出 Excel 日志**：详情页右上角导出按钮生成 `.xls` 并尝试调用系统默认应用打开。
-6. **固定音量**：主屏幕顶部音量按钮 → 启用开关 → 拖动滑块设定百分比；后续每次连接都会把媒体音量恢复到该值。
-7. **检查更新**：顶部菜单按钮中触发；或等待蒲公英 SDK 被动检测。
-8. **数据清理**
-    * **全部**：顶部清空按钮
-    * **某设备**：列表项长按
-    * **单条记录**：详情页列表项长按
-9. **快捷入口**：顶部蓝牙图标可跳转至系统蓝牙设置页。
+### 1. 安装应用
 
-## 已知问题与未来改进
+通过 Android Studio 安装，或使用 GitHub Actions 构建产物安装。
 
-* **部分厂商不上报耳机电量**：如果设备既不支持标准 BAS GATT Service，也不发送 `+XEVENT` / `+IPHONEACCEV`，则耳机电量会持续显示为「未知」（-1）。
-* **蓝牙版本推断存在信息差**：公开 SDK 无法精确读取远端 Core Version，只能通过 DIS / 广播内容做启发式推断，极少数机型可能依然显示为「未知」。
-* **前台服务保活**：个别国产 ROM（小米、OPPO、vivo 等）会在内存紧张时回收前台服务，必要时需手动加入「电池优化白名单」或「自启动/后台允许」。
-* **数据库升级策略**：当前使用 `fallbackToDestructiveMigration`，schema 变更会清空历史数据；未来需要迁移到真正的 `Migration` 以保留用户数据。
-* **开机自启**：已声明 `RECEIVE_BOOT_COMPLETED` 但尚未注册 `BOOT_COMPLETED` 监听；如需启动即录制需补齐该能力。
-* **模块化拆分**：`MainActivity.kt` 目前承载了所有 Compose UI（约 1500+ 行），后续可按 Feature 拆包，并把 `MainViewModel` 的直接 DAO 依赖替换为现有 Repository。
-* **统计维度**：可以基于事件数据增加更丰富的统计（日/周维度连接频率、平均连接时长、Codec 命中率等）。
-* **过滤与排序**：设备列表与记录列表暂无过滤、搜索、排序能力，规模大时查找不便。
+### 2. 授予权限
+
+首次启动时，请根据系统提示授予：
+
+- 蓝牙权限
+- 附近设备权限
+- 通知权限
+- 定位权限，部分 Android 版本 BLE 扫描需要
+- 前台服务相关权限
+
+### 3. 启动日志服务
+
+进入应用后启动蓝牙日志监听服务。
+
+启动后通知栏会显示常驻通知，表示 BtLogger 正在后台监听蓝牙事件。
+
+### 4. 连接蓝牙设备
+
+连接蓝牙耳机、音箱或其他 A2DP 音频设备。
+
+应用会自动记录连接事件，并采集相关信息。
+
+### 5. 查看设备记录
+
+在设备列表中选择目标设备，进入详情页查看：
+
+- 连接历史
+- 断开历史
+- Codec 变化
+- 电量变化
+- 音量变化
+- 播放状态
+- 时间间隔
+
+### 6. 导出数据
+
+进入设备详情后，可将该设备历史数据导出为 Excel 文件，并通过系统分享面板发送给其他应用。
+
+---
+
+## 典型应用场景
+
+### 蓝牙耳机研发测试
+
+用于记录耳机在不同手机、不同系统版本下的连接稳定性、电量上报、Codec 协商结果。
+
+### 客诉问题复盘
+
+当用户反馈断连、无声、电量异常时，可通过历史日志辅助定位问题。
+
+### 兼容性验证
+
+对比不同厂商手机上的蓝牙行为差异，例如：
+
+- 小米
+- OPPO
+- vivo
+- 华为
+- Samsung
+- Pixel
+
+### 长时间稳定性测试
+
+通过前台服务持续记录设备数小时甚至数天的连接状态，用于发现偶现问题。
+
+### Codec 行为分析
+
+用于观察设备连接后是否正确协商 AAC、aptX、LDAC 等音频编码格式。
+
+### 电量上报验证
+
+用于测试耳机电量广播、HFP 电量事件、BLE Battery Service 是否稳定。
+
+---
+
+## 技术亮点
+
+### 多源蓝牙电量采集
+
+Android 对蓝牙耳机电量并没有完全统一的公开标准实现。BtLogger 通过系统缓存、隐藏广播、HFP 厂商事件和 BLE GATT 多种方式进行采集，并进行合并去重。
+
+### 蓝牙版本推断
+
+通过公开 API、BLE GATT、广播扫描等多种信息源推断蓝牙版本，提升设备信息完整度。
+
+### 前台服务稳定监听
+
+将核心监听逻辑从 Activity 解耦到 Foreground Service，提升长时间运行可靠性。
+
+### Compose + Material 3
+
+使用 Jetpack Compose 构建现代化 UI，降低传统 View 系统的状态同步复杂度。
+
+### Room 本地持久化
+
+所有连接事件和设备信息均持久化到本地数据库，支持历史回溯、统计和导出。
+
+### Excel 结构化导出
+
+将测试过程中的蓝牙行为转化为结构化数据，便于研发、测试、产品和售后协作分析。
+
+---
+
+## 数据库设计概览
+
+### Device Entity
+
+用于存储设备维度信息：
+
+```text
+device_mac
+device_name
+alias
+bond_state
+device_type
+uuids
+bluetooth_version
+first_seen_time
+last_seen_time
+latest_codec
+latest_battery
+```
+
+### Connection Log Entity
+
+用于存储事件维度信息：
+
+```text
+id
+device_mac
+event_type
+timestamp
+codec_info
+phone_battery
+headset_battery
+media_volume
+is_bluetooth_output
+is_playing
+raw_extra
+```
+
+---
+
+## 隐私说明
+
+BtLogger 仅在本地记录蓝牙设备相关信息，不会默认上传任何用户数据。
+
+本地记录的数据包括：
+
+- 蓝牙设备名称
+- 蓝牙 MAC 地址
+- 连接 / 断开时间
+- Codec 信息
+- 电量信息
+- 音量状态
+- 播放状态
+
+这些数据仅用于本地分析和用户主动导出。
+
+如果后续引入云端同步或远程日志能力，应明确增加用户授权与隐私说明。
+
+---
+
+## 已知限制
+
+由于 Android 系统和厂商实现差异，部分能力可能受到限制：
+
+- 某些设备不公开耳机电量
+- 某些系统屏蔽隐藏广播
+- 某些手机不允许读取完整 Codec 信息
+- Android 12+ 对蓝牙权限要求更严格
+- BLE 扫描在后台可能受到系统限制
+- 部分厂商 ROM 会限制前台服务长时间运行
+- 蓝牙版本只能基于多源信息推断，不能保证 100% 准确
+
+---
+
+## Roadmap
+
+后续计划：
+
+- [ ] 支持更多图表维度，如连接时长、断连次数、Codec 分布
+- [ ] 支持按日期范围筛选日志
+- [ ] 支持 CSV 导出
+- [ ] 支持 JSON 导出
+- [ ] 支持批量导出全部设备记录
+- [ ] 增加日志搜索能力
+- [ ] 增加设备标签功能
+- [ ] 增加断连原因分析
+- [ ] 增加蓝牙 RSSI 记录
+- [ ] 增加测试报告自动生成
+- [ ] 支持更多蓝牙 Profile 状态记录
+- [ ] 优化数据库迁移策略，替换 destructive migration
+- [ ] 增加单元测试与 UI 自动化测试
+- [ ] 增加更多厂商耳机电量协议适配
+
+---
+
+## 适合人群
+
+该项目适合以下开发者或团队参考：
+
+- Android 蓝牙开发工程师
+- 智能硬件 App 开发者
+- 蓝牙耳机测试工程师
+- 音频设备研发团队
+- Android 系统兼容性测试人员
+- 想学习 Android 蓝牙开发的开发者
+- 想了解 Compose + Room + 前台服务实践的开发者
+
+---
+
+## 相关知识点
+
+通过该项目可以学习和实践：
+
+- Android 蓝牙连接状态监听
+- A2DP Profile 使用
+- HFP Vendor Specific Event 解析
+- BLE GATT Service 读取与订阅
+- Android 12+ 蓝牙权限适配
+- 前台服务保活
+- Room 数据库设计
+- Jetpack Compose 状态管理
+- Flow / Coroutines 异步处理
+- Android 音频输出设备判断
+- Excel 文件导出
+- FileProvider 文件共享
+- GitHub Actions 自动构建
+
+---
+
+## 贡献
+
+欢迎提交 Issue 和 Pull Request。
+
+如果你在不同设备上发现：
+
+- 电量无法读取
+- Codec 信息异常
+- 连接状态记录不准确
+- 某些厂商设备存在特殊广播格式
+- Android 某版本权限行为异常
+
+欢迎反馈设备型号、系统版本、蓝牙设备型号和复现步骤。
+
+---
+
+## License
+
+MIT License
+
+---
+
+## 作者
+
+**毛科 / kekemao00**
+
+- GitHub: [https://github.com/kekemao00](https://github.com/kekemao00)
+- Blog: [https://kekemao.me](https://kekemao.me)
+
+---
+
+## 项目定位
+
+BtLogger 不只是一个简单的蓝牙日志工具，它更像是一个面向 Android 蓝牙设备研发和测试场景的轻量级可观测性工具。
+
+它尝试将蓝牙连接、Codec、电量、音量、播放状态等分散在系统各处的信息统一采集、结构化存储并可视化展示，从而帮助开发者更高效地定位蓝牙连接稳定性和兼容性问题。
