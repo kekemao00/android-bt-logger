@@ -800,7 +800,7 @@ MIT License
 
 ## 作者
 
-**毛科 / kekemao00**
+**kekemao00**
 
 - GitHub: [https://github.com/kekemao00](https://github.com/kekemao00)
 - Blog: [https://kekemao.me](https://kekemao.me)
