@@ -27,6 +27,21 @@ class BluetoothCodecFormatterTest {
     }
 
     @Test
+    fun normalizeSnapshot_keepsActiveCodecWhenCapabilityListsUnavailable() {
+        val normalized = BluetoothCodecFormatter.normalizeSnapshot(
+            CodecSnapshot(
+                phoneSupportedCodecs = CODEC_LIST_UNAVAILABLE,
+                negotiableCodecs = CODEC_LIST_UNAVAILABLE,
+                activeCodec = " LDAC "
+            )
+        )
+
+        assertEquals(CODEC_LIST_UNAVAILABLE, normalized.phoneSupportedCodecs)
+        assertEquals(CODEC_LIST_UNAVAILABLE, normalized.negotiableCodecs)
+        assertEquals("LDAC", normalized.activeCodec)
+    }
+
+    @Test
     fun normalizeSnapshot_sortsAndDeduplicatesCodecLists() {
         val normalized = BluetoothCodecFormatter.normalizeSnapshot(
             CodecSnapshot(

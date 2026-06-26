@@ -33,6 +33,17 @@ class BtLoggerReceiver : BroadcastReceiver() {
 
     @SuppressLint("MissingPermission")
     override fun onReceive(context: Context, intent: Intent) {
+        try {
+            handleBroadcast(intent)
+        } catch (e: Exception) {
+            Log.e(tag, "[BtLoggerReceiver] onReceive -> failed for action=${intent.action}", e)
+        } catch (e: LinkageError) {
+            Log.e(tag, "[BtLoggerReceiver] onReceive -> platform API unavailable for action=${intent.action}", e)
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun handleBroadcast(intent: Intent) {
         val action = intent.action ?: return
 
         // 根据不同的 Action 获取对应的状态 Extra Key
@@ -74,22 +85,22 @@ class BtLoggerReceiver : BroadcastReceiver() {
         state: Int,
         profileName: String
     ) {
-        val name = bluetoothDevice.name
-        val address = bluetoothDevice.address
-        val type = bluetoothDevice.type
-        val bondState = bluetoothDevice.bondState
-        val uuids = bluetoothDevice.uuids
+        val name = readDeviceNameOrEmpty(bluetoothDevice)
+        val address = readDeviceAddressOrNull(bluetoothDevice) ?: return
+        val type = readDeviceType(bluetoothDevice)
+        val bondState = readDeviceBondState(bluetoothDevice)
+        val uuids = readDeviceUuidsOrNull(bluetoothDevice)
         val alias = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            bluetoothDevice.alias
+            readDeviceAliasOrEmpty(bluetoothDevice)
         } else {
             ""
         }
 
-        val isPlaying = isPlaying()
-        val volumeSnapshot = readMediaVolumeSnapshot(BtLoggerApplication.instance)
+        val isPlaying = isPlayingSafely()
+        val volumeSnapshot = readMediaVolumeSnapshotSafely()
         val volume = volumeSnapshot.percent
         val now = System.currentTimeMillis()
-        val batteryLevel = getBatteryLevel()
+        val batteryLevel = getBatteryLevelSafely()
 
         val isConnected = state == BluetoothProfile.STATE_CONNECTED
         val connectStatus = if (isConnected) {
@@ -106,14 +117,14 @@ class BtLoggerReceiver : BroadcastReceiver() {
                     "uuids=${uuids?.joinToString()}: $now"
         )
 
-        ToastUtils.showLong("$name - ${if (isConnected) "已连接" else "已断开"}")
+        showConnectionToastSafely(name, isConnected)
 
         val device = Device(
             mac = address,
-            name = name ?: "",
+            name = name,
             bondState = bondState,
             rssi = null, // 连接状态变化时无法获取 RSSI
-            alias = alias ?: "",
+            alias = alias,
             deviceType = type,
             uuids = uuids?.joinToString() ?: ""
         )
@@ -133,7 +144,144 @@ class BtLoggerReceiver : BroadcastReceiver() {
         )
 
         // 直接发送事件，移除延迟保存机制以避免数据丢失
-        EventBus.getDefault().post(MessageEvent("ADD_RECORD", device, record))
+        postRecordEventSafely(device, record)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun readDeviceAddressOrNull(bluetoothDevice: BluetoothDevice): String? {
+        return try {
+            bluetoothDevice.address?.takeIf { it.isNotBlank() }
+        } catch (e: Exception) {
+            Log.e(tag, "[BtLoggerReceiver] readDeviceAddressOrNull -> failed", e)
+            null
+        } catch (e: LinkageError) {
+            Log.e(tag, "[BtLoggerReceiver] readDeviceAddressOrNull -> platform API unavailable", e)
+            null
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun readDeviceNameOrEmpty(bluetoothDevice: BluetoothDevice): String {
+        return try {
+            bluetoothDevice.name.orEmpty()
+        } catch (e: Exception) {
+            Log.e(tag, "[BtLoggerReceiver] readDeviceNameOrEmpty -> failed", e)
+            ""
+        } catch (e: LinkageError) {
+            Log.e(tag, "[BtLoggerReceiver] readDeviceNameOrEmpty -> platform API unavailable", e)
+            ""
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun readDeviceAliasOrEmpty(bluetoothDevice: BluetoothDevice): String {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                bluetoothDevice.alias.orEmpty()
+            } else {
+                ""
+            }
+        } catch (e: Exception) {
+            Log.e(tag, "[BtLoggerReceiver] readDeviceAliasOrEmpty -> failed", e)
+            ""
+        } catch (e: LinkageError) {
+            Log.e(tag, "[BtLoggerReceiver] readDeviceAliasOrEmpty -> platform API unavailable", e)
+            ""
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun readDeviceType(bluetoothDevice: BluetoothDevice): Int {
+        return try {
+            bluetoothDevice.type
+        } catch (e: Exception) {
+            Log.e(tag, "[BtLoggerReceiver] readDeviceType -> failed", e)
+            BluetoothDevice.DEVICE_TYPE_UNKNOWN
+        } catch (e: LinkageError) {
+            Log.e(tag, "[BtLoggerReceiver] readDeviceType -> platform API unavailable", e)
+            BluetoothDevice.DEVICE_TYPE_UNKNOWN
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun readDeviceBondState(bluetoothDevice: BluetoothDevice): Int {
+        return try {
+            bluetoothDevice.bondState
+        } catch (e: Exception) {
+            Log.e(tag, "[BtLoggerReceiver] readDeviceBondState -> failed", e)
+            BluetoothDevice.BOND_NONE
+        } catch (e: LinkageError) {
+            Log.e(tag, "[BtLoggerReceiver] readDeviceBondState -> platform API unavailable", e)
+            BluetoothDevice.BOND_NONE
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun readDeviceUuidsOrNull(bluetoothDevice: BluetoothDevice): Array<android.os.ParcelUuid>? {
+        return try {
+            bluetoothDevice.uuids
+        } catch (e: Exception) {
+            Log.e(tag, "[BtLoggerReceiver] readDeviceUuidsOrNull -> failed", e)
+            null
+        } catch (e: LinkageError) {
+            Log.e(tag, "[BtLoggerReceiver] readDeviceUuidsOrNull -> platform API unavailable", e)
+            null
+        }
+    }
+
+    private fun readMediaVolumeSnapshotSafely() =
+        try {
+            readMediaVolumeSnapshot(BtLoggerApplication.instance)
+        } catch (e: Exception) {
+            Log.e(tag, "[BtLoggerReceiver] readMediaVolumeSnapshotSafely -> failed", e)
+            com.xingkeqi.btlogger.utils.MediaVolumeSnapshot()
+        } catch (e: LinkageError) {
+            Log.e(tag, "[BtLoggerReceiver] readMediaVolumeSnapshotSafely -> platform API unavailable", e)
+            com.xingkeqi.btlogger.utils.MediaVolumeSnapshot()
+        }
+
+    private fun isPlayingSafely(): Boolean {
+        return try {
+            isPlaying()
+        } catch (e: Exception) {
+            Log.e(tag, "[BtLoggerReceiver] isPlayingSafely -> failed", e)
+            false
+        } catch (e: LinkageError) {
+            Log.e(tag, "[BtLoggerReceiver] isPlayingSafely -> platform API unavailable", e)
+            false
+        }
+    }
+
+    private fun getBatteryLevelSafely(): Int {
+        return try {
+            getBatteryLevel()
+        } catch (e: Exception) {
+            Log.e(tag, "[BtLoggerReceiver] getBatteryLevelSafely -> failed", e)
+            0
+        } catch (e: LinkageError) {
+            Log.e(tag, "[BtLoggerReceiver] getBatteryLevelSafely -> platform API unavailable", e)
+            0
+        }
+    }
+
+    private fun showConnectionToastSafely(name: String, isConnected: Boolean) {
+        try {
+            ToastUtils.showLong("$name - ${if (isConnected) "已连接" else "已断开"}")
+        } catch (e: Exception) {
+            Log.e(tag, "[BtLoggerReceiver] showConnectionToastSafely -> failed", e)
+        } catch (e: LinkageError) {
+            Log.e(tag, "[BtLoggerReceiver] showConnectionToastSafely -> platform API unavailable", e)
+        }
+    }
+
+    private fun postRecordEventSafely(device: Device, record: DeviceConnectionRecord) {
+        try {
+            EventBus.getDefault().post(MessageEvent("ADD_RECORD", device, record))
+        } catch (e: Exception) {
+            Log.e(tag, "[BtLoggerReceiver] postRecordEventSafely -> failed for ${device.mac}", e)
+        } catch (e: LinkageError) {
+            Log.e(tag, "[BtLoggerReceiver] postRecordEventSafely -> platform API unavailable for ${device.mac}", e)
+        }
     }
 }
 

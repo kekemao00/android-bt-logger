@@ -36,9 +36,12 @@ import com.xingkeqi.btlogger.data.RecordDao
 import com.xingkeqi.btlogger.utils.ACTION_BLUETOOTH_DEVICE_BATTERY_LEVEL_CHANGED
 import com.xingkeqi.btlogger.utils.BluetoothBatteryUtils
 import com.xingkeqi.btlogger.utils.BluetoothVersionProbeResult
+import com.xingkeqi.btlogger.utils.BluetoothVersionSnapshot
 import com.xingkeqi.btlogger.utils.BluetoothVersionUtils
 import com.xingkeqi.btlogger.utils.HeadsetBatterySnapshot
+import com.xingkeqi.btlogger.utils.MediaVolumeSnapshot
 import com.xingkeqi.btlogger.utils.readMediaVolumeSnapshot
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -71,7 +74,7 @@ class BtLoggerForegroundService : Service() {
             context = applicationContext,
             scope = serviceScope
         ) { device, snapshot ->
-            serviceScope.launch {
+            launchSafely("batteryProbeResult") {
                 handleHeadsetBatteryChanged(device, snapshot)
             }
         }
@@ -81,7 +84,7 @@ class BtLoggerForegroundService : Service() {
             context = applicationContext,
             scope = serviceScope
         ) { device, result ->
-            serviceScope.launch {
+            launchSafely("versionProbeResult") {
                 handleBluetoothVersionProbeResult(device, result)
             }
         }
@@ -91,7 +94,7 @@ class BtLoggerForegroundService : Service() {
             context = applicationContext,
             scope = serviceScope
         ) { device, result ->
-            serviceScope.launch {
+            launchSafely("versionAdvertisementProbeResult") {
                 handleBluetoothVersionProbeResult(device, result)
             }
         }
@@ -109,61 +112,68 @@ class BtLoggerForegroundService : Service() {
     private val btReceiver = object : BroadcastReceiver() {
         @SuppressLint("MissingPermission")
         override fun onReceive(context: Context, intent: Intent) {
-            when (intent.action) {
-                BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED -> {
-                    val state = intent.getIntExtra(BluetoothProfile.EXTRA_STATE, -1)
-                    if (state != BluetoothProfile.STATE_CONNECTED && state != BluetoothProfile.STATE_DISCONNECTED) {
-                        return
-                    }
+            runSafely("onReceive action=${intent.action}") {
+                handleBluetoothBroadcast(intent)
+            }
+        }
+    }
 
-                    val bluetoothDevice =
-                        intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
-                    if (bluetoothDevice == null) {
-                        Log.w(tag, "[BtLoggerForegroundService] onReceive -> BluetoothDevice is null")
-                        return
-                    }
-
-                    handleConnectionStateChanged(bluetoothDevice, state)
+    @SuppressLint("MissingPermission")
+    private fun handleBluetoothBroadcast(intent: Intent) {
+        when (intent.action) {
+            BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED -> {
+                val state = intent.getIntExtra(BluetoothProfile.EXTRA_STATE, -1)
+                if (state != BluetoothProfile.STATE_CONNECTED && state != BluetoothProfile.STATE_DISCONNECTED) {
+                    return
                 }
 
-                ACTION_A2DP_CODEC_CONFIG_CHANGED -> {
-                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
-                        Log.w(tag, "[BtLoggerForegroundService] onReceive -> codec action ignored below API 28")
-                        return
-                    }
-
-                    val bluetoothDevice =
-                        intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
-                    if (bluetoothDevice == null) {
-                        Log.w(tag, "[BtLoggerForegroundService] onReceive -> codec device is null")
-                        return
-                    }
-
-                    handleCodecConfigChanged(bluetoothDevice, intent)
+                val bluetoothDevice =
+                    intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
+                if (bluetoothDevice == null) {
+                    Log.w(tag, "[BtLoggerForegroundService] onReceive -> BluetoothDevice is null")
+                    return
                 }
 
-                Intent.ACTION_BATTERY_CHANGED -> {
-                    val phoneBatteryLevel = BluetoothBatteryUtils.extractPhoneBatteryLevel(intent) ?: return
-                    serviceScope.launch {
-                        handlePhoneBatteryChanged(phoneBatteryLevel)
-                    }
+                handleConnectionStateChanged(bluetoothDevice, state)
+            }
+
+            ACTION_A2DP_CODEC_CONFIG_CHANGED -> {
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+                    Log.w(tag, "[BtLoggerForegroundService] onReceive -> codec action ignored below API 28")
+                    return
                 }
 
-                ACTION_BLUETOOTH_DEVICE_BATTERY_LEVEL_CHANGED,
-                BluetoothHeadset.ACTION_VENDOR_SPECIFIC_HEADSET_EVENT -> {
-                    val bluetoothDevice = BluetoothBatteryUtils.extractBluetoothDevice(intent)
-                    if (bluetoothDevice == null) {
-                        Log.w(
-                            tag,
-                            "[BtLoggerForegroundService] onReceive -> battery device missing for action=${intent.action}"
-                        )
-                        return
-                    }
+                val bluetoothDevice =
+                    intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
+                if (bluetoothDevice == null) {
+                    Log.w(tag, "[BtLoggerForegroundService] onReceive -> codec device is null")
+                    return
+                }
 
-                    val snapshot = BluetoothBatteryUtils.extractHeadsetBatterySnapshot(intent) ?: return
-                    serviceScope.launch {
-                        handleHeadsetBatteryChanged(bluetoothDevice, snapshot)
-                    }
+                handleCodecConfigChanged(bluetoothDevice, intent)
+            }
+
+            Intent.ACTION_BATTERY_CHANGED -> {
+                val phoneBatteryLevel = BluetoothBatteryUtils.extractPhoneBatteryLevel(intent) ?: return
+                launchSafely("phoneBatteryChanged") {
+                    handlePhoneBatteryChanged(phoneBatteryLevel)
+                }
+            }
+
+            ACTION_BLUETOOTH_DEVICE_BATTERY_LEVEL_CHANGED,
+            BluetoothHeadset.ACTION_VENDOR_SPECIFIC_HEADSET_EVENT -> {
+                val bluetoothDevice = BluetoothBatteryUtils.extractBluetoothDevice(intent)
+                if (bluetoothDevice == null) {
+                    Log.w(
+                        tag,
+                        "[BtLoggerForegroundService] onReceive -> battery device missing for action=${intent.action}"
+                    )
+                    return
+                }
+
+                val snapshot = BluetoothBatteryUtils.extractHeadsetBatterySnapshot(intent) ?: return
+                launchSafely("headsetBatteryChanged") {
+                    handleHeadsetBatteryChanged(bluetoothDevice, snapshot)
                 }
             }
         }
@@ -171,7 +181,7 @@ class BtLoggerForegroundService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        latestPhoneBatteryLevel = getPhoneBatteryLevel()
+        latestPhoneBatteryLevel = getPhoneBatteryLevelSafely()
         Log.i(tag, "onCreate: 前台服务启动")
 
         val intentFilter = IntentFilter().apply {
@@ -193,9 +203,11 @@ class BtLoggerForegroundService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        batteryProbeManager.stopAll()
-        versionProbeManager.stopAll()
-        versionAdvertisementProbeManager.stopAll()
+        runSafely("stopAllProbes") {
+            batteryProbeManager.stopAll()
+            versionProbeManager.stopAll()
+            versionAdvertisementProbeManager.stopAll()
+        }
         serviceScope.cancel()
         try {
             unregisterReceiver(btReceiver)
@@ -212,7 +224,7 @@ class BtLoggerForegroundService : Service() {
      */
     @SuppressLint("MissingPermission")
     private fun handleConnectionStateChanged(bluetoothDevice: BluetoothDevice, state: Int) {
-        val address = bluetoothDevice.address
+        val address = readDeviceAddressOrNull(bluetoothDevice) ?: return
         val isConnected = state == BluetoothProfile.STATE_CONNECTED
         val connectStatus = if (isConnected) {
             BluetoothA2dp.STATE_CONNECTED
@@ -221,41 +233,26 @@ class BtLoggerForegroundService : Service() {
         }
 
         if (isConnected) {
-            BluetoothBatteryUtils.readBatteryLevelReflectively(bluetoothDevice)?.let { snapshot ->
-                latestHeadsetBatteryLevels[address] = snapshot.level
-                Log.i(
-                    tag,
-                    "[BtLoggerForegroundService] handleConnectionStateChanged -> preload reflection battery: device=${bluetoothDevice.name.orEmpty()}[$address], battery=${snapshot.level}"
-                )
-            }
-            batteryProbeManager.startMonitoring(bluetoothDevice)
+            preloadHeadsetBatterySafely(bluetoothDevice, address)
         }
 
-        serviceScope.launch {
+        launchSafely("connectionStateChanged[$address]") {
             val existingDevice = deviceDao.getDeviceByMacSnapshot(address)
             val deviceState = buildConnectedDeviceState(bluetoothDevice, existingDevice)
             if (isConnected) {
                 connectedDevices[address] = deviceState
-                versionProbeManager.startMonitoring(
-                    device = bluetoothDevice,
-                    persistedVersion = deviceState.bluetoothVersion
-                )
-                versionAdvertisementProbeManager.startMonitoring(
-                    device = bluetoothDevice,
-                    persistedVersion = deviceState.bluetoothVersion
-                )
             }
             val codecSnapshot = resolveCodecSnapshot(address)
-            val phoneBatteryLevel = getPhoneBatteryLevel().also { latestPhoneBatteryLevel = it }
+            val phoneBatteryLevel = getPhoneBatteryLevelSafely().also { latestPhoneBatteryLevel = it }
             val headsetBatteryLevel = resolveHeadsetBatteryLevel(address)
-            val volumeSnapshot = readMediaVolumeSnapshot(this@BtLoggerForegroundService)
+            val volumeSnapshot = readMediaVolumeSnapshotSafely()
             val record = DeviceConnectionRecord(
                 deviceMac = address,
                 timestamp = System.currentTimeMillis(),
                 connectState = connectStatus,
                 batteryLevel = phoneBatteryLevel,
                 headsetBatteryLevel = headsetBatteryLevel,
-                isPlaying = isPlaying(),
+                isPlaying = isPlayingSafely(),
                 volume = volumeSnapshot.percent,
                 eventType = if (isConnected) RecordEventType.CONNECTED else RecordEventType.DISCONNECTED,
                 phoneSupportedCodecs = codecSnapshot.phoneSupportedCodecs,
@@ -268,15 +265,15 @@ class BtLoggerForegroundService : Service() {
                 tag,
                 "[BtLoggerForegroundService] handleConnectionStateChanged -> state=${record.eventType}, device=${device.name}[${device.mac}], activeCodec=${codecSnapshot.activeCodec}, phoneBattery=$phoneBatteryLevel, headsetBattery=$headsetBatteryLevel, volume=${volumeSnapshot.percent}(${volumeSnapshot.currentLevel}/${volumeSnapshot.maxLevel}), bluetoothConnected=${volumeSnapshot.hasBluetoothOutput}"
             )
-            ToastUtils.showLong("${device.name} - ${if (isConnected) "已连接" else "已断开"}")
             if (persistDeviceAndRecord(device, record)) {
                 rememberPersistedBatterySnapshot(address, phoneBatteryLevel, headsetBatteryLevel)
             }
+            showConnectionToastSafely(device.name, isConnected)
 
-            if (!isConnected) {
-                batteryProbeManager.stopMonitoring(address)
-                versionProbeManager.stopMonitoring(address)
-                versionAdvertisementProbeManager.stopMonitoring(address)
+            if (isConnected) {
+                startConnectedDeviceProbes(bluetoothDevice, deviceState)
+            } else {
+                stopConnectedDeviceProbes(address)
                 connectedDevices.remove(address)
                 latestPersistedBatterySnapshots.remove(address)
             }
@@ -286,18 +283,18 @@ class BtLoggerForegroundService : Service() {
     @RequiresApi(Build.VERSION_CODES.P)
     @SuppressLint("MissingPermission")
     private fun handleCodecConfigChanged(bluetoothDevice: BluetoothDevice, intent: Intent) {
+        val address = readDeviceAddressOrNull(bluetoothDevice) ?: return
         val parsedSnapshot = BluetoothCodecFormatter.parseCodecStatus(intent)
         if (parsedSnapshot == null) {
             Log.w(
                 tag,
-                "[BtLoggerForegroundService] handleCodecConfigChanged -> codec status missing for ${bluetoothDevice.address}"
+                "[BtLoggerForegroundService] handleCodecConfigChanged -> codec status missing for $address"
             )
             return
         }
 
-        serviceScope.launch {
+        launchSafely("codecConfigChanged[$address]") {
             codecSnapshotMutex.withLock {
-                val address = bluetoothDevice.address
                 val previousSnapshot = resolveCodecSnapshot(address)
                 val resolvedSnapshot = BluetoothCodecFormatter.normalizeSnapshot(
                     parsedSnapshot.copy(updatedAt = System.currentTimeMillis())
@@ -311,7 +308,7 @@ class BtLoggerForegroundService : Service() {
                     latestCodecSnapshots[address] = resolvedSnapshot
                     Log.d(
                         tag,
-                        "[BtLoggerForegroundService] handleCodecConfigChanged -> skip duplicate snapshot: device=${bluetoothDevice.name.orEmpty()}[$address], activeCodec=${resolvedSnapshot.activeCodec}"
+                        "[BtLoggerForegroundService] handleCodecConfigChanged -> skip duplicate snapshot: device=${readDeviceNameOrEmpty(bluetoothDevice)}[$address], activeCodec=${resolvedSnapshot.activeCodec}"
                     )
                     return@withLock
                 }
@@ -319,15 +316,6 @@ class BtLoggerForegroundService : Service() {
                 val existingDevice = deviceDao.getDeviceByMacSnapshot(address)
                 val deviceState = buildConnectedDeviceState(bluetoothDevice, existingDevice)
                 connectedDevices[address] = deviceState
-                batteryProbeManager.startMonitoring(bluetoothDevice)
-                versionProbeManager.startMonitoring(
-                    device = bluetoothDevice,
-                    persistedVersion = deviceState.bluetoothVersion
-                )
-                versionAdvertisementProbeManager.startMonitoring(
-                    device = bluetoothDevice,
-                    persistedVersion = deviceState.bluetoothVersion
-                )
                 val device = buildDevice(
                     deviceState = deviceState,
                     codecSnapshot = resolvedSnapshot,
@@ -350,8 +338,8 @@ class BtLoggerForegroundService : Service() {
                     return@withLock
                 }
 
-                val volumeSnapshot = readMediaVolumeSnapshot(this@BtLoggerForegroundService)
-                val phoneBatteryLevel = getPhoneBatteryLevel().also { latestPhoneBatteryLevel = it }
+                val volumeSnapshot = readMediaVolumeSnapshotSafely()
+                val phoneBatteryLevel = getPhoneBatteryLevelSafely().also { latestPhoneBatteryLevel = it }
                 val headsetBatteryLevel = resolveHeadsetBatteryLevel(address)
                 val record = DeviceConnectionRecord(
                     deviceMac = address,
@@ -360,7 +348,7 @@ class BtLoggerForegroundService : Service() {
                     batteryLevel = phoneBatteryLevel,
                     headsetBatteryLevel = headsetBatteryLevel,
                     volume = volumeSnapshot.percent,
-                    isPlaying = isPlaying(),
+                    isPlaying = isPlayingSafely(),
                     eventType = RecordEventType.CODEC_CHANGED,
                     phoneSupportedCodecs = resolvedSnapshot.phoneSupportedCodecs,
                     negotiableCodecs = resolvedSnapshot.negotiableCodecs,
@@ -375,6 +363,7 @@ class BtLoggerForegroundService : Service() {
                     latestCodecSnapshots[address] = resolvedSnapshot
                     rememberPersistedBatterySnapshot(address, phoneBatteryLevel, headsetBatteryLevel)
                 }
+                startConnectedDeviceProbes(bluetoothDevice, deviceState)
             }
         }
     }
@@ -384,7 +373,7 @@ class BtLoggerForegroundService : Service() {
         bluetoothDevice: BluetoothDevice,
         result: BluetoothVersionProbeResult
     ) {
-        val address = bluetoothDevice.address
+        val address = readDeviceAddressOrNull(bluetoothDevice) ?: return
         val existingDevice = deviceDao.getDeviceByMacSnapshot(address)
         val previousBluetoothVersion = existingDevice?.bluetoothVersion ?: BLUETOOTH_VERSION_UNKNOWN
         val mergedBluetoothVersion = BluetoothVersionUtils.mergeBluetoothVersion(
@@ -393,7 +382,7 @@ class BtLoggerForegroundService : Service() {
         )
         Log.i(
             tag,
-            "[BtLoggerForegroundService] handleBluetoothVersionProbeResult -> device=${bluetoothDevice.name.orEmpty()}[$address], previous=$previousBluetoothVersion, resolved=${result.versionSnapshot.version}, merged=$mergedBluetoothVersion, source=${result.versionSnapshot.source}, info=${result.deviceInformation.summary()}, adv=${result.advertisementSnapshot.summary()}"
+            "[BtLoggerForegroundService] handleBluetoothVersionProbeResult -> device=${readDeviceNameOrEmpty(bluetoothDevice)}[$address], previous=$previousBluetoothVersion, resolved=${result.versionSnapshot.version}, merged=$mergedBluetoothVersion, source=${result.versionSnapshot.source}, info=${result.deviceInformation.summary()}, adv=${result.advertisementSnapshot.summary()}"
         )
         if (mergedBluetoothVersion == previousBluetoothVersion) {
             return
@@ -446,19 +435,19 @@ class BtLoggerForegroundService : Service() {
         bluetoothDevice: BluetoothDevice,
         snapshot: HeadsetBatterySnapshot
     ) {
-        val address = bluetoothDevice.address
+        val address = readDeviceAddressOrNull(bluetoothDevice) ?: return
         val previousHeadsetBatteryLevel = latestHeadsetBatteryLevels.put(address, snapshot.level)
         if (previousHeadsetBatteryLevel == snapshot.level) {
             Log.d(
                 tag,
-                "[BtLoggerForegroundService] handleHeadsetBatteryChanged -> skip duplicate headset battery: device=${bluetoothDevice.name.orEmpty()}[$address], level=${snapshot.level}, source=${snapshot.source}"
+                "[BtLoggerForegroundService] handleHeadsetBatteryChanged -> skip duplicate headset battery: device=${readDeviceNameOrEmpty(bluetoothDevice)}[$address], level=${snapshot.level}, source=${snapshot.source}"
             )
             return
         }
 
         Log.i(
             tag,
-            "[BtLoggerForegroundService] handleHeadsetBatteryChanged -> device=${bluetoothDevice.name.orEmpty()}[$address], battery=${previousHeadsetBatteryLevel ?: DEVICE_BATTERY_LEVEL_UNKNOWN} -> ${snapshot.level}, source=${snapshot.source}"
+            "[BtLoggerForegroundService] handleHeadsetBatteryChanged -> device=${readDeviceNameOrEmpty(bluetoothDevice)}[$address], battery=${previousHeadsetBatteryLevel ?: DEVICE_BATTERY_LEVEL_UNKNOWN} -> ${snapshot.level}, source=${snapshot.source}"
         )
 
         if (!connectedDevices.containsKey(address)) {
@@ -504,7 +493,7 @@ class BtLoggerForegroundService : Service() {
         }
 
         val codecSnapshot = resolveCodecSnapshot(address)
-        val volumeSnapshot = readMediaVolumeSnapshot(this)
+        val volumeSnapshot = readMediaVolumeSnapshotSafely()
         val device = buildDevice(deviceState, codecSnapshot)
         val record = DeviceConnectionRecord(
             deviceMac = address,
@@ -513,7 +502,7 @@ class BtLoggerForegroundService : Service() {
             batteryLevel = phoneBatteryLevel,
             headsetBatteryLevel = headsetBatteryLevel,
             volume = volumeSnapshot.percent,
-            isPlaying = isPlaying(),
+            isPlaying = isPlayingSafely(),
             eventType = RecordEventType.BATTERY_CHANGED,
             phoneSupportedCodecs = codecSnapshot.phoneSupportedCodecs,
             negotiableCodecs = codecSnapshot.negotiableCodecs,
@@ -554,10 +543,24 @@ class BtLoggerForegroundService : Service() {
         existingDevice: Device? = null
     ): ConnectedDeviceState {
         val previousBluetoothVersion = existingDevice?.bluetoothVersion ?: BLUETOOTH_VERSION_UNKNOWN
-        val resolvedBluetoothVersion = BluetoothVersionUtils.resolveBluetoothVersion(
-            device = bluetoothDevice,
-            persistedVersion = previousBluetoothVersion
-        )
+        val address = readDeviceAddressOrNull(bluetoothDevice) ?: existingDevice?.mac.orEmpty()
+        val deviceName = readDeviceNameOrEmpty(bluetoothDevice).ifBlank { existingDevice?.name.orEmpty() }
+        val resolvedBluetoothVersion = runCatching {
+            BluetoothVersionUtils.resolveBluetoothVersion(
+                device = bluetoothDevice,
+                persistedVersion = previousBluetoothVersion
+            )
+        }.getOrElse { throwable ->
+            Log.e(
+                tag,
+                "[BtLoggerForegroundService] buildConnectedDeviceState -> bluetooth version resolve failed: device=$address",
+                throwable
+            )
+            BluetoothVersionSnapshot(
+                version = previousBluetoothVersion,
+                source = "fallback:error"
+            )
+        }
         val mergedBluetoothVersion = BluetoothVersionUtils.mergeBluetoothVersion(
             persistedVersion = previousBluetoothVersion,
             resolvedVersion = resolvedBluetoothVersion.version
@@ -565,25 +568,23 @@ class BtLoggerForegroundService : Service() {
         if (previousBluetoothVersion != mergedBluetoothVersion || resolvedBluetoothVersion.source != "cache") {
             Log.i(
                 tag,
-                "[BtLoggerForegroundService] buildConnectedDeviceState -> BluetoothVersion: device=${bluetoothDevice.name.orEmpty()}[${bluetoothDevice.address}], previous=$previousBluetoothVersion, resolved=$mergedBluetoothVersion, source=${resolvedBluetoothVersion.source}"
+                "[BtLoggerForegroundService] buildConnectedDeviceState -> BluetoothVersion: device=$deviceName[$address], previous=$previousBluetoothVersion, resolved=$mergedBluetoothVersion, source=${resolvedBluetoothVersion.source}"
             )
         }
         return ConnectedDeviceState(
-            mac = bluetoothDevice.address,
-            name = bluetoothDevice.name ?: existingDevice?.name.orEmpty(),
-            bondState = bluetoothDevice.bondState,
+            mac = address,
+            name = deviceName,
+            bondState = readDeviceBondState(bluetoothDevice, existingDevice),
             alias = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                bluetoothDevice.alias ?: existingDevice?.alias.orEmpty()
+                readDeviceAliasOrEmpty(bluetoothDevice).ifBlank { existingDevice?.alias.orEmpty() }
             } else {
                 existingDevice?.alias.orEmpty()
             },
-            deviceType = if (bluetoothDevice.type != BluetoothDevice.DEVICE_TYPE_UNKNOWN) {
-                bluetoothDevice.type
-            } else {
-                existingDevice?.deviceType ?: BluetoothDevice.DEVICE_TYPE_UNKNOWN
-            },
+            deviceType = readDeviceType(bluetoothDevice).takeUnless {
+                it == BluetoothDevice.DEVICE_TYPE_UNKNOWN
+            } ?: existingDevice?.deviceType ?: BluetoothDevice.DEVICE_TYPE_UNKNOWN,
             bluetoothVersion = mergedBluetoothVersion,
-            uuids = bluetoothDevice.uuids?.joinToString() ?: existingDevice?.uuids.orEmpty()
+            uuids = readDeviceUuidsOrEmpty(bluetoothDevice).ifBlank { existingDevice?.uuids.orEmpty() }
         )
     }
 
@@ -762,15 +763,326 @@ class BtLoggerForegroundService : Service() {
             .build()
     }
 
-    private fun isPlaying(): Boolean {
-        val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        return audioManager.isMusicActive
+    private fun launchSafely(
+        operation: String,
+        block: suspend CoroutineScope.() -> Unit
+    ) {
+        serviceScope.launch {
+            try {
+                block()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(
+                    tag,
+                    "[BtLoggerForegroundService] launchSafely -> operation failed: $operation",
+                    e
+                )
+            } catch (e: LinkageError) {
+                Log.e(
+                    tag,
+                    "[BtLoggerForegroundService] launchSafely -> platform API unavailable: $operation",
+                    e
+                )
+            }
+        }
     }
 
-    private fun getPhoneBatteryLevel(): Int {
-        val batteryManager = getSystemService(Context.BATTERY_SERVICE) as BatteryManager
-        return batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
-            .coerceIn(0, 100)
+    private fun runSafely(operation: String, block: () -> Unit) {
+        try {
+            block()
+        } catch (e: Exception) {
+            Log.e(
+                tag,
+                "[BtLoggerForegroundService] runSafely -> operation failed: $operation",
+                e
+            )
+        } catch (e: LinkageError) {
+            Log.e(
+                tag,
+                "[BtLoggerForegroundService] runSafely -> platform API unavailable: $operation",
+                e
+            )
+        }
+    }
+
+    /**
+     * Why:
+     * 系统广播主链路只需要记录连接/断开，耳机电量、蓝牙版本等探测失败时必须降级，
+     * 不能反向影响基础连接日志。
+     */
+    private fun startConnectedDeviceProbes(
+        bluetoothDevice: BluetoothDevice,
+        deviceState: ConnectedDeviceState
+    ) {
+        runSafely("startConnectedDeviceProbes[${deviceState.mac}]") {
+            batteryProbeManager.startMonitoring(bluetoothDevice)
+        }
+        runSafely("startVersionProbe[${deviceState.mac}]") {
+            versionProbeManager.startMonitoring(
+                device = bluetoothDevice,
+                persistedVersion = deviceState.bluetoothVersion
+            )
+        }
+        runSafely("startVersionAdvertisementProbe[${deviceState.mac}]") {
+            versionAdvertisementProbeManager.startMonitoring(
+                device = bluetoothDevice,
+                persistedVersion = deviceState.bluetoothVersion
+            )
+        }
+    }
+
+    private fun stopConnectedDeviceProbes(address: String) {
+        runSafely("stopBatteryProbe[$address]") {
+            batteryProbeManager.stopMonitoring(address)
+        }
+        runSafely("stopVersionProbe[$address]") {
+            versionProbeManager.stopMonitoring(address)
+        }
+        runSafely("stopVersionAdvertisementProbe[$address]") {
+            versionAdvertisementProbeManager.stopMonitoring(address)
+        }
+    }
+
+    private fun preloadHeadsetBatterySafely(
+        bluetoothDevice: BluetoothDevice,
+        address: String
+    ) {
+        try {
+            BluetoothBatteryUtils.readBatteryLevelReflectively(bluetoothDevice)?.let { snapshot ->
+                latestHeadsetBatteryLevels[address] = snapshot.level
+                Log.i(
+                    tag,
+                    "[BtLoggerForegroundService] preloadHeadsetBatterySafely -> reflection battery: device=${readDeviceNameOrEmpty(bluetoothDevice)}[$address], battery=${snapshot.level}"
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(
+                tag,
+                "[BtLoggerForegroundService] preloadHeadsetBatterySafely -> failed: device=$address",
+                e
+            )
+        } catch (e: LinkageError) {
+            Log.e(
+                tag,
+                "[BtLoggerForegroundService] preloadHeadsetBatterySafely -> platform API unavailable: device=$address",
+                e
+            )
+        }
+    }
+
+    private fun showConnectionToastSafely(deviceName: String, isConnected: Boolean) {
+        try {
+            ToastUtils.showLong("$deviceName - ${if (isConnected) "已连接" else "已断开"}")
+        } catch (e: Exception) {
+            Log.e(
+                tag,
+                "[BtLoggerForegroundService] showConnectionToastSafely -> failed",
+                e
+            )
+        } catch (e: LinkageError) {
+            Log.e(
+                tag,
+                "[BtLoggerForegroundService] showConnectionToastSafely -> platform API unavailable",
+                e
+            )
+        }
+    }
+
+    private fun readMediaVolumeSnapshotSafely(): MediaVolumeSnapshot {
+        return try {
+            readMediaVolumeSnapshot(this)
+        } catch (e: Exception) {
+            Log.e(
+                tag,
+                "[BtLoggerForegroundService] readMediaVolumeSnapshotSafely -> failed",
+                e
+            )
+            MediaVolumeSnapshot()
+        } catch (e: LinkageError) {
+            Log.e(
+                tag,
+                "[BtLoggerForegroundService] readMediaVolumeSnapshotSafely -> platform API unavailable",
+                e
+            )
+            MediaVolumeSnapshot()
+        }
+    }
+
+    private fun isPlayingSafely(): Boolean {
+        return try {
+            val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            audioManager.isMusicActive
+        } catch (e: Exception) {
+            Log.e(
+                tag,
+                "[BtLoggerForegroundService] isPlayingSafely -> failed",
+                e
+            )
+            false
+        } catch (e: LinkageError) {
+            Log.e(
+                tag,
+                "[BtLoggerForegroundService] isPlayingSafely -> platform API unavailable",
+                e
+            )
+            false
+        }
+    }
+
+    private fun getPhoneBatteryLevelSafely(): Int {
+        return try {
+            val batteryManager = getSystemService(Context.BATTERY_SERVICE) as BatteryManager
+            batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+                .coerceIn(0, 100)
+        } catch (e: Exception) {
+            Log.e(
+                tag,
+                "[BtLoggerForegroundService] getPhoneBatteryLevelSafely -> failed",
+                e
+            )
+            latestPhoneBatteryLevel.coerceIn(0, 100)
+        } catch (e: LinkageError) {
+            Log.e(
+                tag,
+                "[BtLoggerForegroundService] getPhoneBatteryLevelSafely -> platform API unavailable",
+                e
+            )
+            latestPhoneBatteryLevel.coerceIn(0, 100)
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun readDeviceAddressOrNull(bluetoothDevice: BluetoothDevice): String? {
+        return try {
+            bluetoothDevice.address?.takeIf { it.isNotBlank() }
+        } catch (e: Exception) {
+            Log.e(
+                tag,
+                "[BtLoggerForegroundService] readDeviceAddressOrNull -> failed",
+                e
+            )
+            null
+        } catch (e: LinkageError) {
+            Log.e(
+                tag,
+                "[BtLoggerForegroundService] readDeviceAddressOrNull -> platform API unavailable",
+                e
+            )
+            null
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun readDeviceNameOrEmpty(bluetoothDevice: BluetoothDevice): String {
+        return try {
+            bluetoothDevice.name.orEmpty()
+        } catch (e: Exception) {
+            Log.e(
+                tag,
+                "[BtLoggerForegroundService] readDeviceNameOrEmpty -> failed",
+                e
+            )
+            ""
+        } catch (e: LinkageError) {
+            Log.e(
+                tag,
+                "[BtLoggerForegroundService] readDeviceNameOrEmpty -> platform API unavailable",
+                e
+            )
+            ""
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun readDeviceAliasOrEmpty(bluetoothDevice: BluetoothDevice): String {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                bluetoothDevice.alias.orEmpty()
+            } else {
+                ""
+            }
+        } catch (e: Exception) {
+            Log.e(
+                tag,
+                "[BtLoggerForegroundService] readDeviceAliasOrEmpty -> failed",
+                e
+            )
+            ""
+        } catch (e: LinkageError) {
+            Log.e(
+                tag,
+                "[BtLoggerForegroundService] readDeviceAliasOrEmpty -> platform API unavailable",
+                e
+            )
+            ""
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun readDeviceBondState(
+        bluetoothDevice: BluetoothDevice,
+        existingDevice: Device?
+    ): Int {
+        return try {
+            bluetoothDevice.bondState
+        } catch (e: Exception) {
+            Log.e(
+                tag,
+                "[BtLoggerForegroundService] readDeviceBondState -> failed",
+                e
+            )
+            existingDevice?.bondState ?: BluetoothDevice.BOND_NONE
+        } catch (e: LinkageError) {
+            Log.e(
+                tag,
+                "[BtLoggerForegroundService] readDeviceBondState -> platform API unavailable",
+                e
+            )
+            existingDevice?.bondState ?: BluetoothDevice.BOND_NONE
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun readDeviceType(bluetoothDevice: BluetoothDevice): Int {
+        return try {
+            bluetoothDevice.type
+        } catch (e: Exception) {
+            Log.e(
+                tag,
+                "[BtLoggerForegroundService] readDeviceType -> failed",
+                e
+            )
+            BluetoothDevice.DEVICE_TYPE_UNKNOWN
+        } catch (e: LinkageError) {
+            Log.e(
+                tag,
+                "[BtLoggerForegroundService] readDeviceType -> platform API unavailable",
+                e
+            )
+            BluetoothDevice.DEVICE_TYPE_UNKNOWN
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun readDeviceUuidsOrEmpty(bluetoothDevice: BluetoothDevice): String {
+        return try {
+            bluetoothDevice.uuids?.joinToString().orEmpty()
+        } catch (e: Exception) {
+            Log.e(
+                tag,
+                "[BtLoggerForegroundService] readDeviceUuidsOrEmpty -> failed",
+                e
+            )
+            ""
+        } catch (e: LinkageError) {
+            Log.e(
+                tag,
+                "[BtLoggerForegroundService] readDeviceUuidsOrEmpty -> platform API unavailable",
+                e
+            )
+            ""
+        }
     }
 
     companion object {
