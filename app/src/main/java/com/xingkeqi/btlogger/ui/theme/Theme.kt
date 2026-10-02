@@ -57,8 +57,14 @@ fun BtLoggerTheme(
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as Activity).window
-            window.statusBarColor = colorScheme.primary.toArgb()
-            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = darkTheme
+            // 状态栏与顶栏（surface 色）保持一致，并按明暗主题切换图标颜色；
+            // 旧实现用 primary 色且图标明暗与主题相反，浅色主题下图标难以辨认
+            window.statusBarColor = colorScheme.surface.toArgb()
+            window.navigationBarColor = colorScheme.surface.toArgb()
+            WindowCompat.getInsetsController(window, view).apply {
+                isAppearanceLightStatusBars = !darkTheme
+                isAppearanceLightNavigationBars = !darkTheme
+            }
         }
     }
 

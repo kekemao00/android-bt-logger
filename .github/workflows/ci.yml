@@ -26,8 +26,8 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      # Why: ubuntu-latest 已预装 Android SDK（ANDROID_HOME 已设置）；
+      # android-actions/setup-android 默认安装已下架的 `tools` 包会直接失败。
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4

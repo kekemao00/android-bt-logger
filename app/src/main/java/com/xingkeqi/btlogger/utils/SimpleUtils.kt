@@ -1,52 +1,44 @@
 package com.xingkeqi.btlogger.utils
 
-import com.blankj.utilcode.constant.TimeConstants
-import com.blankj.utilcode.util.TimeUtils
 import java.util.concurrent.TimeUnit
 
 /**
- * 获取时分秒格式的时间段字符串
+ * 获取“天 时 分 秒”格式的时间段字符串。
  *
- * @param duration 时间戳的差值，表示时间差
- * @return
+ * Why:
+ * 过去时长为 0 或不足 1 秒时返回空串，界面上会出现“本次连接：”后面空白的情况；
+ * 超过 24 小时的长测也只显示小时数，可读性差。
+ *
+ * @param duration 时间戳的差值（毫秒），负数按 0 处理
  */
 fun getDurationString(duration: Long): String {
-    val hours = TimeUnit.MILLISECONDS.toHours(duration)
-    val minutes = TimeUnit.MILLISECONDS.toMinutes(duration) % 60
-    val seconds = TimeUnit.MILLISECONDS.toSeconds(duration) % 60
-    return "${if (hours > 0) "$hours 时 " else ""}${if (minutes > 0) "$minutes 分 " else ""}${if (seconds > 0) "$seconds 秒" else ""}"
+    val safeDuration = duration.coerceAtLeast(0L)
+    val days = TimeUnit.MILLISECONDS.toDays(safeDuration)
+    val hours = TimeUnit.MILLISECONDS.toHours(safeDuration) % 24
+    val minutes = TimeUnit.MILLISECONDS.toMinutes(safeDuration) % 60
+    val seconds = TimeUnit.MILLISECONDS.toSeconds(safeDuration) % 60
+    val parts = buildList {
+        if (days > 0) add("$days 天")
+        if (hours > 0) add("$hours 时")
+        if (minutes > 0) add("$minutes 分")
+        if (seconds > 0 || isEmpty()) add("$seconds 秒")
+    }
+    return parts.joinToString(" ")
 }
 
 /**
- * Long long long triple
- *
- * @param pair 开始时间戳，结束时间戳
- * @return Triple 时，分，秒
+ * 紧凑时长格式（最多两个单位），用于统计卡片等空间有限的位置，如 “2h13m”“5m20s”“1d2h”
  */
-@Deprecated(
-    "请使用统一格式的 getDurationString(Long)，计算时间间隔",
-    replaceWith = ReplaceWith("getDurationString(Long)")
-)
-fun longLongLongTriple(pair: Pair<Long, Long>): Triple<Long, Long, Long> {
-    val hours = TimeUtils.getTimeSpan(
-        pair.second,
-        pair.first,
-        TimeConstants.HOUR
-    )
-    val minutes = TimeUtils.getTimeSpan(
-        pair.second,
-        pair.first,
-        TimeConstants.MIN
-    ) - (hours * 60)
-    val seconds = TimeUtils.getTimeSpan(
-        pair.second,
-        pair.first,
-        TimeConstants.SEC
-    ) - (hours * 60 * 60) - (minutes * 60)
-    return Triple(hours, minutes, seconds)
-}
-
-
-fun main() {
-    println(getDurationString(3600000))
+fun getCompactDurationString(duration: Long): String {
+    val totalSeconds = TimeUnit.MILLISECONDS.toSeconds(duration.coerceAtLeast(0L))
+    val days = totalSeconds / 86_400
+    val hours = totalSeconds % 86_400 / 3_600
+    val minutes = totalSeconds % 3_600 / 60
+    val seconds = totalSeconds % 60
+    return when {
+        days > 0 -> if (hours > 0) "${days}d${hours}h" else "${days}d"
+        hours > 0 -> if (minutes > 0) "${hours}h${minutes}m" else "${hours}h"
+        minutes > 0 -> if (seconds > 0) "${minutes}m${seconds}s" else "${minutes}m"
+        else -> "${seconds}s"
+    }
 }

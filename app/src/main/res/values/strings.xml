@@ -1,7 +1,158 @@
 <resources>
     <string name="app_name">BtLogger</string>
+
+    <!-- 通用 -->
+    <string name="action_cancel">取消</string>
+    <string name="action_delete">删除</string>
+    <string name="action_done">完成</string>
+    <string name="action_back">返回</string>
+    <string name="action_more">更多</string>
+    <string name="action_search">搜索设备</string>
+    <string name="action_close_search">关闭搜索</string>
+    <string name="action_clear">清除</string>
+    <string name="unknown_device">未知设备</string>
+    <string name="press_again_to_exit">再按一次返回键退出（后台仍会继续记录）</string>
+
+    <!-- 顶栏动作 -->
+    <string name="action_volume_preset">固定连接音量</string>
+    <string name="action_bluetooth_settings">蓝牙设置</string>
+    <string name="action_export_device">导出该设备记录</string>
+    <string name="action_export_all">导出全部记录</string>
+    <string name="action_clear_device_records">清空该设备记录</string>
+    <string name="action_clear_all">清空全部记录</string>
+    <string name="action_check_update">检查更新</string>
+    <string name="app_version">当前版本 v%1$s</string>
+
+    <!-- 设备列表 -->
+    <string name="device_list_summary">共 %1$d 台设备 · %2$d 台已连接</string>
+    <string name="device_list_empty_title">还没有蓝牙记录</string>
+    <string name="device_list_empty_body">连接一个蓝牙耳机或音箱后，连接、断开、编解码与电量变化会自动记录在这里。应用退到后台也会继续记录。</string>
+    <string name="device_list_empty_action">打开蓝牙设置</string>
+    <string name="device_search_hint">按名称或 MAC 地址搜索</string>
+    <string name="device_search_empty">没有匹配“%1$s”的设备</string>
+    <string name="device_first_seen">首次 %1$s</string>
+    <string name="device_last_seen">最近 %1$s</string>
+    <string name="device_open_detail">查看详情</string>
+    <string name="status_connected">已连接</string>
+    <string name="status_disconnected">已断开</string>
+    <string name="connected_for">已连接 %1$s</string>
+
+    <!-- 删除确认 -->
+    <string name="confirm_delete_device_title">删除 %1$s？</string>
+    <string name="confirm_delete_device_body">%1$s [%2$s]\n\n将删除该设备的所有记录，删除后无法恢复。</string>
+    <string name="confirm_clear_device_title">清空 %1$s 的历史记录？</string>
+    <string name="confirm_clear_all_title">清空所有历史记录？</string>
+    <string name="confirm_irreversible_body">记录删除后将无法恢复，是否继续？</string>
+    <string name="confirm_delete_record_title">删除此条记录？</string>
+    <string name="confirm_delete_record_body">确定删除 %1$s 在 %2$s 的【%3$s】记录吗？删除后无法恢复。</string>
+    <string name="message_deleted">已删除</string>
+
+    <!-- 详情页 -->
+    <string name="detail_empty_title">暂无记录</string>
+    <string name="detail_empty_body">该设备的记录已被清空，下次连接时会重新开始记录。</string>
+    <string name="detail_history_title">历史记录（%1$d 条）</string>
+    <string name="detail_history_empty_filter">当前筛选下没有记录</string>
+    <string name="filter_all">全部</string>
+    <string name="filter_connection">连接/断开</string>
+    <string name="filter_codec">编解码</string>
+    <string name="filter_battery">电量</string>
+    <string name="stat_connect_count">连接次数</string>
+    <string name="stat_disconnect_count">断开次数</string>
+    <string name="stat_longest_session">最长连接</string>
+    <string name="stat_average_session">平均连接</string>
+    <string name="stat_device_type">设备类型</string>
+    <string name="stat_bluetooth_version">蓝牙版本</string>
+    <string name="stat_bond_state">绑定状态</string>
+    <string name="count_times">%1$d 次</string>
+    <string name="placeholder_dash">--</string>
+    <string name="device_type_classic">经典</string>
+    <string name="device_type_le">低功耗</string>
+    <string name="device_type_dual">双模</string>
+    <string name="device_type_other">其他</string>
+    <string name="bond_bonded">已配对</string>
+    <string name="bond_bonding">配对中</string>
+    <string name="bond_none">未配对</string>
+    <string name="volume_content_description">媒体音量</string>
+    <string name="badge_playing_at_record">记录时播放</string>
+    <string name="badge_muted_at_record">记录时未播放</string>
+    <string name="badge_playing">播放中</string>
+    <string name="badge_not_playing">未播放</string>
+
+    <!-- 记录条目 -->
+    <string name="event_connected">蓝牙已连接</string>
+    <string name="event_disconnected">蓝牙已断开</string>
+    <string name="event_codec_changed">编解码切换</string>
+    <string name="event_battery_changed">电量更新</string>
+    <string name="event_label_connected">连接</string>
+    <string name="event_label_disconnected">断开</string>
+    <string name="event_label_unknown">未知事件</string>
+    <string name="record_first">首条记录</string>
+    <string name="record_disconnected_gap">断开间隔：%1$s</string>
+    <string name="record_session_duration">本次连接：%1$s</string>
+    <string name="record_active_codec">当前编解码：%1$s</string>
+    <string name="record_battery_summary">电量采样：%1$s，%2$s</string>
+    <string name="record_battery_phone">手机 %1$d%%</string>
+    <string name="record_battery_phone_unknown">手机 --</string>
+    <string name="record_battery_headset">耳机 %1$d%%</string>
+    <string name="record_battery_headset_unknown">耳机未上报</string>
+    <string name="codec_phone_supported">手机支持</string>
+    <string name="codec_negotiable">双方可用</string>
+    <string name="codec_active">当前使用</string>
+
+    <!-- 时长进度 -->
+    <string name="duration_connected">连接 %1$s</string>
+    <string name="duration_disconnected">断开 %1$s</string>
+
+    <!-- 电量 -->
     <string name="battery_trend_title">电量趋势</string>
     <string name="phone_battery_label">手机电量</string>
     <string name="headset_battery_label">耳机电量</string>
     <string name="headset_battery_gap_note">耳机电量依赖设备主动上报，未上报的时间段会显示断线。</string>
+
+    <!-- 固定音量 -->
+    <string name="volume_dialog_title">固定连接音量</string>
+    <string name="volume_dialog_switch">蓝牙连接后自动设置音量</string>
+    <string name="volume_dialog_switch_hint">开启后，每次连接蓝牙音频设备都会把媒体音量调到下方数值，App 在后台也会生效。</string>
+    <string name="volume_dialog_current">当前系统媒体音量：%1$d%%</string>
+    <string name="volume_dialog_route">%1$s（%2$d/%3$d，%4$s）</string>
+    <string name="volume_dialog_target">连接后音量：%1$d%%</string>
+    <string name="volume_route_bluetooth">蓝牙音频设备已连接</string>
+    <string name="volume_route_none">当前未连接蓝牙音频设备</string>
+
+    <!-- 导出 -->
+    <string name="export_empty">没有可以导出的记录</string>
+    <string name="export_failed">导出失败：%1$s</string>
+    <string name="export_saved">已导出 %1$s</string>
+    <string name="export_share_title">分享导出文件</string>
+    <string name="export_no_app">没有可打开 Excel 文件的应用，文件已保存在应用目录</string>
+    <string name="export_all_name">全部设备</string>
+
+    <!-- 更新 -->
+    <string name="update_title">发现新版本</string>
+    <string name="update_body">发现新版本可用，更新后可获得更好的使用体验。</string>
+    <string name="update_version">版本：v%1$s</string>
+    <string name="update_description">更新说明：\n%1$s</string>
+    <string name="update_now">立即更新</string>
+    <string name="update_later">稍后再说</string>
+    <string name="update_latest">已是最新版本</string>
+    <string name="update_check_failed">检查更新失败，请稍后重试</string>
+    <string name="update_downloading">正在下载新版本</string>
+    <string name="update_download_progress">%1$d%% · %2$s / %3$s</string>
+    <string name="update_cancel_download">取消下载</string>
+    <string name="update_download_failed">下载失败，请稍后重试</string>
+
+    <!-- 权限 -->
+    <string name="permission_title">需要蓝牙权限</string>
+    <string name="permission_body">BtLogger 需要“附近的设备”权限来读取蓝牙耳机的连接状态、名称与编解码信息。所有数据只保存在本机。</string>
+    <string name="permission_notification_note">同时建议允许通知，以便在通知栏看到后台记录状态。</string>
+    <string name="permission_grant">授予权限</string>
+    <string name="permission_open_settings">前往系统设置</string>
+
+    <!-- 通知 -->
+    <string name="notification_channel_name">蓝牙日志记录</string>
+    <string name="notification_channel_description">用于显示蓝牙日志记录服务的运行状态</string>
+    <string name="notification_title">蓝牙日志记录中</string>
+    <string name="notification_waiting_device">等待蓝牙音频设备连接…</string>
+    <string name="notification_connected_devices">已连接：%1$s</string>
+    <string name="toast_device_state">%1$s - %2$s</string>
 </resources>

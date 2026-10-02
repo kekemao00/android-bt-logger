@@ -25,50 +25,48 @@ APK 输出路径：`app/build/outputs/apk/`
 
 ## 架构概览
 
-MVVM 架构 + Jetpack Compose + Hilt 依赖注入
+MVVM + Jetpack Compose；数据库与 ViewModel 通过工厂显式创建（Hilt 模块保留但未启用）
 
 ```
-MainActivity (Compose UI)
-    ↓ observes
-MainViewModel (业务逻辑 + LiveData/Flow)
-    ↓ calls
-Repository (BtLoggerRepository)
-    ↓ queries
+BtLoggerForegroundService (广播监听 + 探测器 + 固定音量)
+    ↓ 写入
 Room Database (BtLoggerDatabase)
     ├── devices 表
     └── device_connection_records 表
+    ↓ Flow
+MainViewModel (StateFlow + UiEvent Channel)
+    ↓
+BtLoggerApp → DeviceListScreen / DeviceDetailScreen（无状态 Compose）
 ```
 
 **数据流**：
-1. `BtLoggerReceiver` 监听蓝牙 A2DP 连接状态广播
-2. 通过 EventBus 发送 `MessageEvent` 到 `MainActivity`
-3. `MainActivity` 调用 `MainViewModel` 写入 Room 数据库
-4. UI 通过 Flow → LiveData 响应式更新
+1. `BtLoggerForegroundService` 动态注册广播，监听 A2DP 连接、Codec、手机/耳机电量
+2. 服务直接写入 Room，并通过 EventBus 通知界面刷新音量快照
+3. 固定音量由服务读取 `AppSettings` 执行，不依赖界面存活
+4. UI 通过 Flow → StateFlow 响应式更新
 
 ## 关键文件
 
 | 文件 | 职责 |
 |------|------|
-| `MainActivity.kt` | 所有 Compose UI（设备列表、详情、对话框） |
-| `MainViewModel.kt` | 核心业务逻辑、数据查询、状态管理 |
-| `BtLoggerReceiver.kt` | 蓝牙广播接收器，捕获连接/断开事件 |
-| `BtLoggerDatabase.kt` | Room 数据库定义，含迁移逻辑 |
-| `JxlUtils.kt` | Excel 导出功能 |
+| `ui/BtLoggerApp.kt` | 顶栏、导航、弹框与一次性事件分发 |
+| `ui/screens/*` | 设备列表、详情、权限引导页 |
+| `MainViewModel.kt` | 状态管理、导出、更新下载 |
+| `service/BtLoggerForegroundService.kt` | 蓝牙事件采集与落库 |
+| `data/RecordTimeline.kt` | 累计时长与统计（纯函数，有单测） |
+| `utils/JxlUtils.kt` | Excel 导出 |
+| `utils/AppSettings.kt` | 用户设置（SharedPreferences + StateFlow） |
 
 ## 技术栈
 
-- Kotlin 1.7.20 / Java 17
-- Compose Compiler 1.4.3
+- Kotlin 2.0.21 / Java 17，Compose 编译器插件随 Kotlin
 - Room 2.5.0
-- Hilt 2.44
-- compileSdk/targetSdk 33, minSdk 25
+- compileSdk 36, targetSdk 33, minSdk 25
 
 ## CI/CD
 
-GitHub Actions 自动构建：推送 `v*.*.*` 格式 tag 触发 Release 构建。
-
-配置文件：`.github/workflows/release.yml`
-
+- `.github/workflows/ci.yml`：push 到 main 与 PR 时运行单元测试并构建 debug APK
+- `.github/workflows/release.yml`：推送 `v*.*.*` tag 触发发布，versionName 取自 tag
 
 # Role: Android Expert & Architect
 - **身份**: 10年+经验 Android 架构师，精通 Google Modern Android Development (MAD)。

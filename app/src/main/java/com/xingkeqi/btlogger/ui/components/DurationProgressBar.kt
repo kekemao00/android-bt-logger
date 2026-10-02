@@ -14,7 +14,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.xingkeqi.btlogger.R
 import com.xingkeqi.btlogger.ui.theme.ConnectedGreen
 import com.xingkeqi.btlogger.ui.theme.Dimens
 import com.xingkeqi.btlogger.utils.getDurationString
@@ -49,13 +51,13 @@ fun DurationProgressBar(
 
         Row {
             Text(
-                text = "连接 ${getDurationString(connectionTime)}",
+                text = stringResource(id = R.string.duration_connected, getDurationString(connectionTime)),
                 style = MaterialTheme.typography.labelSmall,
                 color = ConnectedGreen
             )
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-                text = "断开 ${getDurationString(disconnectionTime)}",
+                text = stringResource(id = R.string.duration_disconnected, getDurationString(disconnectionTime)),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.error
             )

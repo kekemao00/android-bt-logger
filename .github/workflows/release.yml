@@ -1,196 +1,193 @@
-name: Build and Release Android APK
+name: Release
 
-# 触发条件：当推送以v开头的tag时
+# 推送 v*.*.* 格式的 tag 时自动构建并发布 GitHub Release，也可在 Actions 页面手动触发（填入 tag）
 on:
   push:
     tags:
-      - 'v*.*.*'  # 匹配 v1.0.0, v2.1.3 等格式
-  # 也可以手动触发
+      - 'v*.*.*'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: '要发布的 tag（如 v1.3.0），必须已存在'
+        required: true
 
 jobs:
-  build-and-release:
+  release:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     # softprops/action-gh-release 创建 Release 需要 contents 写权限
     permissions:
       contents: write
-    # Why: step-level `if` 不支持直接读取 secrets context，必须先在 job env
-    # 里做存在性检查，后续步骤再消费该变量。四个签名 Secrets 缺一不可，
-    # 必须同时校验，否则校验逻辑与「拒绝发布 unsigned APK」的承诺会失配。
+    # Why: step-level `if` 不能直接读取 secrets，先在 job env 里做存在性检查。
     env:
       HAS_RELEASE_SIGNING_SECRETS: ${{ secrets.KEYSTORE_FILE != '' && secrets.KEYSTORE_PASSWORD != '' && secrets.KEY_PASSWORD != '' && secrets.KEY_ALIAS != '' }}
-    
+
     steps:
-    # 1. 检出代码
-    - name: Checkout Repository
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0  # 获取完整历史，用于生成changelog
-        
-    # 2. 设置JDK环境
-    - name: Set up JDK 17
-      uses: actions/setup-java@v4
-      with:
-        java-version: '17'
-        distribution: 'temurin'
-        
-    # 3. 设置Android SDK
-    - name: Setup Android SDK
-      uses: android-actions/setup-android@v3
-      
-    # 4. 缓存Gradle依赖
-    - name: Cache Gradle packages
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.gradle/caches
-          ~/.gradle/wrapper
-        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-        restore-keys: |
-          ${{ runner.os }}-gradle-
-          
-    # 5. 赋予gradlew执行权限
-    - name: Grant execute permission for gradlew
-      run: chmod +x gradlew
-      
-    # 6. 获取版本信息
-    - name: Get version info
-      id: version
-      run: |
-        VERSION=${GITHUB_REF#refs/tags/}
-        echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-        echo "VERSION_CODE=$(git rev-list --count HEAD)" >> $GITHUB_OUTPUT
-        
-    # 7. 构建Debug APK
-    - name: Build Debug APK
-      run: ./gradlew assembleDebug
-      
-    # 8. 构建Release APK
-    - name: Build Release APK
-      run: ./gradlew assembleRelease
-      env:
-        VERSION_NAME: ${{ steps.version.outputs.VERSION }}
-        VERSION_CODE: ${{ steps.version.outputs.VERSION_CODE }}
-        
-    # 9. 定位 Gradle 产出的 APK
-    # Why: app/build.gradle 通过 outputFileName 将 APK 重命名为
-    #   BtLogger-{variant}-v{versionName}-{versionCode}({applicationId}).apk，
-    # 因此不能再使用 app-debug.apk / app-release.apk 这些默认名字。
-    - name: Locate APK artifacts
-      id: locate
-      run: |
-        set -euo pipefail
-        DEBUG_APK=$(find app/build/outputs/apk/debug -maxdepth 1 -name '*.apk' | head -n 1)
-        RELEASE_APK=$(find app/build/outputs/apk/release -maxdepth 1 -name '*.apk' | head -n 1)
+      - name: Resolve tag
+        id: version
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.tag }}"
+          if [ -z "$TAG" ]; then TAG="${GITHUB_REF#refs/tags/}"; fi
+          echo "TAG=$TAG" >> "$GITHUB_OUTPUT"
+          # versionName 去掉前缀 v，与 app/build.gradle 中的默认格式一致
+          echo "VERSION_NAME=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "BUILD_DATE=$(date -u '+%Y-%m-%d %H:%M UTC')" >> "$GITHUB_OUTPUT"
 
-        if [ -z "${DEBUG_APK}" ] || [ -z "${RELEASE_APK}" ]; then
-          echo "::error::未找到构建产物: DEBUG_APK='${DEBUG_APK}' RELEASE_APK='${RELEASE_APK}'"
-          ls -R app/build/outputs/apk || true
-          exit 1
-        fi
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.version.outputs.TAG }}
+          fetch-depth: 0  # 获取完整历史与 tag，用于生成 changelog
 
-        echo "DEBUG_APK=${DEBUG_APK}" >> "$GITHUB_OUTPUT"
-        echo "RELEASE_APK=${RELEASE_APK}" >> "$GITHUB_OUTPUT"
-        echo "Debug APK:   ${DEBUG_APK}"
-        echo "Release APK: ${RELEASE_APK}"
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
 
-    # 10. 校验 Release 签名 Secrets
-    # Why: Release 页面对外标注为 production use，Android 7+ 会拒绝安装 unsigned APK。
-    # 缺失签名 Secrets 时必须直接 fail，避免发布用户无法安装的构建产物。
-    - name: Validate release signing secrets
-      if: ${{ env.HAS_RELEASE_SIGNING_SECRETS != 'true' }}
-      run: |
-        echo "::error::Release signing secrets 未完整配置（KEYSTORE_FILE/KEYSTORE_PASSWORD/KEY_PASSWORD/KEY_ALIAS），拒绝发布 unsigned APK"
-        exit 1
+      # Why: ubuntu-latest 已预装 Android SDK（ANDROID_HOME 已设置）；
+      # android-actions/setup-android 默认安装已下架的 `tools` 包会直接失败，
+      # 这正是 v1.1.0 ~ v1.2.1 发布全部失败的原因。
 
-    # 11. 签名 Release APK
-    # Why: 使用 Android SDK 的 apksigner 生成 v2+ 签名（targetSdk 30+ 必需），
-    # jarsigner 只能产生 v1(JAR) 签名。密码通过 `env:` 前缀读取环境变量，
-    # 避免 -storepass/-keypass 展开到 /proc/*/cmdline。
-    - name: Sign Release APK
-      if: ${{ env.HAS_RELEASE_SIGNING_SECRETS == 'true' }}
-      env:
-        KEYSTORE_FILE: ${{ secrets.KEYSTORE_FILE }}
-        KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-        KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-        RELEASE_APK: ${{ steps.locate.outputs.RELEASE_APK }}
-      run: |
-        set -euo pipefail
-        # trap 保证任何分支（包括签名/校验失败）都清理临时 keystore，降低泄漏风险
-        trap 'rm -f keystore.jks' EXIT
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
 
-        printf '%s' "$KEYSTORE_FILE" | base64 -d > keystore.jks
+      - name: Unit tests
+        run: ./gradlew testDebugUnitTest --stacktrace
 
-        # 选取最新版本的 apksigner，避免多版本 build-tools 并存时选到旧版
-        APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1)"
-        if [ -z "$APKSIGNER" ]; then
-          echo "::error::未找到 apksigner，请确认 Android build-tools 已安装"
-          exit 1
-        fi
+      - name: Build APKs
+        run: ./gradlew assembleDebug assembleRelease --stacktrace
+        env:
+          VERSION_NAME: ${{ steps.version.outputs.VERSION_NAME }}
 
-        "$APKSIGNER" sign \
-          --ks keystore.jks \
-          --ks-key-alias "$KEY_ALIAS" \
-          --ks-pass env:KEYSTORE_PASSWORD \
-          --key-pass env:KEY_PASSWORD \
-          "$RELEASE_APK"
+      # app/build.gradle 将 APK 重命名为
+      # BtLogger-{variant}-v{versionName}-{versionCode}({applicationId}).apk
+      - name: Locate APKs
+        id: locate
+        run: |
+          set -euo pipefail
+          DEBUG_APK=$(find app/build/outputs/apk/debug -maxdepth 1 -name '*.apk' | head -n 1)
+          RELEASE_APK=$(find app/build/outputs/apk/release -maxdepth 1 -name '*.apk' | head -n 1)
+          if [ -z "$DEBUG_APK" ] || [ -z "$RELEASE_APK" ]; then
+            echo "::error::未找到构建产物: DEBUG_APK='$DEBUG_APK' RELEASE_APK='$RELEASE_APK'"
+            ls -R app/build/outputs/apk || true
+            exit 1
+          fi
+          echo "DEBUG_APK=$DEBUG_APK" >> "$GITHUB_OUTPUT"
+          echo "RELEASE_APK=$RELEASE_APK" >> "$GITHUB_OUTPUT"
 
-        "$APKSIGNER" verify --verbose "$RELEASE_APK"
+      # Why: apksigner 生成 v2+ 签名（targetSdk 30+ 必需）；密码通过 env: 读取，
+      # 避免出现在进程命令行中。
+      - name: Sign release APK
+        if: ${{ env.HAS_RELEASE_SIGNING_SECRETS == 'true' }}
+        env:
+          KEYSTORE_FILE: ${{ secrets.KEYSTORE_FILE }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          RELEASE_APK: ${{ steps.locate.outputs.RELEASE_APK }}
+        run: |
+          set -euo pipefail
+          trap 'rm -f keystore.jks' EXIT
+          printf '%s' "$KEYSTORE_FILE" | base64 -d > keystore.jks
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1)"
+          if [ -z "$APKSIGNER" ]; then
+            echo "::error::未找到 apksigner"
+            exit 1
+          fi
+          "$APKSIGNER" sign \
+            --ks keystore.jks \
+            --ks-key-alias "$KEY_ALIAS" \
+            --ks-pass env:KEYSTORE_PASSWORD \
+            --key-pass env:KEY_PASSWORD \
+            "$RELEASE_APK"
+          "$APKSIGNER" verify --verbose "$RELEASE_APK"
 
-    # 12. 生成 Changelog
-    - name: Generate Changelog
-      id: changelog
-      run: |
-        set -euo pipefail
-        PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
-        if [ -n "$PREVIOUS_TAG" ]; then
-          CHANGELOG=$(git log ${PREVIOUS_TAG}..HEAD --pretty=format:"- %s" --no-merges)
-        else
-          CHANGELOG=$(git log --pretty=format:"- %s" --no-merges -10)
-        fi
-        {
-          echo "CHANGELOG<<EOF"
-          echo "$CHANGELOG"
-          echo "EOF"
-        } >> "$GITHUB_OUTPUT"
+      # Why: 未配置签名时，unsigned 的 release APK 无法安装，不能上传；
+      # 但也不应让整个发布失败，此时只发布可直接安装的 debug APK，并在说明中注明。
+      - name: Collect release assets
+        id: assets
+        env:
+          DEBUG_APK: ${{ steps.locate.outputs.DEBUG_APK }}
+          RELEASE_APK: ${{ steps.locate.outputs.RELEASE_APK }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp "$DEBUG_APK" dist/
+          if [ "$HAS_RELEASE_SIGNING_SECRETS" = "true" ]; then
+            cp "$RELEASE_APK" dist/
+            echo "SIGNING_NOTE=- **Release APK**：正式签名，推荐安装" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::未配置签名 Secrets（KEYSTORE_FILE/KEYSTORE_PASSWORD/KEY_PASSWORD/KEY_ALIAS），本次只发布 debug APK"
+            echo "SIGNING_NOTE=- 本次未配置正式签名，仅提供 debug APK" >> "$GITHUB_OUTPUT"
+          fi
+          (cd dist && sha256sum *.apk > SHA256SUMS.txt)
+          ls -l dist
 
-    # 13. 创建 Release 并上传所有 APK 资产
-    # Why: actions/create-release@v1 与 actions/upload-release-asset@v1 已归档，
-    # 改用仍在维护的 softprops/action-gh-release，通过 glob 一次性上传所有 APK。
-    - name: Create GitHub Release
-      uses: softprops/action-gh-release@v2
-      with:
-        tag_name: ${{ steps.version.outputs.VERSION }}
-        name: Release ${{ steps.version.outputs.VERSION }}
-        draft: false
-        prerelease: false
-        body: |
-          ## 🚀 Release ${{ steps.version.outputs.VERSION }}
+      # 按 Conventional Commits 类型分组生成更新日志
+      - name: Generate changelog
+        env:
+          TAG: ${{ steps.version.outputs.TAG }}
+        run: |
+          set -euo pipefail
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || echo "")
+          RANGE="${PREVIOUS_TAG:+${PREVIOUS_TAG}..}${TAG}"
+          git log "$RANGE" --no-merges --pretty=format:'%s' > commits.txt || true
+          section() {
+            local title="$1" pattern="$2"
+            local lines
+            lines=$(grep -E "$pattern" commits.txt || true)
+            if [ -n "$lines" ]; then
+              printf '### %s\n%s\n\n' "$title" "$(printf '%s\n' "$lines" | sed 's/^/- /')"
+            fi
+          }
+          {
+            section "✨ 新功能" '^feat(\(.+\))?!?:'
+            section "🐛 问题修复" '^fix(\(.+\))?!?:'
+            section "⚡ 优化与重构" '^(perf|refactor|style)(\(.+\))?!?:'
+            section "🔧 其他" '^(build|ci|chore|docs|test)(\(.+\))?!?:'
+            others=$(grep -vE '^(feat|fix|perf|refactor|style|build|ci|chore|docs|test)(\(.+\))?!?:' commits.txt || true)
+            if [ -n "$others" ]; then
+              printf '### 📝 其他提交\n%s\n\n' "$(printf '%s\n' "$others" | sed 's/^/- /')"
+            fi
+            if [ -n "$PREVIOUS_TAG" ]; then
+              echo "**完整变更**：https://github.com/${GITHUB_REPOSITORY}/compare/${PREVIOUS_TAG}...${TAG}"
+            fi
+          } > CHANGELOG_BODY.md
+          cat CHANGELOG_BODY.md
 
-          ### 📱 Download
-          - **Release APK**: For production use
-          - **Debug APK**: For testing and debugging
+      - name: Compose release notes
+        env:
+          TAG: ${{ steps.version.outputs.TAG }}
+          BUILD_DATE: ${{ steps.version.outputs.BUILD_DATE }}
+          SIGNING_NOTE: ${{ steps.assets.outputs.SIGNING_NOTE }}
+        run: |
+          {
+            echo "## BtLogger ${TAG}"
+            echo
+            echo "### 📱 下载"
+            echo "$SIGNING_NOTE"
+            echo "- **Debug APK**：调试版本，日志更完整"
+            echo "- \`SHA256SUMS.txt\`：校验文件完整性"
+            echo
+            cat CHANGELOG_BODY.md
+            echo
+            echo "---"
+            echo "构建时间：${BUILD_DATE} · Commit：\`$(git rev-parse --short HEAD)\`"
+          } > RELEASE_NOTES.md
 
-          ### 📋 Changes
-          ${{ steps.changelog.outputs.CHANGELOG }}
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.TAG }}
+          name: BtLogger ${{ steps.version.outputs.TAG }}
+          body_path: RELEASE_NOTES.md
+          files: dist/*
 
-          ### 📊 Build Info
-          - Version Code: ${{ steps.version.outputs.VERSION_CODE }}
-          - Build Date: ${{ github.event.head_commit.timestamp }}
-          - Commit: ${{ github.sha }}
-        files: |
-          app/build/outputs/apk/release/*.apk
-          app/build/outputs/apk/debug/*.apk
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-    # 14. 上传构建产物到 Artifacts（备份）
-    - name: Upload APK Artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: apk-files-${{ steps.version.outputs.VERSION }}
-        path: |
-          app/build/outputs/apk/release/*.apk
-          app/build/outputs/apk/debug/*.apk
-        retention-days: 30
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: BtLogger-${{ steps.version.outputs.TAG }}
+          path: dist/*
+          retention-days: 30

@@ -11,7 +11,8 @@ object Dimens {
     val spacingSm = 8.dp
     val spacingMd = 12.dp
     val spacingLg = 16.dp
-    val spacingXl = 22.dp
+    val spacingXl = 24.dp
+    val spacingXxl = 48.dp
 
     // 卡片
     val cardPadding = 12.dp
@@ -23,10 +24,18 @@ object Dimens {
     val iconSizeSm = 16.dp
     val iconSizeMd = 24.dp
     val iconSizeLg = 32.dp
+    val iconSizeXl = 64.dp
+
+    // 头像
+    val avatarSize = 40.dp
 
     // 状态指示器
     val statusIndicatorSize = 10.dp
 
     // 进度条
     val progressBarHeight = 8.dp
+
+    // 列表
+    val listContentPadding = 12.dp
+    val listItemSpacing = 8.dp
 }

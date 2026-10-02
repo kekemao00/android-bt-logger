@@ -20,6 +20,8 @@
     <!--    前台服务权限（Android 9+）-->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <!--    Android 13+ 显示前台服务通知需要运行时通知权限-->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!--    要正确地使用 FileProvider 来共享文件，您需要在清单文件中请求以下权限-->
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
@@ -57,6 +59,7 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTop"
             android:label="@string/app_name"
             android:theme="@style/Theme.BtLogger">
             <intent-filter>
@@ -81,6 +84,16 @@
                 <action android:name="android.bluetooth.adapter.action.CONNECTION_STATE_CHANGED" />
                 <action android:name="android.bluetooth.a2dp.profile.action.CONNECTION_STATE_CHANGED" />
                 <action android:name="android.bluetooth.headset.profile.action.CONNECTION_STATE_CHANGED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- 开机 / 应用更新后自动恢复后台记录 -->
+        <receiver
+            android:name=".receiver.BootCompletedReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
 
