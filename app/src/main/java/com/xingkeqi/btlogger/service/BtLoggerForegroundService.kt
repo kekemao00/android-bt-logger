@@ -2,9 +2,11 @@ package com.xingkeqi.btlogger.service
 
 import android.annotation.SuppressLint
 import android.app.Notification
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.bluetooth.BluetoothA2dp
+import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothHeadset
 import android.bluetooth.BluetoothProfile
@@ -38,11 +40,14 @@ import com.xingkeqi.btlogger.utils.BluetoothBatteryUtils
 import com.xingkeqi.btlogger.utils.BluetoothVersionProbeResult
 import com.xingkeqi.btlogger.utils.BluetoothVersionSnapshot
 import com.xingkeqi.btlogger.utils.BluetoothVersionUtils
+import com.xingkeqi.btlogger.utils.AppSettings
 import com.xingkeqi.btlogger.utils.HeadsetBatterySnapshot
+import com.xingkeqi.btlogger.utils.applyFixedMediaVolume
 import com.xingkeqi.btlogger.utils.MediaVolumeSnapshot
 import com.xingkeqi.btlogger.utils.readMediaVolumeSnapshot
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -67,6 +72,8 @@ class BtLoggerForegroundService : Service() {
     private val connectedDevices = ConcurrentHashMap<String, ConnectedDeviceState>()
     private val latestHeadsetBatteryLevels = ConcurrentHashMap<String, Int>()
     private val latestPersistedBatterySnapshots = ConcurrentHashMap<String, PersistedBatterySnapshot>()
+    private val fixedVolumeJobs = ConcurrentHashMap<String, Job>()
+    private val appSettings by lazy { AppSettings.get(applicationContext) }
     private val codecSnapshotMutex = Mutex()
     private val batterySnapshotMutex = Mutex()
     private val batteryProbeManager by lazy {
@@ -193,10 +200,11 @@ class BtLoggerForegroundService : Service() {
         }
         registerReceiver(btReceiver, intentFilter)
         Log.i(tag, "onCreate: 已注册蓝牙与电量广播接收器")
+        syncAlreadyConnectedDevices()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(NOTIFICATION_ID, createNotification())
+        startForeground(NOTIFICATION_ID, createNotification(connectedDeviceNames()))
         Log.i(tag, "onStartCommand: 前台服务已启动")
         return START_STICKY
     }
@@ -208,6 +216,8 @@ class BtLoggerForegroundService : Service() {
             versionProbeManager.stopAll()
             versionAdvertisementProbeManager.stopAll()
         }
+        fixedVolumeJobs.values.forEach { it.cancel() }
+        fixedVolumeJobs.clear()
         serviceScope.cancel()
         try {
             unregisterReceiver(btReceiver)
@@ -223,7 +233,11 @@ class BtLoggerForegroundService : Service() {
      * 连接状态变化必须立即落库，同时把当前已知的耳机电量快照一并写入，避免详情页只显示手机电量。
      */
     @SuppressLint("MissingPermission")
-    private fun handleConnectionStateChanged(bluetoothDevice: BluetoothDevice, state: Int) {
+    private fun handleConnectionStateChanged(
+        bluetoothDevice: BluetoothDevice,
+        state: Int,
+        applyFixedVolume: Boolean = true
+    ) {
         val address = readDeviceAddressOrNull(bluetoothDevice) ?: return
         val isConnected = state == BluetoothProfile.STATE_CONNECTED
         val connectStatus = if (isConnected) {
@@ -271,12 +285,108 @@ class BtLoggerForegroundService : Service() {
             showConnectionToastSafely(device.name, isConnected)
 
             if (isConnected) {
+                if (applyFixedVolume) {
+                    scheduleFixedVolume(address)
+                }
                 startConnectedDeviceProbes(bluetoothDevice, deviceState)
             } else {
+                fixedVolumeJobs.remove(address)?.cancel()
                 stopConnectedDeviceProbes(address)
                 connectedDevices.remove(address)
                 latestPersistedBatterySnapshots.remove(address)
             }
+            refreshNotificationSafely()
+        }
+    }
+
+    /**
+     * 固定音量由前台服务执行。
+     *
+     * Why:
+     * 过去该逻辑挂在 Activity 的 EventBus 回调上，App 界面关闭后（最常见的使用场景）不会生效。
+     */
+    private fun scheduleFixedVolume(address: String) {
+        if (!appSettings.fixedVolumeEnabled.value) return
+        val targetPercent = appSettings.fixedVolumePercent.value
+        fixedVolumeJobs.remove(address)?.cancel()
+        fixedVolumeJobs[address] = serviceScope.launch {
+            try {
+                val applied = applyFixedMediaVolume(applicationContext, targetPercent)
+                Log.i(
+                    tag,
+                    "[BtLoggerForegroundService] scheduleFixedVolume -> device=$address, target=$targetPercent%, applied=$applied"
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(tag, "[BtLoggerForegroundService] scheduleFixedVolume -> failed: device=$address", e)
+            }
+        }
+    }
+
+    /**
+     * 服务（重新）启动时同步系统中已连接的 A2DP 设备。
+     *
+     * Why:
+     * 服务被系统回收后以 START_STICKY 重建、或开机前耳机已连上时，不会再收到连接广播，
+     * 导致电量采样与版本探测全部失效。这里主动查询一次已连接设备：
+     * 数据库最新状态已是“已连接”的只恢复内存跟踪；否则补记一条连接记录。
+     */
+    @SuppressLint("MissingPermission")
+    private fun syncAlreadyConnectedDevices() {
+        runSafely("syncAlreadyConnectedDevices") {
+            @Suppress("DEPRECATION")
+            val adapter = BluetoothAdapter.getDefaultAdapter() ?: return@runSafely
+            if (!adapter.isEnabled) return@runSafely
+            adapter.getProfileProxy(applicationContext, object : BluetoothProfile.ServiceListener {
+                override fun onServiceConnected(profile: Int, proxy: BluetoothProfile) {
+                    runSafely("syncAlreadyConnectedDevices.onServiceConnected") {
+                        val devices = proxy.connectedDevices.orEmpty()
+                        Log.i(
+                            tag,
+                            "[BtLoggerForegroundService] syncAlreadyConnectedDevices -> connected=${devices.size}"
+                        )
+                        devices.forEach { restoreConnectedDevice(it) }
+                    }
+                    runSafely("syncAlreadyConnectedDevices.closeProxy") {
+                        adapter.closeProfileProxy(profile, proxy)
+                    }
+                }
+
+                override fun onServiceDisconnected(profile: Int) = Unit
+            }, BluetoothProfile.A2DP)
+        }
+    }
+
+    private fun restoreConnectedDevice(bluetoothDevice: BluetoothDevice) {
+        val address = readDeviceAddressOrNull(bluetoothDevice) ?: return
+        if (connectedDevices.containsKey(address)) return
+        launchSafely("restoreConnectedDevice[$address]") {
+            val latestStateRecord = recordDao.getLatestConnectionStateRecord(address)
+            if (latestStateRecord?.connectState == BluetoothA2dp.STATE_CONNECTED) {
+                val existingDevice = deviceDao.getDeviceByMacSnapshot(address)
+                val deviceState = buildConnectedDeviceState(bluetoothDevice, existingDevice)
+                connectedDevices[address] = deviceState
+                preloadHeadsetBatterySafely(bluetoothDevice, address)
+                startConnectedDeviceProbes(bluetoothDevice, deviceState)
+                refreshNotificationSafely()
+            } else {
+                handleConnectionStateChanged(
+                    bluetoothDevice = bluetoothDevice,
+                    state = BluetoothProfile.STATE_CONNECTED,
+                    applyFixedVolume = false
+                )
+            }
+        }
+    }
+
+    private fun connectedDeviceNames(): List<String> =
+        connectedDevices.values.map { state -> state.name.ifBlank { state.mac } }
+
+    private fun refreshNotificationSafely() {
+        runSafely("refreshNotification") {
+            val manager = getSystemService(NotificationManager::class.java) ?: return@runSafely
+            manager.notify(NOTIFICATION_ID, createNotification(connectedDeviceNames()))
         }
     }
 
@@ -745,17 +855,24 @@ class BtLoggerForegroundService : Service() {
         }
     }
 
-    private fun createNotification(): Notification {
+    private fun createNotification(connectedNames: List<String>): Notification {
         val pendingIntent = PendingIntent.getActivity(
             this,
             0,
-            Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_IMMUTABLE
+            Intent(this, MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
+        val contentText = if (connectedNames.isEmpty()) {
+            getString(R.string.notification_waiting_device)
+        } else {
+            getString(R.string.notification_connected_devices, connectedNames.joinToString("、"))
+        }
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("蓝牙日志记录中")
-            .setContentText("正在监听蓝牙连接状态...")
+            .setContentTitle(getString(R.string.notification_title))
+            .setContentText(contentText)
+            .setOnlyAlertOnce(true)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
@@ -873,7 +990,8 @@ class BtLoggerForegroundService : Service() {
 
     private fun showConnectionToastSafely(deviceName: String, isConnected: Boolean) {
         try {
-            ToastUtils.showLong("$deviceName - ${if (isConnected) "已连接" else "已断开"}")
+            val state = getString(if (isConnected) R.string.status_connected else R.string.status_disconnected)
+            ToastUtils.showLong(getString(R.string.toast_device_state, deviceName, state))
         } catch (e: Exception) {
             Log.e(
                 tag,

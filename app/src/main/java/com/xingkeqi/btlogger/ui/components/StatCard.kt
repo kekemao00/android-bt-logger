@@ -12,6 +12,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.xingkeqi.btlogger.ui.theme.Dimens
 
@@ -41,28 +43,35 @@ fun StatCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(Dimens.cardPadding),
-            horizontalArrangement = Arrangement.SpaceEvenly
+            horizontalArrangement = Arrangement.spacedBy(Dimens.spacingXs)
         ) {
             items.forEach { item ->
-                StatItemView(item)
+                StatItemView(item = item, modifier = Modifier.weight(1f))
             }
         }
     }
 }
 
 @Composable
-private fun StatItemView(item: StatItem) {
-    Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+private fun StatItemView(item: StatItem, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally
+    ) {
         Text(
             text = item.value,
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary
+            color = MaterialTheme.colorScheme.primary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center
         )
         Text(
             text = item.label,
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.outline
+            color = MaterialTheme.colorScheme.outline,
+            maxLines = 1
         )
     }
 }

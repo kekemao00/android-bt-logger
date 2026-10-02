@@ -1,288 +1,334 @@
 package com.xingkeqi.btlogger
 
-import android.bluetooth.BluetoothA2dp
 import android.content.Context
 import android.util.Log
-import androidx.lifecycle.LiveData
-import androidx.lifecycle.MutableLiveData
+import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.asLiveData
-import androidx.lifecycle.switchMap
 import androidx.lifecycle.viewModelScope
 import com.blankj.utilcode.util.AppUtils
 import com.pgyer.pgyersdk.PgyerSDKManager
 import com.pgyer.pgyersdk.callback.CheckoutVersionCallBack
 import com.pgyer.pgyersdk.model.CheckSoftModel
 import com.xingkeqi.btlogger.data.BtLoggerDatabase
-import com.xingkeqi.btlogger.data.Device
-import com.xingkeqi.btlogger.data.DeviceConnectionRecord
 import com.xingkeqi.btlogger.data.DeviceDao
 import com.xingkeqi.btlogger.data.DeviceInfo
 import com.xingkeqi.btlogger.data.DeviceWithRecordsDao
-import com.xingkeqi.btlogger.data.RecordEventType
 import com.xingkeqi.btlogger.data.RecordDao
 import com.xingkeqi.btlogger.data.RecordInfo
+import com.xingkeqi.btlogger.data.RecordStats
+import com.xingkeqi.btlogger.data.buildRecordTimeline
+import com.xingkeqi.btlogger.data.computeRecordStats
+import com.xingkeqi.btlogger.utils.AppSettings
 import com.xingkeqi.btlogger.utils.MediaVolumeSnapshot
+import com.xingkeqi.btlogger.utils.saveDataToSheet
 import io.reactivex.android.schedulers.AndroidSchedulers
+import io.reactivex.disposables.Disposable
 import io.reactivex.rxkotlin.subscribeBy
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import zlc.season.rxdownload4.download
 import zlc.season.rxdownload4.file
 import java.io.File
 
+/**
+ * 一次性 UI 事件（Toast、分享文件等），避免用 State 表达导致旋转屏幕后重复触发
+ */
+sealed interface UiEvent {
+    data class ShowMessage(@StringRes val resId: Int, val args: List<Any> = emptyList()) : UiEvent
+    data class ShareFile(val file: File) : UiEvent
+}
+
+/**
+ * 应用内更新弹框状态
+ */
+sealed interface UpdateUiState {
+    object Hidden : UpdateUiState
+    data class Available(val version: CheckSoftModel) : UpdateUiState
+    data class Downloading(
+        val progress: Float,
+        val downloadedBytes: Long,
+        val totalBytes: Long
+    ) : UpdateUiState
+}
+
+/**
+ * 详情页历史记录筛选
+ */
+enum class RecordFilter {
+    ALL, CONNECTION, CODEC, BATTERY
+}
+
+@OptIn(ExperimentalCoroutinesApi::class)
 class MainViewModel(
     private val deviceDao: DeviceDao,
     private val recordDao: RecordDao,
-    private val deviceWithRecordsDao: DeviceWithRecordsDao
+    private val deviceWithRecordsDao: DeviceWithRecordsDao,
+    private val settings: AppSettings,
+    private val exportDir: File
 ) : ViewModel() {
 
     private val tag = "MainViewModel"
 
     /**
-     * 列表，包括当前状态，首次 尾次连接时间
+     * 设备列表；null 表示首次加载尚未完成，用于区分“加载中”与“确实为空”
      */
-    val deviceInfoList: LiveData<List<DeviceInfo>> =
-        deviceDao.getDeviceInfosWithConnectionRecords().asLiveData()
+    val devices: StateFlow<List<DeviceInfo>?> = deviceDao.getDeviceInfosWithConnectionRecords()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    val filteredDevices: StateFlow<List<DeviceInfo>?> = combine(devices, _searchQuery) { list, query ->
+        val keyword = query.trim()
+        if (list == null || keyword.isEmpty()) {
+            list
+        } else {
+            list.filter {
+                it.name.contains(keyword, ignoreCase = true) || it.mac.contains(keyword, ignoreCase = true)
+            }
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    private val _selectedDevice = MutableStateFlow<DeviceInfo?>(null)
 
     /**
-     * Curr device
+     * 当前查看详情的设备；与设备列表合并以便连接状态实时刷新，记录被清空后保留最后一次快照
      */
-    val currDevice = MutableLiveData<DeviceInfo>()
+    val selectedDevice: StateFlow<DeviceInfo?> = combine(_selectedDevice, devices) { selected, list ->
+        selected?.let { device -> list?.firstOrNull { it.mac == device.mac } ?: device }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
-    val pairTimeDuration = MutableLiveData(Pair(0L, 0L))
+    /**
+     * 当前设备的记录时间线（倒序，已计算累计时长）
+     */
+    val records: StateFlow<List<RecordInfo>> = _selectedDevice
+        .map { it?.mac }
+        .distinctUntilChanged()
+        .flatMapLatest { mac ->
+            if (mac == null) {
+                flowOf(emptyList())
+            } else {
+                recordDao.getRecordInfoListByMac(mac).map { buildRecordTimeline(it) }
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    var customVolumeSwitch = MutableLiveData(false)
+    val recordStats: StateFlow<RecordStats> = records
+        .map { computeRecordStats(it) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), RecordStats())
 
-    var presetTestVolume = 60
+    private val _recordFilter = MutableStateFlow(RecordFilter.ALL)
+    val recordFilter: StateFlow<RecordFilter> = _recordFilter.asStateFlow()
 
-    val mediaVolumeSnapshot = MutableLiveData(MediaVolumeSnapshot(percent = presetTestVolume))
+    val fixedVolumeEnabled: StateFlow<Boolean> = settings.fixedVolumeEnabled
+    val fixedVolumePercent: StateFlow<Int> = settings.fixedVolumePercent
+
+    private val _mediaVolumeSnapshot = MutableStateFlow(MediaVolumeSnapshot())
+    val mediaVolumeSnapshot: StateFlow<MediaVolumeSnapshot> = _mediaVolumeSnapshot.asStateFlow()
+
+    private val _updateState = MutableStateFlow<UpdateUiState>(UpdateUiState.Hidden)
+    val updateState: StateFlow<UpdateUiState> = _updateState.asStateFlow()
+    private var downloadDisposable: Disposable? = null
+
+    private val _events = Channel<UiEvent>(Channel.BUFFERED)
+    val events: Flow<UiEvent> = _events.receiveAsFlow()
+
+    fun selectDevice(device: DeviceInfo) {
+        Log.i(tag, "[MainViewModel] selectDevice -> mac=${device.mac}")
+        _recordFilter.value = RecordFilter.ALL
+        _selectedDevice.value = device
+    }
+
+    fun clearSelection() {
+        _selectedDevice.value = null
+    }
+
+    fun setSearchQuery(query: String) {
+        _searchQuery.value = query
+    }
+
+    fun setRecordFilter(filter: RecordFilter) {
+        _recordFilter.value = filter
+    }
 
     fun updateMediaVolumeSnapshot(snapshot: MediaVolumeSnapshot) {
-        Log.i(
-            tag,
-            "[MainViewModel] updateMediaVolumeSnapshot -> Route/Volume: bluetoothConnected=${snapshot.hasBluetoothOutput}, playing=${snapshot.isMusicActive}, current=${snapshot.currentLevel}, max=${snapshot.maxLevel}, percent=${snapshot.percent}"
-        )
-        mediaVolumeSnapshot.value = snapshot
+        _mediaVolumeSnapshot.value = snapshot
     }
 
-    fun updatePresetTestVolume(percent: Int) {
-        val resolvedPercent = percent.coerceIn(0, 100)
-        if (presetTestVolume == resolvedPercent) return
-        Log.i(
-            tag,
-            "[MainViewModel] updatePresetTestVolume -> TargetVolume: old=$presetTestVolume, new=$resolvedPercent"
-        )
-        presetTestVolume = resolvedPercent
+    fun setFixedVolumeEnabled(enabled: Boolean) {
+        Log.i(tag, "[MainViewModel] setFixedVolumeEnabled -> $enabled")
+        settings.setFixedVolumeEnabled(enabled)
     }
 
+    fun setFixedVolumePercent(percent: Int) {
+        settings.setFixedVolumePercent(percent)
+    }
+
+    fun deleteDevice(mac: String) = launchIo("deleteDevice") {
+        deviceWithRecordsDao.deleteDeviceWithRecords(mac)
+        if (_selectedDevice.value?.mac == mac) clearSelection()
+        emit(UiEvent.ShowMessage(R.string.message_deleted))
+    }
+
+    fun clearAll() = launchIo("clearAll") {
+        deviceWithRecordsDao.deleteAll()
+        clearSelection()
+        emit(UiEvent.ShowMessage(R.string.message_deleted))
+    }
 
     /**
-     * 当前设备的详细记录
+     * 清空当前设备记录后返回列表：设备已无记录，列表查询不会再返回它
      */
-    val recordInfoList: LiveData<List<RecordInfo>> =
-        currDevice.switchMap { device ->
-            var lastStateTimestamp = 0L
-            var connectionTime = 0L
-            var disconnectionTime = 0L
-            recordDao.getRecordInfoListByMac(device?.mac ?: "").map { it ->
-                it.sortedBy { it.timestamp }.map {
-                    val isStateEvent =
-                        it.eventType != RecordEventType.CODEC_CHANGED &&
-                            it.eventType != RecordEventType.BATTERY_CHANGED
-                    it.lastRecordTime = if (lastStateTimestamp < 1) it.timestamp else lastStateTimestamp
-                    if (isStateEvent) {
-                        val timeDiff = it.timestamp - (it.lastRecordTime ?: 0)
-                        if (it.connectState == BluetoothA2dp.STATE_CONNECTED) {
-                            disconnectionTime += timeDiff
-                        } else {
-                            connectionTime += timeDiff
-                        }
-                        lastStateTimestamp = it.timestamp
+    fun clearSelectedDeviceRecords() {
+        val mac = _selectedDevice.value?.mac ?: return
+        launchIo("clearSelectedDeviceRecords") {
+            recordDao.deleteRecordByDeviceMac(mac)
+            clearSelection()
+            emit(UiEvent.ShowMessage(R.string.message_deleted))
+        }
+    }
+
+    fun deleteRecord(id: Int) = launchIo("deleteRecord") {
+        recordDao.deleteRecordByDeviceId(id)
+    }
+
+    fun exportSelectedDevice() {
+        val device = selectedDevice.value ?: return
+        val snapshot = records.value
+        launchIo("exportSelectedDevice") {
+            export(device, snapshot)
+        }
+    }
+
+    fun exportAll(allDevicesName: String) = launchIo("exportAll") {
+        val all = recordDao.getRecordInfoListAll().first()
+        export(DeviceInfo(name = allDevicesName), all)
+    }
+
+    private suspend fun export(device: DeviceInfo, records: List<RecordInfo>) {
+        if (records.isEmpty()) {
+            emit(UiEvent.ShowMessage(R.string.export_empty))
+            return
+        }
+        val result = runCatching { saveDataToSheet(exportDir, device, records) }
+        result.onSuccess { file ->
+            Log.i(tag, "[MainViewModel] export -> success: ${file.name}, ${file.length()} bytes, rows=${records.size}")
+            emit(UiEvent.ShareFile(file))
+        }.onFailure { e ->
+            Log.e(tag, "[MainViewModel] export -> failed", e)
+            emit(UiEvent.ShowMessage(R.string.export_failed, listOf(e.message.orEmpty())))
+        }
+    }
+
+    /**
+     * @param manual 用户主动检查时才提示“已是最新/检查失败”，启动时静默检查
+     */
+    fun checkUpdate(manual: Boolean) {
+        runCatching {
+            PgyerSDKManager.checkSoftwareUpdate(object : CheckoutVersionCallBack {
+                override fun onSuccess(version: CheckSoftModel?) {
+                    Log.i(tag, "[MainViewModel] checkUpdate -> hasNew=${version?.isBuildHaveNewVersion}")
+                    if (version?.isBuildHaveNewVersion == true) {
+                        _updateState.value = UpdateUiState.Available(version)
+                    } else if (manual) {
+                        emit(UiEvent.ShowMessage(R.string.update_latest))
                     }
-                    it.totalConnectionTime = connectionTime
-                    it.totalDisConnectionTime = disconnectionTime
-                    pairTimeDuration.value = Pair(connectionTime, disconnectionTime)
-
-                    it
-                }.sortedByDescending { it.timestamp }.also {
-                    // 处理完成初始化临时变量，为下次计算做准备
-                    lastStateTimestamp = 0L
-                    connectionTime = 0L
-                    disconnectionTime = 0L
                 }
-            }.asLiveData()
-        }
 
-    /**
-     *
-     * val connectionTime = 0L
-     * val disconnectionTime = 0L
-     * var lastTimestamp = 0L
-     *
-     * recordDao.getRecordInfoListByMac(device?.mac ?: "").map { it ->
-     *     it.sortedBy { it.timestamp }.forEach { recordInfo ->
-     *         val timeDiff = recordInfo.timestamp - lastTimestamp
-     *         if (recordInfo.isConnected) {
-     *             connectionTime += timeDiff
-     *         } else {
-     *             disconnectionTime += timeDiff
-     *         }
-     *         lastTimestamp = recordInfo.timestamp
-     *     }
-     * }.asLiveData()
-     */
-
-
-    /**
-     * Insert device
-     *
-     * @param device
-     */
-    fun insertDevice(device: Device) {
-        viewModelScope.launch {
-            withContext(Dispatchers.IO) {
-                deviceDao.insert(device)
-            }
-        }
-    }
-
-    fun getDeviceByMac(mac: String): LiveData<Device> {
-        return deviceDao.getDeviceByMac(mac).asLiveData()
-    }
-
-
-    /**
-     * 删除设备及其所有记录
-     * 使用事务保护确保数据一致性
-     */
-    fun deleteDevice(mac: String) {
-        viewModelScope.launch {
-            withContext(Dispatchers.IO) {
-                deviceWithRecordsDao.deleteDeviceWithRecords(mac)
-            }
-        }
-    }
-
-    fun cleanAll() {
-        deleteAllRecord()
-        deleteAllDevice()
-    }
-
-    private fun deleteAllDevice() {
-        viewModelScope.launch {
-            withContext(Dispatchers.IO) {
-                deviceDao.deleteAll()
-            }
-        }
-    }
-
-    private fun deleteAllRecord() {
-        viewModelScope.launch {
-            withContext(Dispatchers.IO) {
-                recordDao.deleteAll()
-            }
-        }
-    }
-
-    /**
-     * 添加记录
-     *
-     * @param record
-     */
-    fun insertRecord(record: DeviceConnectionRecord) {
-        viewModelScope.launch {
-            withContext(Dispatchers.IO) {
-                recordDao.insert(record)
-            }
-        }
-    }
-
-
-    fun deleteRecordByMac(mac: String) {
-        viewModelScope.launch {
-            withContext(Dispatchers.IO) {
-                recordDao.deleteRecordByDeviceMac(mac)
-            }
-        }
-    }
-
-
-    fun deleteRecordById(id: Int) {
-        viewModelScope.launch {
-            withContext(Dispatchers.IO) {
-                recordDao.deleteRecordByDeviceId(id)
-            }
-        }
-    }
-
-    /**
-     * Version model
-     * 0. 不显示弹框
-     * 1. 显示升级弹框
-     * 2. 显示下载进度提示框
-     */
-    val showDialogLD = MutableLiveData(0)
-
-    /**
-     * Download progress
-     */
-    val downloadProgressLD = MutableLiveData(0F)
-
-    /**
-     * Version model l d
-     * 3. 版本信息
-     *
-     */
-    val versionModelLD = MutableLiveData(CheckSoftModel())
-
-    fun checkUpdate() {
-        PgyerSDKManager.checkSoftwareUpdate(object :
-            CheckoutVersionCallBack {
-            override fun onSuccess(version: CheckSoftModel?) {
-                Log.d("@@@", "onSuccess: ${version.toString()}")
-                if (version?.isBuildHaveNewVersion == true) {
-                    showDialogLD.value = 1
-                    versionModelLD.value = version
+                override fun onFail(message: String?) {
+                    Log.w(tag, "[MainViewModel] checkUpdate -> failed: $message")
+                    if (manual) emit(UiEvent.ShowMessage(R.string.update_check_failed))
                 }
-            }
-
-            override fun onFail(p0: String?) =
-                PgyerSDKManager.reportException(Exception("版本检测更新异常：$p0"))
-        })
+            })
+        }.onFailure { e ->
+            Log.e(tag, "[MainViewModel] checkUpdate -> exception", e)
+            if (manual) emit(UiEvent.ShowMessage(R.string.update_check_failed))
+        }
     }
 
-    fun downLoadUpdate(version: CheckSoftModel?) {
+    fun dismissUpdate() {
+        _updateState.value = UpdateUiState.Hidden
+    }
 
-        val uri = version?.downloadURL
-
-        val disposable = uri?.download()?.observeOn(AndroidSchedulers.mainThread())
-            ?.subscribeBy(
-                onNext = {
-                    Log.v("@@@", "downLoadUpdate: $it")
-                    if (showDialogLD.value != 2) {
-                        showDialogLD.value = 2
-                    }
-                    downloadProgressLD.value = it.downloadSize.toFloat() / it.totalSize.toFloat()
+    fun startDownload() {
+        val version = (_updateState.value as? UpdateUiState.Available)?.version ?: return
+        val url = version.downloadURL
+        if (url.isNullOrBlank()) {
+            emit(UiEvent.ShowMessage(R.string.update_download_failed))
+            dismissUpdate()
+            return
+        }
+        _updateState.value = UpdateUiState.Downloading(0f, 0L, 0L)
+        downloadDisposable?.dispose()
+        downloadDisposable = url.download()
+            .observeOn(AndroidSchedulers.mainThread())
+            .subscribeBy(
+                onNext = { progress ->
+                    val total = progress.totalSize
+                    _updateState.value = UpdateUiState.Downloading(
+                        progress = if (total > 0) progress.downloadSize.toFloat() / total else 0f,
+                        downloadedBytes = progress.downloadSize,
+                        totalBytes = total
+                    )
                 },
                 onComplete = {
-                    Log.i("@@@", "downLoadUpdate: 下载完成！")
-                    showDialogLD.value = 0
-                    installApk(uri.file())
+                    Log.i(tag, "[MainViewModel] startDownload -> completed")
+                    _updateState.value = UpdateUiState.Hidden
+                    runCatching { AppUtils.installApp(url.file()) }
+                        .onFailure { Log.e(tag, "[MainViewModel] installApk -> failed", it) }
                 },
-                onError = {
-                    PgyerSDKManager.reportException(Exception("下载新版本发生异常!!", it))
-                    showDialogLD.value = 0
+                onError = { e ->
+                    Log.e(tag, "[MainViewModel] startDownload -> failed", e)
+                    runCatching { PgyerSDKManager.reportException(Exception("下载新版本发生异常", e)) }
+                    _updateState.value = UpdateUiState.Hidden
+                    emit(UiEvent.ShowMessage(R.string.update_download_failed))
                 }
             )
-
     }
 
-    private fun installApk(file: File) {
-        AppUtils.installApp(file)
+    fun cancelDownload() {
+        downloadDisposable?.dispose()
+        downloadDisposable = null
+        _updateState.value = UpdateUiState.Hidden
+    }
+
+    override fun onCleared() {
+        downloadDisposable?.dispose()
+        super.onCleared()
+    }
+
+    private fun emit(event: UiEvent) {
+        _events.trySend(event)
+    }
+
+    private fun launchIo(operation: String, block: suspend () -> Unit) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { block() }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(tag, "[MainViewModel] $operation -> failed", e)
+            }
+        }
     }
 
     companion object {
@@ -296,7 +342,9 @@ class MainViewModel(
                         return MainViewModel(
                             deviceDao = database.deviceDao(),
                             recordDao = database.connectionRecordDao(),
-                            deviceWithRecordsDao = database.deviceWithRecordsDao()
+                            deviceWithRecordsDao = database.deviceWithRecordsDao(),
+                            settings = AppSettings.get(applicationContext),
+                            exportDir = File(applicationContext.filesDir, "exports")
                         ) as T
                     }
                     throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")

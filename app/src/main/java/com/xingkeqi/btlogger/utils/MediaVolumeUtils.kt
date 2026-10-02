@@ -5,6 +5,8 @@ import android.media.AudioAttributes
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.os.Build
+import android.util.Log
+import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
 data class MediaVolumeSnapshot(
@@ -60,6 +62,47 @@ fun shouldApplyFixedVolumeForBluetooth(
     if (!snapshot.hasBluetoothOutput || maxAttempts <= 0) return false
     val lastResortAttempt = attempt >= (maxAttempts - 2).coerceAtLeast(0)
     return snapshot.isMusicActive || lastResortAttempt
+}
+
+/**
+ * 在蓝牙音频路由就绪后把媒体音量调到目标百分比。
+ *
+ * Why:
+ * A2DP 连接广播到达时音频路由往往尚未切到蓝牙，系统随后还会恢复耳机自己的音量，
+ * 因此需要短暂轮询：优先在开始播放时设置，最后两次尝试兜底强制设置。
+ *
+ * @return 是否成功达到目标音量
+ */
+suspend fun applyFixedMediaVolume(
+    context: Context,
+    targetPercent: Int,
+    maxAttempts: Int = 8
+): Boolean {
+    repeat(maxAttempts) { attempt ->
+        val snapshot = readMediaVolumeSnapshot(context)
+        val shouldApply = shouldApplyFixedVolumeForBluetooth(
+            snapshot = snapshot,
+            attempt = attempt,
+            maxAttempts = maxAttempts
+        )
+        Log.i(
+            "MediaVolumeUtils",
+            "[MediaVolumeUtils] applyFixedMediaVolume -> attempt=${attempt + 1}/$maxAttempts, bluetooth=${snapshot.hasBluetoothOutput}, playing=${snapshot.isMusicActive}, current=${snapshot.percent}%, target=$targetPercent%"
+        )
+        if (shouldApply) {
+            setMediaVolumePercent(context, targetPercent)
+            delay(160L)
+            val applied = readMediaVolumeSnapshot(context)
+            // 按音量档位比较：部分百分比无法精确映射到整数档位，比较百分比会一直判定失败
+            val targetLevel = resolveVolumeIndex(targetPercent, applied.maxLevel)
+            if (applied.hasBluetoothOutput && applied.currentLevel == targetLevel) {
+                return true
+            }
+        }
+        delay(320L)
+    }
+    Log.w("MediaVolumeUtils", "[MediaVolumeUtils] applyFixedMediaVolume -> timeout, target=$targetPercent%")
+    return false
 }
 
 private fun hasBluetoothAudioOutput(audioManager: AudioManager): Boolean {

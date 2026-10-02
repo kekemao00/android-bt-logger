@@ -46,6 +46,7 @@ interface DeviceDao {
         INNER JOIN device_connection_records
             ON devices.mac = device_connection_records.device_mac
         GROUP BY devices.mac
+        ORDER BY lastRecordTime DESC
         """
     )
     fun getDeviceInfosWithConnectionRecords(): Flow<List<DeviceInfo>>
@@ -84,6 +85,21 @@ abstract class DeviceWithRecordsDao {
         deleteRecordsByMac(mac)
         deleteDeviceByMac(mac)
     }
+
+    @Query("DELETE FROM device_connection_records")
+    abstract suspend fun deleteAllRecords()
+
+    @Query("DELETE FROM devices")
+    abstract suspend fun deleteAllDevices()
+
+    /**
+     * 事务清空全部数据，避免记录与设备分两次删除时 UI 看到中间态
+     */
+    @Transaction
+    open suspend fun deleteAll() {
+        deleteAllRecords()
+        deleteAllDevices()
+    }
 }
 
 @Dao
@@ -111,6 +127,21 @@ interface RecordDao {
         deviceMac: String,
         connectState: Int
     ): DeviceConnectionRecord?
+
+    /**
+     * 最近一条连接/断开状态记录（忽略编解码与电量采样），用于判断设备在库中的最新连接状态
+     */
+    @Query(
+        """
+        SELECT *
+        FROM device_connection_records
+        WHERE device_mac = :deviceMac
+            AND event_type IN ('CONNECTED', 'DISCONNECTED')
+        ORDER BY timestamp DESC, id DESC
+        LIMIT 1
+        """
+    )
+    suspend fun getLatestConnectionStateRecord(deviceMac: String): DeviceConnectionRecord?
 
     @Query(
         """

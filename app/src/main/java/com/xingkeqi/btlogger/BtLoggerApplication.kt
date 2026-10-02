@@ -34,10 +34,10 @@ class BtLoggerApplication : Application() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 BtLoggerForegroundService.CHANNEL_ID,
-                "蓝牙日志记录",
+                getString(R.string.notification_channel_name),
                 NotificationManager.IMPORTANCE_LOW // 低优先级，不发出声音
             ).apply {
-                description = "用于显示蓝牙日志记录服务的运行状态"
+                description = getString(R.string.notification_channel_description)
                 setShowBadge(false)
             }
             val notificationManager = getSystemService(NotificationManager::class.java)
