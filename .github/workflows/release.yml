@@ -1,6 +1,8 @@
 name: Release
 
-# 推送 v*.*.* 格式的 tag 时自动构建并发布 GitHub Release，也可在 Actions 页面手动触发（填入 tag）
+# 推送 v*.*.* 格式的 tag 时自动构建并发布 GitHub Release。
+# 也可在 Actions 页面手动触发：填入版本号（如 v1.3.0），tag 不存在时会基于所选提交自动创建，
+# 不需要在本地打 tag。
 on:
   push:
     tags:
@@ -8,8 +10,12 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: '要发布的 tag（如 v1.3.0），必须已存在'
+        description: '要发布的版本 tag（如 v1.3.0）；不存在时自动创建'
         required: true
+      target:
+        description: 'tag 不存在时基于哪个分支/提交创建'
+        required: false
+        default: 'main'
 
 jobs:
   release:
@@ -37,8 +43,32 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ steps.version.outputs.TAG }}
           fetch-depth: 0  # 获取完整历史与 tag，用于生成 changelog
+
+      # 手动触发且 tag 尚不存在时，在 target 上创建并推送 tag；
+      # 用 GITHUB_TOKEN 推送的 tag 不会再次触发本工作流，不会重复发布
+      - name: Checkout or create tag
+        env:
+          TAG: ${{ steps.version.outputs.TAG }}
+          TARGET: ${{ github.event.inputs.target || 'main' }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::tag 必须形如 v1.3.0，实际为 '$TAG'"
+            exit 1
+          fi
+          git fetch --tags --force origin
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "使用已有 tag $TAG"
+          else
+            git fetch origin "$TARGET"
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$TAG" FETCH_HEAD -m "BtLogger $TAG"
+            git push origin "refs/tags/$TAG"
+            echo "已在 $TARGET 上创建 tag $TAG"
+          fi
+          git checkout -q "refs/tags/$TAG"
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
