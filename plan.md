@@ -39,5 +39,5 @@
 - [x] 导航状态收归 ViewModel，使用 BackHandler 替代废弃的 onBackPressed
 - [x] UI 视觉：状态栏配色、顶栏溢出菜单、详情页标题、文案抽离 strings.xml
 - [x] 扩展：开机自启记录服务、通知栏显示当前已连接设备
-- [ ] Release 流水线：版本号从 tag 注入、签名缺失时仍可发布 debug 包
+- [x] Release 流水线：版本号从 tag 注入、签名缺失时仍可发布 debug 包
 - [ ] 重构 README
