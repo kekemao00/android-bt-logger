@@ -40,7 +40,9 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Build app and test APKs
-        run: ./gradlew assembleDebug assembleDebugAndroidTest --stacktrace
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug assembleDebugAndroidTest --stacktrace
 
       - name: Enable KVM
         run: |
