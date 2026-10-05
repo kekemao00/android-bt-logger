@@ -14,6 +14,30 @@ BtLogger 在后台持续记录蓝牙耳机、音箱、车机等 A2DP 设备的**
 
 所有数据只保存在本机，不会上传。
 
+<p align="center">
+  <img src="docs/screenshots/device-list.png" width="24%" alt="设备列表" />
+  <img src="docs/screenshots/device-detail.png" width="24%" alt="设备详情：统计、编解码与电量趋势" />
+  <img src="docs/screenshots/device-history.png" width="24%" alt="可筛选的历史记录" />
+  <img src="docs/screenshots/fixed-volume.png" width="24%" alt="固定连接音量" />
+</p>
+<p align="center"><sub>设备列表 · 设备详情 · 历史记录 · 固定连接音量（截图使用示例数据，详见<a href="#截图">截图</a>）</sub></p>
+
+## 目录
+
+- [适用场景](#适用场景)
+- [下载](#下载)
+- [功能](#功能)
+- [使用](#使用)
+- [常见问题](#常见问题)
+- [权限与隐私](#权限与隐私)
+- [构建](#构建) · [架构](#架构) · [CI / 发布](#ci--发布) · [截图](#截图)
+
+## 适用场景
+
+- **耳机 / 音箱研发与测试**：长时间挂机记录连接稳定性，统计断连次数与单次连接时长。
+- **客诉复盘**：让用户安装后正常使用，导出 Excel 即可看到“什么时候断的、当时电量多少、用的什么 Codec”。
+- **兼容性验证**：对比不同手机上可用 / 实际使用的编解码，以及耳机电量是否能正确上报。
+
 ## 下载
 
 在 [Releases](https://github.com/kekemao00/android-bt-logger/releases/latest) 下载最新 APK。每个 Release 附带 `SHA256SUMS.txt` 用于校验。
@@ -42,7 +66,26 @@ BtLogger 在后台持续记录蓝牙耳机、音箱、车机等 A2DP 设备的**
 
 > 部分国产 ROM 会限制后台运行，请在系统设置里允许 BtLogger 自启动并关闭电池优化。
 
-## 权限
+## 常见问题
+
+**关掉 App 之后还会记录吗？**
+会。记录由前台服务完成，通知栏常驻“蓝牙日志记录中”通知即表示服务在运行；开机和应用更新后也会自动恢复。若通知消失，多半是系统清理了后台，请按上面的提示放开自启动与电池优化。
+
+**为什么耳机电量显示“耳机未上报”？**
+耳机电量依赖耳机通过 HFP 指令、电量广播或 BLE Battery Service 主动上报，部分耳机或手机组合不提供这些信息。只要任一通道后续拿到数据，就会回填到当前连接记录。
+
+**编解码显示“不可用”或“未知”？**
+Android 8.0 以上才提供 Codec 信息，且各厂商实现差异较大；有的系统只在开始播放后才完成协商。播放一段音频后通常会出现编解码切换记录。
+
+**导出的 Excel 在哪里？**
+导出后会直接弹出系统分享面板，可以发送到微信、邮件或保存到网盘；文件同时保存在应用私有目录，卸载应用会一并删除。
+
+**卸载或升级会丢数据吗？**
+卸载会清空数据。升级时如果数据库结构有变更，当前版本会重建数据库，建议升级前先导出全部记录。
+
+## 权限与隐私
+
+不需要账号，也没有统计或上报：记录只写入本机数据库，只有你主动导出时才会离开手机。网络权限仅用于检查更新。
 
 | 权限 | 用途 |
 |------|------|
@@ -98,6 +141,7 @@ app/src/main/java/com/xingkeqi/btlogger/
 ## CI / 发布
 
 - **CI**（`.github/workflows/ci.yml`）：每次 push 到 `main` 和每个 PR 都会运行单元测试并构建 debug APK，产物可在 Actions 页面下载。
+- **Screenshots**（`.github/workflows/screenshots.yml`）：在模拟器上重新生成 README 截图，见[截图](#截图)。
 - **Release**（`.github/workflows/release.yml`）：推送 `v*.*.*` tag 即自动发布：
 
   ```bash
@@ -112,6 +156,22 @@ app/src/main/java/com/xingkeqi/btlogger/
   ```bash
   base64 -w0 release.jks   # 生成 KEYSTORE_FILE 的值
   ```
+
+## 截图
+
+README 中的截图由 [Screenshots](.github/workflows/screenshots.yml) 工作流生成：在 Android 11 模拟器上写入三台示例设备的数据，启动真实应用并截取浅色与深色界面，结果提交到 [`docs/screenshots/`](docs/screenshots)。界面有较大改动时，在 Actions → Screenshots → Run workflow 选择分支即可重新生成。
+
+截图逻辑在 [`ReadmeScreenshotTest`](app/src/androidTest/java/com/xingkeqi/btlogger/screenshots/ReadmeScreenshotTest.kt)。它会清空设备上的记录，所以只有传入 `-e readmeScreenshots true` 时才运行，普通的 `connectedAndroidTest` 会自动跳过。
+
+<details>
+<summary>深色模式</summary>
+<p align="center">
+  <img src="docs/screenshots/device-list-dark.png" width="24%" alt="设备列表（深色）" />
+  <img src="docs/screenshots/device-detail-dark.png" width="24%" alt="设备详情（深色）" />
+  <img src="docs/screenshots/device-history-dark.png" width="24%" alt="历史记录（深色）" />
+  <img src="docs/screenshots/fixed-volume-dark.png" width="24%" alt="固定连接音量（深色）" />
+</p>
+</details>
 
 ## 已知限制
 
