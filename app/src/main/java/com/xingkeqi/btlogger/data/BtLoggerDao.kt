@@ -36,6 +36,21 @@ interface DeviceDao {
             MIN(device_connection_records.timestamp) AS firstRecordTime,
             MAX(device_connection_records.timestamp) AS lastRecordTime,
             (
+                SELECT MIN(session_record.timestamp)
+                FROM device_connection_records AS session_record
+                WHERE session_record.device_mac = devices.mac
+                    AND session_record.event_type = 'CONNECTED'
+                    AND session_record.timestamp > COALESCE(
+                        (
+                            SELECT MAX(disconnect_record.timestamp)
+                            FROM device_connection_records AS disconnect_record
+                            WHERE disconnect_record.device_mac = devices.mac
+                                AND disconnect_record.event_type = 'DISCONNECTED'
+                        ),
+                        0
+                    )
+            ) AS connectedSince,
+            (
                 SELECT latest_record.connect_state
                 FROM device_connection_records AS latest_record
                 WHERE latest_record.device_mac = devices.mac

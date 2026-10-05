@@ -29,6 +29,13 @@ data class DeviceInfo(
     val latestActiveCodec: String = CODEC_UNKNOWN,
     val firstRecordTime: Long = 0,
     val lastRecordTime: Long = 0,
+    /**
+     * 本次连接的开始时间：最近一次断开之后的第一条连接记录。
+     *
+     * Why: 电量、编解码采样也会刷新 lastRecordTime，用它计算“已连接时长”会在每次采样后归零；
+     * 取最早的连接记录还能避免服务重建时补写的连接记录把时长重置。未连接或无连接记录时为 null。
+     */
+    val connectedSince: Long? = null,
     val connectState: Int = 0
 )
 

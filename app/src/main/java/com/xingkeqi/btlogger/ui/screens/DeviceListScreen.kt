@@ -229,7 +229,7 @@ private fun DeviceCard(
                     if (isConnected) {
                         val context = LocalContext.current
                         LiveDurationText(
-                            sinceMillis = device.lastRecordTime,
+                            sinceMillis = device.connectedSince ?: device.lastRecordTime,
                             style = MaterialTheme.typography.labelMedium,
                             color = ConnectedGreen,
                             format = { context.getString(R.string.connected_for, it) }
