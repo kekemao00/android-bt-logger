@@ -41,3 +41,10 @@
 - [x] 扩展：开机自启记录服务、通知栏显示当前已连接设备
 - [x] Release 流水线：版本号从 tag 注入、签名缺失时仍可发布 debug 包
 - [x] 重构 README
+
+# README 截图与文案优化
+
+- [x] 新增 ReadmeScreenshotTest：写入示例数据后启动真实应用并整屏截图（需显式参数才运行）
+- [x] 新增 Screenshots 工作流：模拟器上截取浅色/深色界面并提交到 docs/screenshots/
+- [x] README 增加截图、适用场景、常见问题与隐私说明，移除过期的 images/
+- [ ] 通过 CI 生成截图并检查效果
