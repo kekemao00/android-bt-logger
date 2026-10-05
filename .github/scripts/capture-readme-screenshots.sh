@@ -19,12 +19,16 @@ adb shell svc data disable || true
 # 系统界面演示模式：固定时间、满电量与满信号，隐藏通知图标
 adb shell settings put global sysui_demo_allowed 1
 demo() { adb shell am broadcast -a com.android.systemui.demo -e command "$@" >/dev/null; }
-demo enter
-demo clock -e hhmm 0930
-demo battery -e level 100 -e plugged false
-demo network -e wifi show -e level 4
-demo network -e mobile show -e datatype none -e level 4
-demo notifications -e visible false
+# 切换深浅色会重建系统界面并退出演示模式，因此每轮截图前都重新进入
+enter_demo_mode() {
+  sleep 3
+  demo enter
+  demo clock -e hhmm 0930
+  demo battery -e level 100 -e plugged false
+  demo network -e wifi show -e level 4
+  demo network -e mobile show -e datatype none -e level 4
+  demo notifications -e visible false
+}
 
 run_pass() {
   local suffix="$1"
@@ -47,8 +51,10 @@ run_pass() {
 }
 
 adb shell cmd uimode night no
+enter_demo_mode
 run_pass ""
 adb shell cmd uimode night yes
+enter_demo_mode
 run_pass "-dark"
 adb shell cmd uimode night no
 

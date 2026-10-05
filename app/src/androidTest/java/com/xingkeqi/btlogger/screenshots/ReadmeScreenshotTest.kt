@@ -20,6 +20,7 @@ import com.xingkeqi.btlogger.data.BtLoggerDatabase
 import com.xingkeqi.btlogger.data.Device
 import com.xingkeqi.btlogger.data.DeviceConnectionRecord
 import com.xingkeqi.btlogger.data.RecordEventType
+import com.xingkeqi.btlogger.utils.AppSettings
 import kotlinx.coroutines.runBlocking
 import org.junit.Assume.assumeTrue
 import org.junit.Before
@@ -138,6 +139,11 @@ class ReadmeScreenshotTest {
             addSession(speaker.mac, start = now - 3 * DAY - 6 * HOUR, length = 1 * HOUR + 5 * MINUTE, phone = 72, headset = 60, codec = "AAC")
         }
         records.forEach { database.connectionRecordDao().insert(it) }
+        // 打开固定连接音量，弹框截图里展示开启后的状态
+        AppSettings.get(context).apply {
+            setFixedVolumeEnabled(true)
+            setFixedVolumePercent(60)
+        }
         Log.i(TAG, "[ReadmeScreenshotTest] seedSampleData -> devices=3 records=${records.size}")
     }
 
@@ -186,7 +192,8 @@ class ReadmeScreenshotTest {
                     phone - index * 3,
                     headsetLevel(index),
                     codec,
-                    playing = index % 2 == 1
+                    // 最后一次采样处于播放中，让详情页头部展示“播放中”状态
+                    playing = index % 2 == 0
                 )
             )
         }
