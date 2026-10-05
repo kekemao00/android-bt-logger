@@ -29,9 +29,14 @@ demo notifications -e visible false
 run_pass() {
   local suffix="$1"
   local output
+  # adb shell 会把参数拼成一条命令，空字符串会被吞掉导致 am 参数错位，所以只在非空时传后缀
+  local suffix_args=()
+  if [[ -n "$suffix" ]]; then
+    suffix_args=(-e readmeScreenshotSuffix "$suffix")
+  fi
   output=$(adb shell am instrument -w \
     -e readmeScreenshots true \
-    -e readmeScreenshotSuffix "$suffix" \
+    "${suffix_args[@]}" \
     -e class "$TEST_CLASS" \
     "$RUNNER")
   echo "$output"
