@@ -10,6 +10,7 @@
     <string name="action_search">搜索设备</string>
     <string name="action_close_search">关闭搜索</string>
     <string name="action_clear">清除</string>
+    <string name="action_close">关闭</string>
     <string name="unknown_device">未知设备</string>
     <string name="press_again_to_exit">再按一次返回键退出（后台仍会继续记录）</string>
 

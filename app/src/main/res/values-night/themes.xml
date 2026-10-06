@@ -1,8 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <!-- 窗口背景与 Compose 的 canvas 一致，避免启动时闪白 -->
-    <style name="Theme.BtLogger" parent="android:Theme.Material.Light.NoActionBar">
+    <style name="Theme.BtLogger" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowBackground">@color/canvas</item>
         <item name="android:statusBarColor">@color/canvas</item>
         <item name="android:navigationBarColor">@color/canvas</item>
