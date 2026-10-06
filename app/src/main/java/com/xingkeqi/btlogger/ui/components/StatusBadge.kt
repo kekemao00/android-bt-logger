@@ -1,27 +1,17 @@
 package com.xingkeqi.btlogger.ui.components
 
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.unit.dp
-import com.xingkeqi.btlogger.ui.theme.ConnectedGreen
-import com.xingkeqi.btlogger.ui.theme.DisconnectedGray
-import com.xingkeqi.btlogger.ui.theme.PlayingBlue
+import com.xingkeqi.btlogger.ui.theme.BtTheme
 
 /**
- * 状态徽章类型
+ * 状态徽章类型。
+ *
+ * Why:
+ * 原先每种状态一个实心彩色块（绿、灰、蓝），与“只有一个强调色”的规范冲突；
+ * 现在统一为白底描边 chip，只用前面的小圆点区分：已连接用强调色（成功态），播放中用墨黑，其余用 ink-3。
  */
-enum class BadgeType(val backgroundColor: Color, val contentColor: Color) {
-    Connected(ConnectedGreen, Color.White),
-    Disconnected(DisconnectedGray, Color.White),
-    Playing(PlayingBlue, Color.White),
-    Paused(Color(0xFF757575), Color.White)
-}
+enum class BadgeType { Connected, Disconnected, Playing, Paused }
 
 /**
  * 状态徽章组件
@@ -34,16 +24,15 @@ fun StatusBadge(
     type: BadgeType,
     modifier: Modifier = Modifier
 ) {
-    Surface(
-        color = type.backgroundColor,
-        shape = RoundedCornerShape(4.dp),
-        modifier = modifier
-    ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelSmall,
-            color = type.contentColor,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-        )
+    val colors = BtTheme.colors
+    val dot = when (type) {
+        BadgeType.Connected -> colors.accent
+        BadgeType.Playing -> colors.ink
+        BadgeType.Disconnected, BadgeType.Paused -> colors.ink3
     }
+    val content = when (type) {
+        BadgeType.Connected, BadgeType.Playing -> colors.ink
+        BadgeType.Disconnected, BadgeType.Paused -> colors.ink2
+    }
+    WmChip(text = text, dotColor = dot, contentColor = content, modifier = modifier)
 }

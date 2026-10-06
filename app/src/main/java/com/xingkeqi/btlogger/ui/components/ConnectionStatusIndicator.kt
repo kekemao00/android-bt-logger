@@ -6,12 +6,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import com.xingkeqi.btlogger.ui.theme.ConnectedGreen
+import com.xingkeqi.btlogger.ui.theme.BtTheme
 import com.xingkeqi.btlogger.ui.theme.Dimens
-import com.xingkeqi.btlogger.ui.theme.DisconnectedGray
 
 /**
- * 连接状态指示器 - 圆点形式
+ * 连接状态指示器 - 圆点形式：已连接用强调色，断开用 ink-3
  * @param isConnected 是否已连接
  */
 @Composable
@@ -19,11 +18,12 @@ fun ConnectionStatusIndicator(
     isConnected: Boolean,
     modifier: Modifier = Modifier
 ) {
+    val colors = BtTheme.colors
     Box(
         modifier = modifier
             .size(Dimens.statusIndicatorSize)
             .background(
-                color = if (isConnected) ConnectedGreen else DisconnectedGray,
+                color = if (isConnected) colors.accent else colors.ink3,
                 shape = CircleShape
             )
     )

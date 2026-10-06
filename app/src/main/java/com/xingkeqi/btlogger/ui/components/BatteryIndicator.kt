@@ -1,65 +1,35 @@
 package com.xingkeqi.btlogger.ui.components
 
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.unit.dp
-import com.xingkeqi.btlogger.R
-import com.xingkeqi.btlogger.ui.theme.BatteryHigh
-import com.xingkeqi.btlogger.ui.theme.BatteryLow
-import com.xingkeqi.btlogger.ui.theme.BatteryMedium
-import com.xingkeqi.btlogger.ui.theme.Dimens
+import com.xingkeqi.btlogger.ui.theme.BtTheme
+
+/** 低于这个电量才用危险色提醒，其余电量保持黑白 */
+private const val LOW_BATTERY_THRESHOLD = 20
 
 /**
  * 电量指示器组件
  * @param level 电量百分比 (0-100)
- * @param showText 是否显示百分比文字
+ * @param label 前缀文案（如“手机电量”）
  */
 @Composable
 fun BatteryIndicator(
     level: Int,
     modifier: Modifier = Modifier,
-    showText: Boolean = true,
     label: String? = null
 ) {
-    val color = when {
-        level < 20 -> BatteryLow
-        level < 50 -> BatteryMedium
-        else -> BatteryHigh
-    }
-
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
+    val colors = BtTheme.colors
+    WmChip(
+        text = buildString {
+            if (!label.isNullOrBlank()) {
+                append(label)
+                append(' ')
+            }
+            append(level)
+            append('%')
+        },
+        icon = LineIcons.Battery,
+        contentColor = if (level < LOW_BATTERY_THRESHOLD) colors.danger else colors.ink2,
         modifier = modifier
-    ) {
-        Icon(
-            painter = painterResource(id = R.drawable.ic_battery),
-            contentDescription = "电量",
-            tint = color,
-            modifier = Modifier.size(Dimens.iconSizeSm)
-        )
-        if (showText) {
-            Spacer(modifier = Modifier.width(2.dp))
-            Text(
-                text = buildString {
-                    if (!label.isNullOrBlank()) {
-                        append(label)
-                        append(' ')
-                    }
-                    append(level)
-                    append('%')
-                },
-                style = MaterialTheme.typography.labelSmall,
-                color = color
-            )
-        }
-    }
+    )
 }

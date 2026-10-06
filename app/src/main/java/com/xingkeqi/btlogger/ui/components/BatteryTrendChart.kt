@@ -9,9 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -24,9 +22,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.xingkeqi.btlogger.R
 import com.xingkeqi.btlogger.data.RecordInfo
-import com.xingkeqi.btlogger.ui.theme.BatteryHigh
+import com.xingkeqi.btlogger.ui.theme.BtTheme
 import com.xingkeqi.btlogger.ui.theme.Dimens
-import com.xingkeqi.btlogger.ui.theme.PlayingBlue
+import com.xingkeqi.btlogger.ui.theme.MonoTextStyle
 import kotlin.math.max
 
 /**
@@ -34,6 +32,7 @@ import kotlin.math.max
  *
  * Why:
  * 续航测试更关心“随时间变化的电量”，这里使用记录时间作为横轴，并对耳机未上报电量的区间保留断线。
+ * 两条曲线只用墨黑（手机）和唯一强调色（耳机）区分，线宽与图标一致保持纤细。
  */
 @Composable
 fun BatteryTrendChart(
@@ -60,29 +59,25 @@ fun BatteryTrendChart(
     val lastTimestamp = timelinePoints.last().timestamp
     val totalDuration = max(lastTimestamp - firstTimestamp, 0L)
     val hasHeadsetGap = headsetPointCount < timelinePoints.size
-    val gridColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.18f)
+    val colors = BtTheme.colors
+    val gridColor = colors.line
+    val phoneColor = colors.ink
+    val headsetColor = colors.accent
+    val axisStyle = MonoTextStyle.copy(fontSize = MaterialTheme.typography.labelSmall.fontSize)
 
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(Dimens.cardCornerRadius),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-    ) {
-        Column(modifier = Modifier.padding(Dimens.cardPadding)) {
-            Text(
-                text = stringResource(id = R.string.battery_trend_title),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.outline
-            )
+    WmCard(modifier = modifier) {
+        Column {
+            SectionCaption(text = stringResource(id = R.string.battery_trend_title))
 
-            Spacer(modifier = Modifier.height(Dimens.spacingXs))
+            Spacer(modifier = Modifier.height(Dimens.spacingSm))
 
-            Row(horizontalArrangement = Arrangement.spacedBy(Dimens.spacingMd)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(Dimens.spacingLg)) {
                 BatteryTrendLegend(
-                    color = BatteryHigh,
+                    color = phoneColor,
                     label = stringResource(id = R.string.phone_battery_label)
                 )
                 BatteryTrendLegend(
-                    color = PlayingBlue,
+                    color = headsetColor,
                     label = stringResource(id = R.string.headset_battery_label)
                 )
             }
@@ -101,8 +96,8 @@ fun BatteryTrendChart(
                     listOf("100%", "50%", "0%").forEach { label ->
                         Text(
                             text = label,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.outline
+                            style = axisStyle,
+                            color = colors.ink3
                         )
                     }
                 }
@@ -116,9 +111,9 @@ fun BatteryTrendChart(
                 ) {
                     val chartWidth = size.width
                     val chartHeight = size.height
-                    val phoneStroke = 3.dp.toPx()
-                    val headsetStroke = 3.dp.toPx()
-                    val pointRadius = 3.dp.toPx()
+                    val phoneStroke = 2.dp.toPx()
+                    val headsetStroke = 2.dp.toPx()
+                    val pointRadius = 2.5.dp.toPx()
 
                     listOf(0f, 0.5f, 1f).forEach { ratio ->
                         val y = chartHeight * ratio
@@ -135,7 +130,7 @@ fun BatteryTrendChart(
                         chartWidth = chartWidth,
                         chartHeight = chartHeight,
                         totalDuration = totalDuration,
-                        lineColor = BatteryHigh,
+                        lineColor = phoneColor,
                         strokeWidth = phoneStroke,
                         pointRadius = pointRadius,
                         valueSelector = { it.phoneBatteryLevel }
@@ -146,7 +141,7 @@ fun BatteryTrendChart(
                         chartWidth = chartWidth,
                         chartHeight = chartHeight,
                         totalDuration = totalDuration,
-                        lineColor = PlayingBlue,
+                        lineColor = headsetColor,
                         strokeWidth = headsetStroke,
                         pointRadius = pointRadius,
                         valueSelector = { it.headsetBatteryLevel }
@@ -164,18 +159,18 @@ fun BatteryTrendChart(
             ) {
                 Text(
                     text = formatElapsedDuration(0L),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.outline
+                    style = axisStyle,
+                    color = colors.ink3
                 )
                 Text(
                     text = formatElapsedDuration(totalDuration / 2),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.outline
+                    style = axisStyle,
+                    color = colors.ink3
                 )
                 Text(
                     text = formatElapsedDuration(totalDuration),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.outline
+                    style = axisStyle,
+                    color = colors.ink3
                 )
             }
 
@@ -183,8 +178,8 @@ fun BatteryTrendChart(
                 Spacer(modifier = Modifier.height(Dimens.spacingXs))
                 Text(
                     text = stringResource(id = R.string.headset_battery_gap_note),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.outline
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.ink3
                 )
             }
         }
@@ -206,14 +201,14 @@ private fun BatteryTrendLegend(color: Color, label: String) {
                 color = color,
                 start = Offset(0f, size.height / 2f),
                 end = Offset(size.width, size.height / 2f),
-                strokeWidth = 3.dp.toPx(),
+                strokeWidth = 2.dp.toPx(),
                 cap = StrokeCap.Round
             )
         }
         Text(
             text = label,
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.outline
+            color = BtTheme.colors.ink2
         )
     }
 }
