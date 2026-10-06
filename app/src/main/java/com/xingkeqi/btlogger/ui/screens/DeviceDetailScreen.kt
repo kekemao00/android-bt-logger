@@ -1,12 +1,15 @@
 package com.xingkeqi.btlogger.ui.screens
 
 import android.bluetooth.BluetoothDevice
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -18,34 +21,24 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.blankj.utilcode.util.TimeUtils
 import com.xingkeqi.btlogger.R
@@ -62,19 +55,39 @@ import com.xingkeqi.btlogger.ui.components.BatteryTrendChart
 import com.xingkeqi.btlogger.ui.components.ConnectionStatusIndicator
 import com.xingkeqi.btlogger.ui.components.DurationProgressBar
 import com.xingkeqi.btlogger.ui.components.EmptyState
+import com.xingkeqi.btlogger.ui.components.LineIcons
+import com.xingkeqi.btlogger.ui.components.SectionCaption
+import com.xingkeqi.btlogger.ui.components.SegmentPosition
 import com.xingkeqi.btlogger.ui.components.StatCard
 import com.xingkeqi.btlogger.ui.components.StatItem
 import com.xingkeqi.btlogger.ui.components.StatusBadge
-import com.xingkeqi.btlogger.ui.theme.ConnectedGreenDark
-import com.xingkeqi.btlogger.ui.theme.ConnectedGreenLight
+import com.xingkeqi.btlogger.ui.components.WmCard
+import com.xingkeqi.btlogger.ui.components.WmChip
+import com.xingkeqi.btlogger.ui.components.WmSegmentedTabs
+import com.xingkeqi.btlogger.ui.components.cardSegment
+import com.xingkeqi.btlogger.ui.components.segmentPositionOf
+import com.xingkeqi.btlogger.ui.components.shape
+import com.xingkeqi.btlogger.ui.theme.BtTheme
 import com.xingkeqi.btlogger.ui.theme.Dimens
+import com.xingkeqi.btlogger.ui.theme.MonoTextStyle
+import com.xingkeqi.btlogger.ui.theme.Springs
 import com.xingkeqi.btlogger.utils.getCompactDurationString
 import com.xingkeqi.btlogger.utils.getDurationString
 
 private const val STATE_CONNECTED = 2
 
+private val HistoryFilters = listOf(
+    RecordFilter.ALL to R.string.filter_all,
+    RecordFilter.CONNECTION to R.string.filter_connection,
+    RecordFilter.CODEC to R.string.filter_codec,
+    RecordFilter.BATTERY to R.string.filter_battery
+)
+
 /**
- * 设备详情（无状态）：概览、统计、编解码、电量趋势与可筛选的历史记录
+ * 设备详情（无状态）：概览、统计、编解码、电量趋势与可筛选的历史记录。
+ *
+ * 头部不再使用渐变底色，概览、统计与图表分别放在白色卡片里；历史记录是一张分组卡片，
+ * 用分段标签页筛选。
  */
 @Composable
 fun DeviceDetailScreen(
@@ -88,7 +101,7 @@ fun DeviceDetailScreen(
 ) {
     if (records.isEmpty()) {
         EmptyState(
-            icon = painterResource(id = R.drawable.ic_bluetooth_settings),
+            icon = LineIcons.Bluetooth,
             title = stringResource(id = R.string.detail_empty_title),
             body = stringResource(id = R.string.detail_empty_body),
             modifier = modifier
@@ -112,7 +125,7 @@ fun DeviceDetailScreen(
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = Dimens.spacingLg)
+        contentPadding = PaddingValues(start = Dimens.pageGutter, end = Dimens.pageGutter, bottom = Dimens.spacingXl)
     ) {
         item(key = "header") {
             DetailHeader(
@@ -136,15 +149,16 @@ fun DeviceDetailScreen(
                 Text(
                     text = stringResource(id = R.string.detail_history_empty_filter),
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.outline,
-                    modifier = Modifier.padding(Dimens.spacingLg)
+                    color = BtTheme.colors.ink3,
+                    modifier = Modifier.padding(vertical = Dimens.spacingLg, horizontal = Dimens.spacingXs)
                 )
             }
         }
 
-        items(items = historyRecords, key = { it.id }) { record ->
+        itemsIndexed(items = historyRecords, key = { _, record -> record.id }) { index, record ->
             RecordItem(
                 record = record,
+                position = segmentPositionOf(index, historyRecords.size),
                 onLongClick = { onRecordLongClick(record) }
             )
         }
@@ -158,24 +172,19 @@ private fun DetailHeader(
     stats: RecordStats,
     chronologicalRecords: List<RecordInfo>
 ) {
+    val colors = BtTheme.colors
     val isConnected = latestRecord.connectState == STATE_CONNECTED
     val bluetoothVersion = latestRecord.bluetoothVersion
         .takeUnless { it == BLUETOOTH_VERSION_UNKNOWN }
         ?: device.bluetoothVersion
-    val headerTint = if (isConnected) {
-        if (isSystemInDarkTheme()) ConnectedGreenDark.copy(alpha = 0.45f) else ConnectedGreenLight
-    } else {
-        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
-    }
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Brush.verticalGradient(listOf(headerTint, MaterialTheme.colorScheme.background)))
-            .padding(Dimens.spacingLg),
+            .padding(top = Dimens.spacingXs),
         verticalArrangement = Arrangement.spacedBy(Dimens.spacingMd)
     ) {
-        Column {
+        WmCard {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 ConnectionStatusIndicator(isConnected = isConnected)
                 Spacer(modifier = Modifier.width(Dimens.spacingSm))
@@ -183,6 +192,7 @@ private fun DetailHeader(
                     text = device.name.ifBlank { latestRecord.name }
                         .ifBlank { stringResource(id = R.string.unknown_device) },
                     style = MaterialTheme.typography.titleLarge,
+                    color = colors.ink,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false)
@@ -195,20 +205,22 @@ private fun DetailHeader(
                     type = if (isConnected) BadgeType.Connected else BadgeType.Disconnected
                 )
             }
-            Spacer(modifier = Modifier.height(Dimens.spacingXs))
+            Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = device.mac,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.outline
+                style = MonoTextStyle,
+                color = colors.ink3,
+                modifier = Modifier.padding(start = Dimens.statusIndicatorSize + Dimens.spacingSm)
             )
+
+            Spacer(modifier = Modifier.height(Dimens.spacingLg))
+            DurationProgressBar(
+                connectionTime = latestRecord.totalConnectionTime ?: 0L,
+                disconnectionTime = latestRecord.totalDisConnectionTime ?: 0L
+            )
+            Spacer(modifier = Modifier.height(Dimens.spacingMd))
+            RecordMetricsRow(record = latestRecord, recordedLabels = true)
         }
-
-        DurationProgressBar(
-            connectionTime = latestRecord.totalConnectionTime ?: 0L,
-            disconnectionTime = latestRecord.totalDisConnectionTime ?: 0L
-        )
-
-        RecordMetricsRow(record = latestRecord, recordedLabels = true)
 
         StatCard(
             items = listOf(
@@ -227,11 +239,13 @@ private fun DetailHeader(
             )
         )
 
-        CodecInfoSection(
-            phoneSupportedCodecs = latestRecord.phoneSupportedCodecs,
-            negotiableCodecs = latestRecord.negotiableCodecs,
-            activeCodec = latestRecord.activeCodec
-        )
+        WmCard(contentPadding = 0.dp) {
+            CodecInfoTable(
+                phoneSupportedCodecs = latestRecord.phoneSupportedCodecs,
+                negotiableCodecs = latestRecord.negotiableCodecs,
+                activeCodec = latestRecord.activeCodec
+            )
+        }
 
         BatteryTrendChart(records = chronologicalRecords)
     }
@@ -260,45 +274,27 @@ private fun bondStateLabel(state: Int): String = stringResource(
     }
 )
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun HistoryFilterRow(
     selected: RecordFilter,
     count: Int,
     onFilterChange: (RecordFilter) -> Unit
 ) {
-    Column(modifier = Modifier.padding(top = Dimens.spacingSm)) {
-        Text(
+    Column(modifier = Modifier.padding(top = Dimens.spacingXl, bottom = Dimens.spacingMd)) {
+        SectionCaption(
             text = stringResource(id = R.string.detail_history_title, count),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.outline,
-            modifier = Modifier.padding(horizontal = Dimens.spacingLg)
+            modifier = Modifier.padding(start = Dimens.spacingXs, bottom = Dimens.spacingSm)
         )
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = Dimens.spacingLg),
-            horizontalArrangement = Arrangement.spacedBy(Dimens.spacingSm)
-        ) {
-            listOf(
-                RecordFilter.ALL to R.string.filter_all,
-                RecordFilter.CONNECTION to R.string.filter_connection,
-                RecordFilter.CODEC to R.string.filter_codec,
-                RecordFilter.BATTERY to R.string.filter_battery
-            ).forEach { (filter, labelRes) ->
-                FilterChip(
-                    selected = selected == filter,
-                    onClick = { onFilterChange(filter) },
-                    label = { Text(stringResource(id = labelRes)) }
-                )
-            }
-        }
+        WmSegmentedTabs(
+            labels = HistoryFilters.map { (_, labelRes) -> stringResource(id = labelRes) },
+            selectedIndex = HistoryFilters.indexOfFirst { it.first == selected }.coerceAtLeast(0),
+            onSelect = { index -> onFilterChange(HistoryFilters[index].first) }
+        )
     }
 }
 
 /**
- * 电量、音量与播放状态指标行
+ * 电量、音量与播放状态指标行（标签 chip）
  *
  * @param recordedLabels 详情头部强调“记录时”的状态，历史条目使用简短文案
  */
@@ -308,7 +304,7 @@ private fun RecordMetricsRow(record: RecordInfo, recordedLabels: Boolean) {
         modifier = Modifier
             .fillMaxWidth()
             .horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(Dimens.spacingMd),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         record.batteryLevel.takeIf { it in 0..100 }?.let { level ->
@@ -317,20 +313,11 @@ private fun RecordMetricsRow(record: RecordInfo, recordedLabels: Boolean) {
         record.headsetBatteryLevel.takeIf { it in 0..100 }?.let { level ->
             BatteryIndicator(level = level, label = stringResource(id = R.string.headset_battery_label))
         }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                painter = painterResource(id = R.drawable.icon_volue),
-                contentDescription = stringResource(id = R.string.volume_content_description),
-                modifier = Modifier.size(Dimens.iconSizeSm),
-                tint = MaterialTheme.colorScheme.outline
-            )
-            Spacer(modifier = Modifier.width(2.dp))
-            Text(
-                text = "${record.volume}%",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.outline
-            )
-        }
+        WmChip(
+            text = "${record.volume}%",
+            icon = LineIcons.Volume,
+            modifier = Modifier
+        )
         val playing = record.isPlaying == 1
         StatusBadge(
             text = stringResource(
@@ -350,88 +337,74 @@ private fun RecordMetricsRow(record: RecordInfo, recordedLabels: Boolean) {
 @Composable
 private fun RecordItem(
     record: RecordInfo,
+    position: SegmentPosition,
     onLongClick: () -> Unit
 ) {
+    val colors = BtTheme.colors
     val haptics = LocalHapticFeedback.current
     val isCodecChanged = record.eventType == RecordEventType.CODEC_CHANGED
     val isBatteryChanged = record.eventType == RecordEventType.BATTERY_CHANGED
     val isConnected = record.connectState == STATE_CONNECTED
     val isStateEvent = !isCodecChanged && !isBatteryChanged
-    val shape = RoundedCornerShape(Dimens.cardCornerRadius)
-    val containerColor = when {
-        isCodecChanged -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.45f)
-        isBatteryChanged -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
-        isConnected -> if (isSystemInDarkTheme()) ConnectedGreenDark.copy(alpha = 0.45f) else ConnectedGreenLight
-        else -> MaterialTheme.colorScheme.surface
-    }
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val pressedBackground by animateColorAsState(
+        if (pressed) colors.surface2 else colors.surface2.copy(alpha = 0f),
+        Springs.snappy(),
+        label = "recordPressed"
+    )
 
-    Card(
+    Row(
         modifier = Modifier
-            .padding(horizontal = Dimens.spacingMd, vertical = Dimens.spacingXs)
             .fillMaxWidth()
-            .clip(shape)
+            .cardSegment(position, background = colors.surface, border = colors.line, divider = colors.line)
+            .clip(position.shape())
+            .background(pressedBackground)
             .combinedClickable(
+                interactionSource = interaction,
+                indication = null,
                 onClick = {},
                 onLongClick = {
                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                     onLongClick()
                 }
-            ),
-        shape = shape,
-        colors = CardDefaults.cardColors(containerColor = containerColor),
-        elevation = CardDefaults.cardElevation(defaultElevation = if (isStateEvent) 1.dp else 0.dp)
+            )
+            .padding(horizontal = Dimens.cardPadding, vertical = 14.dp)
     ) {
+        EventIcon(
+            icon = when {
+                isCodecChanged -> LineIcons.Waveform
+                isBatteryChanged -> LineIcons.Battery
+                isConnected -> LineIcons.Bluetooth
+                else -> LineIcons.BluetoothOff
+            },
+            emphasized = isStateEvent && isConnected
+        )
+        Spacer(modifier = Modifier.width(Dimens.spacingMd))
         Column(
-            modifier = Modifier
-                .padding(Dimens.cardPadding)
-                .fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(Dimens.spacingSm)
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    when {
-                        isCodecChanged -> Icon(
-                            imageVector = Icons.Filled.Settings,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(Dimens.iconSizeSm)
-                        )
-
-                        isBatteryChanged -> Icon(
-                            painter = painterResource(id = R.drawable.ic_battery),
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(Dimens.iconSizeSm)
-                        )
-
-                        else -> ConnectionStatusIndicator(isConnected = isConnected)
-                    }
-                    Spacer(modifier = Modifier.width(Dimens.spacingSm))
-                    Text(
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        text = stringResource(
-                            id = when {
-                                isCodecChanged -> R.string.event_codec_changed
-                                isBatteryChanged -> R.string.event_battery_changed
-                                isConnected -> R.string.event_connected
-                                else -> R.string.event_disconnected
-                            }
-                        )
-                    )
-                }
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.outline,
-                    text = TimeUtils.millis2String(record.timestamp, "MM-dd HH:mm:ss")
+                    text = stringResource(
+                        id = when {
+                            isCodecChanged -> R.string.event_codec_changed
+                            isBatteryChanged -> R.string.event_battery_changed
+                            isConnected -> R.string.event_connected
+                            else -> R.string.event_disconnected
+                        }
+                    ),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = colors.ink,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = TimeUtils.millis2String(record.timestamp, "MM-dd HH:mm:ss"),
+                    style = MonoTextStyle,
+                    color = colors.ink3
                 )
             }
-
-            RecordMetricsRow(record = record, recordedLabels = false)
 
             val summary = when {
                 isCodecChanged -> stringResource(id = R.string.record_active_codec, record.activeCodec.ifBlank { CODEC_UNKNOWN })
@@ -446,26 +419,49 @@ private fun RecordItem(
                 }
             }
             Text(
-                style = MaterialTheme.typography.labelMedium,
-                color = if (isStateEvent && !isConnected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-                fontWeight = if (isStateEvent && !isConnected) FontWeight.Medium else FontWeight.Normal,
-                text = summary
+                text = summary,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (isStateEvent && !isConnected) colors.ink else colors.ink2
             )
 
+            RecordMetricsRow(record = record, recordedLabels = false)
+
             if (isCodecChanged) {
-                CodecInfoSection(
+                CodecInfoTable(
                     phoneSupportedCodecs = record.phoneSupportedCodecs,
                     negotiableCodecs = record.negotiableCodecs,
-                    activeCodec = record.activeCodec
+                    activeCodec = record.activeCodec,
+                    compact = true
                 )
             } else if (!isBatteryChanged) {
                 Text(
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.outline,
-                    text = stringResource(id = R.string.record_active_codec, record.activeCodec.ifBlank { CODEC_UNKNOWN })
+                    text = stringResource(id = R.string.record_active_codec, record.activeCodec.ifBlank { CODEC_UNKNOWN }),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.ink3
                 )
             }
         }
+    }
+}
+
+/**
+ * 事件图标：32dp 的 surface-2 圆底 + 16dp 线性图标；已连接事件图标为 ink，其余 ink-2
+ */
+@Composable
+private fun EventIcon(icon: ImageVector, emphasized: Boolean) {
+    val colors = BtTheme.colors
+    Box(
+        modifier = Modifier
+            .size(32.dp)
+            .background(colors.surface2, CircleShape),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = if (emphasized) colors.ink else colors.ink2,
+            modifier = Modifier.size(Dimens.iconSizeSm)
+        )
     }
 }
 
@@ -480,40 +476,63 @@ private fun batterySummary(record: RecordInfo): String {
     return stringResource(id = R.string.record_battery_summary, phone, headset)
 }
 
+/**
+ * 编解码信息表：标签 ink-3 在左、值 ink 在右，行间 1px 分隔线，无竖线
+ *
+ * @param compact 嵌在历史条目里时去掉内边距与分隔线
+ */
 @Composable
-private fun CodecInfoSection(
+private fun CodecInfoTable(
     phoneSupportedCodecs: String,
     negotiableCodecs: String,
     activeCodec: String,
-    modifier: Modifier = Modifier
+    compact: Boolean = false
 ) {
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-        shape = RoundedCornerShape(Dimens.cardCornerRadius),
-        modifier = modifier.fillMaxWidth()
-    ) {
-        Column(
-            modifier = Modifier.padding(Dimens.cardPadding),
-            verticalArrangement = Arrangement.spacedBy(Dimens.spacingXs)
-        ) {
-            CodecInfoLine(label = stringResource(id = R.string.codec_phone_supported), value = phoneSupportedCodecs)
-            CodecInfoLine(label = stringResource(id = R.string.codec_negotiable), value = negotiableCodecs)
-            CodecInfoLine(label = stringResource(id = R.string.codec_active), value = activeCodec)
+    val rows = listOf(
+        stringResource(id = R.string.codec_phone_supported) to phoneSupportedCodecs,
+        stringResource(id = R.string.codec_negotiable) to negotiableCodecs,
+        stringResource(id = R.string.codec_active) to activeCodec
+    )
+    Column {
+        rows.forEachIndexed { index, (label, value) ->
+            if (index > 0 && !compact) {
+                HorizontalDivider(
+                    thickness = Dimens.stroke,
+                    color = BtTheme.colors.line,
+                    modifier = Modifier.padding(horizontal = Dimens.rowDividerInset)
+                )
+            }
+            CodecInfoLine(
+                label = label,
+                value = value,
+                emphasized = index == rows.lastIndex,
+                modifier = if (compact) {
+                    Modifier
+                } else {
+                    Modifier.padding(horizontal = Dimens.cardPadding, vertical = Dimens.spacingMd)
+                }
+            )
         }
     }
 }
 
 @Composable
-private fun CodecInfoLine(label: String, value: String) {
-    val labelColor = MaterialTheme.colorScheme.outline
-    Text(
-        style = MaterialTheme.typography.labelMedium,
-        color = MaterialTheme.colorScheme.onSurface,
-        text = buildAnnotatedString {
-            withStyle(SpanStyle(color = labelColor, fontWeight = FontWeight.Medium)) {
-                append("$label：")
-            }
-            append(value.ifBlank { CODEC_UNKNOWN })
-        }
-    )
+private fun CodecInfoLine(label: String, value: String, emphasized: Boolean, modifier: Modifier = Modifier) {
+    val colors = BtTheme.colors
+    Row(modifier = modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.ink3,
+            modifier = Modifier.width(72.dp)
+        )
+        Text(
+            text = value.ifBlank { CODEC_UNKNOWN },
+            style = if (emphasized) MaterialTheme.typography.labelMedium else MaterialTheme.typography.bodySmall,
+            color = colors.ink,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+        )
+    }
 }

@@ -7,4 +7,6 @@
     <color name="teal_700">#FF018786</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+    <!-- warm-mono 页面背景，与 ui/theme/Color.kt 的 canvas 保持一致 -->
+    <color name="canvas">#FFEFEEEA</color>
 </resources>
