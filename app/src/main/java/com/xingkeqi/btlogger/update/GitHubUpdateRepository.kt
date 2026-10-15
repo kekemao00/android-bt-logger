@@ -47,7 +47,7 @@ class GitHubUpdateRepository(
     suspend fun fetchExpectedSha256(release: ReleaseInfo, asset: ReleaseAsset): String? =
         withContext(Dispatchers.IO) {
             val sumsAsset = release.assets.firstOrNull { it.name == SHA256_ASSET_NAME } ?: return@withContext null
-            runCatching { parseSha256Sums(httpGetText(sumsAsset.downloadUrl))[asset.name] }
+            runCatching { findSha256(parseSha256Sums(httpGetText(sumsAsset.downloadUrl)), asset.name) }
                 .onFailure { Log.e(tag, "[GitHubUpdateRepository] fetchExpectedSha256 -> failed", it) }
                 .getOrNull()
         }
