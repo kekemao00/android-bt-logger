@@ -1,6 +1,7 @@
 [versions]
 analytics = "4.3.3"
-com-android-application = "8.2.2"
+# AGP 8.5.1+ 才会把未压缩的 .so 按 16 KB 对齐，低版本打出的包在 16 KB 页面设备上会弹兼容性警告
+com-android-application = "8.5.2"
 eventbus = "3.3.1"
 glance = "1.1.0"
 hilt-android = "2.48"

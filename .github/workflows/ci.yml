@@ -56,6 +56,21 @@ jobs:
             exit 1
           fi
 
+      # Why: Android 15+ 的 16 KB 页面设备要求 APK 内未压缩的 .so 按 16 KB 对齐，
+      # 否则安装后弹出兼容性警告（v1.5.0 即因 AGP 8.2.2 只按 4 KB 对齐而触发）
+      - name: Verify 16 KB page alignment
+        run: |
+          set -euo pipefail
+          ZIPALIGN="$(find "$ANDROID_HOME/build-tools" -name zipalign | sort -V | tail -n 1)"
+          for APK in app/build/outputs/apk/debug/*.apk; do
+            if ! "$ZIPALIGN" -c -P 16 -v 4 "$APK" > zipalign.log; then
+              grep -v ' (OK' zipalign.log || true
+              echo "::error::$APK 未通过 16 KB 页面对齐校验"
+              exit 1
+            fi
+            echo "$APK 通过 16 KB 页面对齐校验"
+          done
+
       - name: Upload test reports
         if: failure()
         uses: actions/upload-artifact@v4
