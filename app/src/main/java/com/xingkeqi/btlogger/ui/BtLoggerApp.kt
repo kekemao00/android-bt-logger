@@ -65,6 +65,7 @@ import com.xingkeqi.btlogger.ui.components.WmIconButton
 import com.xingkeqi.btlogger.ui.dialogs.ConfirmDeleteDialog
 import com.xingkeqi.btlogger.ui.dialogs.FixedVolumeDialog
 import com.xingkeqi.btlogger.ui.dialogs.UpdateDialogs
+import com.xingkeqi.btlogger.update.ApkInstaller
 import com.xingkeqi.btlogger.ui.screens.DeviceDetailScreen
 import com.xingkeqi.btlogger.ui.screens.DeviceListScreen
 import com.xingkeqi.btlogger.ui.theme.BtTheme
@@ -143,6 +144,10 @@ fun BtLoggerApp(
                             context.getString(R.string.export_no_app)
                         }
                     )
+                }
+
+                is UiEvent.InstallApk -> launchApkInstall(context, event.file)?.let {
+                    snackbarHostState.showSnackbar(context.getString(it))
                 }
             }
         }
@@ -279,8 +284,12 @@ fun BtLoggerApp(
     UpdateDialogs(
         state = updateState,
         onUpdateNow = viewModel::startDownload,
+        onSkip = viewModel::skipUpdate,
         onDismiss = viewModel::dismissUpdate,
-        onCancelDownload = viewModel::cancelDownload
+        onCancelDownload = viewModel::cancelDownload,
+        onInstall = viewModel::requestInstall,
+        onExportData = { viewModel.exportAll(context.getString(R.string.export_all_name)) },
+        onOpenRelease = { url -> ApkInstaller.openUrl(context, url) }
     )
 }
 
@@ -547,6 +556,25 @@ private fun shareExportedFile(context: Context, file: File): Boolean {
         Log.e(TAG, "[BtLoggerApp] shareExportedFile -> FileProvider path not configured", e)
         false
     }
+}
+
+/**
+ * 拉起系统安装器；未授权“安装未知应用”时先跳转授权页，返回后由用户再点一次“安装”。
+ *
+ * @return 需要提示用户的文案，null 表示已正常拉起安装器
+ */
+private fun launchApkInstall(context: Context, file: File): Int? = when {
+    !ApkInstaller.canRequestInstall(context) -> {
+        Log.i(TAG, "[BtLoggerApp] launchApkInstall -> request unknown sources permission")
+        if (ApkInstaller.openUnknownSourcesSettings(context)) {
+            R.string.update_install_permission
+        } else {
+            R.string.update_install_failed
+        }
+    }
+
+    ApkInstaller.install(context, file) -> null
+    else -> R.string.update_install_failed
 }
 
 /**

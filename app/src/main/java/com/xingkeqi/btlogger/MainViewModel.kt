@@ -6,10 +6,6 @@ import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import com.blankj.utilcode.util.AppUtils
-import com.pgyer.pgyersdk.PgyerSDKManager
-import com.pgyer.pgyersdk.callback.CheckoutVersionCallBack
-import com.pgyer.pgyersdk.model.CheckSoftModel
 import com.xingkeqi.btlogger.data.BtLoggerDatabase
 import com.xingkeqi.btlogger.data.DeviceDao
 import com.xingkeqi.btlogger.data.DeviceInfo
@@ -19,15 +15,20 @@ import com.xingkeqi.btlogger.data.RecordInfo
 import com.xingkeqi.btlogger.data.RecordStats
 import com.xingkeqi.btlogger.data.buildRecordTimeline
 import com.xingkeqi.btlogger.data.computeRecordStats
+import com.xingkeqi.btlogger.update.ApkInstaller
+import com.xingkeqi.btlogger.update.GitHubUpdateRepository
+import com.xingkeqi.btlogger.update.ReleaseAsset
+import com.xingkeqi.btlogger.update.ReleaseInfo
+import com.xingkeqi.btlogger.update.isNewerVersion
+import com.xingkeqi.btlogger.update.selectApkAsset
+import com.xingkeqi.btlogger.update.simplifyReleaseNotes
 import com.xingkeqi.btlogger.utils.AppSettings
 import com.xingkeqi.btlogger.utils.MediaVolumeSnapshot
 import com.xingkeqi.btlogger.utils.saveDataToSheet
-import io.reactivex.android.schedulers.AndroidSchedulers
-import io.reactivex.disposables.Disposable
-import io.reactivex.rxkotlin.subscribeBy
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -44,8 +45,6 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import zlc.season.rxdownload4.download
-import zlc.season.rxdownload4.file
 import java.io.File
 
 /**
@@ -54,6 +53,7 @@ import java.io.File
 sealed interface UiEvent {
     data class ShowMessage(@StringRes val resId: Int, val args: List<Any> = emptyList()) : UiEvent
     data class ShareFile(val file: File) : UiEvent
+    data class InstallApk(val file: File) : UiEvent
 }
 
 /**
@@ -61,12 +61,29 @@ sealed interface UiEvent {
  */
 sealed interface UpdateUiState {
     object Hidden : UpdateUiState
-    data class Available(val version: CheckSoftModel) : UpdateUiState
+
+    /**
+     * @param notes 精简后的更新日志，为空时不展示
+     */
+    data class Available(
+        val release: ReleaseInfo,
+        val asset: ReleaseAsset,
+        val currentVersion: String,
+        val notes: String
+    ) : UpdateUiState
+
     data class Downloading(
+        val versionName: String,
         val progress: Float,
         val downloadedBytes: Long,
         val totalBytes: Long
     ) : UpdateUiState
+
+    /** 已下载并校验，等待用户（可能需先授权“安装未知应用”）拉起系统安装器 */
+    data class ReadyToInstall(val versionName: String, val file: File) : UpdateUiState
+
+    /** 新包签名与已安装版本不同，系统不允许覆盖安装，需要用户导出数据后卸载重装 */
+    data class SignatureMismatch(val versionName: String, val releaseUrl: String) : UpdateUiState
 }
 
 /**
@@ -82,7 +99,11 @@ class MainViewModel(
     private val recordDao: RecordDao,
     private val deviceWithRecordsDao: DeviceWithRecordsDao,
     private val settings: AppSettings,
-    private val exportDir: File
+    private val exportDir: File,
+    private val updateRepository: GitHubUpdateRepository,
+    private val appVersionName: String,
+    private val debuggable: Boolean,
+    private val verifyApkSignature: (File) -> Boolean?
 ) : ViewModel() {
 
     private val tag = "MainViewModel"
@@ -146,7 +167,8 @@ class MainViewModel(
 
     private val _updateState = MutableStateFlow<UpdateUiState>(UpdateUiState.Hidden)
     val updateState: StateFlow<UpdateUiState> = _updateState.asStateFlow()
-    private var downloadDisposable: Disposable? = null
+    private var checkJob: Job? = null
+    private var downloadJob: Job? = null
 
     private val _events = Channel<UiEvent>(Channel.BUFFERED)
     val events: Flow<UiEvent> = _events.receiveAsFlow()
@@ -239,28 +261,38 @@ class MainViewModel(
     }
 
     /**
-     * @param manual 用户主动检查时才提示“已是最新/检查失败”，启动时静默检查
+     * 查询 GitHub 最新 Release 并与当前版本比较。
+     *
+     * @param manual 用户主动检查时才提示“已是最新/检查失败”，并忽略“跳过此版本”；启动时静默检查
      */
     fun checkUpdate(manual: Boolean) {
-        runCatching {
-            PgyerSDKManager.checkSoftwareUpdate(object : CheckoutVersionCallBack {
-                override fun onSuccess(version: CheckSoftModel?) {
-                    Log.i(tag, "[MainViewModel] checkUpdate -> hasNew=${version?.isBuildHaveNewVersion}")
-                    if (version?.isBuildHaveNewVersion == true) {
-                        _updateState.value = UpdateUiState.Available(version)
-                    } else if (manual) {
-                        emit(UiEvent.ShowMessage(R.string.update_latest))
-                    }
-                }
+        if (checkJob?.isActive == true) return
+        if (_updateState.value !is UpdateUiState.Hidden) return
+        checkJob = viewModelScope.launch {
+            Log.i(tag, "[MainViewModel] checkUpdate -> start, manual=$manual, current=$appVersionName")
+            if (manual) emit(UiEvent.ShowMessage(R.string.update_checking))
+            updateRepository.fetchLatestRelease()
+                .onSuccess { release -> onLatestRelease(release, manual) }
+                .onFailure { if (manual) emit(UiEvent.ShowMessage(R.string.update_check_failed)) }
+        }
+    }
 
-                override fun onFail(message: String?) {
-                    Log.w(tag, "[MainViewModel] checkUpdate -> failed: $message")
-                    if (manual) emit(UiEvent.ShowMessage(R.string.update_check_failed))
-                }
-            })
-        }.onFailure { e ->
-            Log.e(tag, "[MainViewModel] checkUpdate -> exception", e)
-            if (manual) emit(UiEvent.ShowMessage(R.string.update_check_failed))
+    private fun onLatestRelease(release: ReleaseInfo, manual: Boolean) {
+        val asset = selectApkAsset(release.assets, debuggable)
+        val newer = isNewerVersion(release.versionName, appVersionName)
+        Log.i(tag, "[MainViewModel] checkUpdate -> latest=${release.tagName}, newer=$newer, asset=${asset?.name}")
+        when {
+            !newer -> if (manual) emit(UiEvent.ShowMessage(R.string.update_latest))
+            asset == null -> if (manual) emit(UiEvent.ShowMessage(R.string.update_no_apk))
+            !manual && settings.skippedUpdateTag == release.tagName ->
+                Log.i(tag, "[MainViewModel] checkUpdate -> skipped by user: ${release.tagName}")
+            _updateState.value !is UpdateUiState.Hidden -> Unit
+            else -> _updateState.value = UpdateUiState.Available(
+                release = release,
+                asset = asset,
+                currentVersion = appVersionName,
+                notes = simplifyReleaseNotes(release.notes)
+            )
         }
     }
 
@@ -268,51 +300,61 @@ class MainViewModel(
         _updateState.value = UpdateUiState.Hidden
     }
 
+    fun skipUpdate() {
+        val available = _updateState.value as? UpdateUiState.Available ?: return
+        Log.i(tag, "[MainViewModel] skipUpdate -> ${available.release.tagName}")
+        settings.skippedUpdateTag = available.release.tagName
+        dismissUpdate()
+    }
+
     fun startDownload() {
-        val version = (_updateState.value as? UpdateUiState.Available)?.version ?: return
-        val url = version.downloadURL
-        if (url.isNullOrBlank()) {
-            emit(UiEvent.ShowMessage(R.string.update_download_failed))
-            dismissUpdate()
-            return
-        }
-        _updateState.value = UpdateUiState.Downloading(0f, 0L, 0L)
-        downloadDisposable?.dispose()
-        downloadDisposable = url.download()
-            .observeOn(AndroidSchedulers.mainThread())
-            .subscribeBy(
-                onNext = { progress ->
-                    val total = progress.totalSize
+        val available = _updateState.value as? UpdateUiState.Available ?: return
+        val versionName = available.release.versionName
+        _updateState.value = UpdateUiState.Downloading(versionName, 0f, 0L, available.asset.size)
+        downloadJob?.cancel()
+        downloadJob = viewModelScope.launch {
+            val expectedSha256 = updateRepository.fetchExpectedSha256(available.release, available.asset)
+            var lastPercent = -1
+            val result = updateRepository.download(available.asset, expectedSha256) { downloaded, total ->
+                // 只在百分比变化时刷新状态，避免每个缓冲区都触发重组
+                val percent = if (total > 0) (downloaded * 100 / total).toInt() else -1
+                if (percent != lastPercent || total <= 0) {
+                    lastPercent = percent
                     _updateState.value = UpdateUiState.Downloading(
-                        progress = if (total > 0) progress.downloadSize.toFloat() / total else 0f,
-                        downloadedBytes = progress.downloadSize,
+                        versionName = versionName,
+                        progress = if (total > 0) downloaded.toFloat() / total else 0f,
+                        downloadedBytes = downloaded,
                         totalBytes = total
                     )
-                },
-                onComplete = {
-                    Log.i(tag, "[MainViewModel] startDownload -> completed")
-                    _updateState.value = UpdateUiState.Hidden
-                    runCatching { AppUtils.installApp(url.file()) }
-                        .onFailure { Log.e(tag, "[MainViewModel] installApk -> failed", it) }
-                },
-                onError = { e ->
-                    Log.e(tag, "[MainViewModel] startDownload -> failed", e)
-                    runCatching { PgyerSDKManager.reportException(Exception("下载新版本发生异常", e)) }
-                    _updateState.value = UpdateUiState.Hidden
-                    emit(UiEvent.ShowMessage(R.string.update_download_failed))
                 }
-            )
+            }
+            result.onSuccess { file ->
+                val signatureMatches = withContext(Dispatchers.IO) { verifyApkSignature(file) }
+                Log.i(tag, "[MainViewModel] startDownload -> completed, signatureMatches=$signatureMatches")
+                if (signatureMatches == false) {
+                    _updateState.value = UpdateUiState.SignatureMismatch(versionName, available.release.htmlUrl)
+                } else {
+                    _updateState.value = UpdateUiState.ReadyToInstall(versionName, file)
+                    emit(UiEvent.InstallApk(file))
+                }
+            }.onFailure { e ->
+                if (e is CancellationException) return@onFailure
+                _updateState.value = UpdateUiState.Hidden
+                emit(UiEvent.ShowMessage(R.string.update_download_failed))
+            }
+        }
     }
 
     fun cancelDownload() {
-        downloadDisposable?.dispose()
-        downloadDisposable = null
+        Log.i(tag, "[MainViewModel] cancelDownload")
+        downloadJob?.cancel()
+        downloadJob = null
         _updateState.value = UpdateUiState.Hidden
     }
 
-    override fun onCleared() {
-        downloadDisposable?.dispose()
-        super.onCleared()
+    fun requestInstall() {
+        val ready = _updateState.value as? UpdateUiState.ReadyToInstall ?: return
+        emit(UiEvent.InstallApk(ready.file))
     }
 
     private fun emit(event: UiEvent) {
@@ -332,6 +374,10 @@ class MainViewModel(
     }
 
     companion object {
+        private fun appVersionName(context: Context): String = runCatching {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName
+        }.getOrNull().orEmpty()
+
         fun provideFactory(appContext: Context): ViewModelProvider.Factory {
             val applicationContext = appContext.applicationContext
             return object : ViewModelProvider.Factory {
@@ -344,7 +390,13 @@ class MainViewModel(
                             recordDao = database.connectionRecordDao(),
                             deviceWithRecordsDao = database.deviceWithRecordsDao(),
                             settings = AppSettings.get(applicationContext),
-                            exportDir = File(applicationContext.filesDir, "exports")
+                            exportDir = File(applicationContext.filesDir, "exports"),
+                            updateRepository = GitHubUpdateRepository(
+                                downloadDir = File(applicationContext.cacheDir, "updates")
+                            ),
+                            appVersionName = appVersionName(applicationContext),
+                            debuggable = ApkInstaller.isDebuggable(applicationContext),
+                            verifyApkSignature = { ApkInstaller.signatureMatches(applicationContext, it) }
                         ) as T
                     }
                     throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")

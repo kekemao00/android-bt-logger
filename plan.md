@@ -61,3 +61,12 @@
 - [x] 弹框改为面板样式，Snackbar 改为顶部墨黑通知胶囊
 - [x] 页面切换与内容替换使用模糊交叉淡化，列表入场错开
 - [x] CI 构建通过并重新生成 README 截图
+
+# 应用内检查更新（GitHub Releases）
+
+- [x] 新增 `update/`：查询最新 Release、选择同类型 APK、下载并按 SHA256SUMS.txt 校验、签名比对与系统安装
+- [x] ViewModel 更新状态机：发现新版本（更新日志、跳过此版本）→ 下载（可取消）→ 安装 / 签名不一致引导重装
+- [x] 移除蒲公英更新检查与 rxdownload4
+- [x] 固定 debug 签名（app/debug.keystore），CI 与 Release 校验证书指纹
+- [x] 单元测试：版本比较、资源选择、SHA256SUMS 与 Release 解析、更新日志精简
+- [ ] CI 构建通过

@@ -55,7 +55,6 @@ class BtLoggerApplication : Application() {
             .setContext(application)
             .enable(Features.APP_LAUNCH_TIME)
             .enable(Features.APP_PAGE_CATON)
-            .enable(Features.CHECK_UPDATE)
             .start()
     }
 }

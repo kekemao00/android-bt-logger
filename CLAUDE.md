@@ -51,7 +51,8 @@ BtLoggerApp → DeviceListScreen / DeviceDetailScreen（无状态 Compose）
 |------|------|
 | `ui/BtLoggerApp.kt` | 顶栏、导航、弹框与一次性事件分发 |
 | `ui/screens/*` | 设备列表、详情、权限引导页 |
-| `MainViewModel.kt` | 状态管理、导出、更新下载 |
+| `MainViewModel.kt` | 状态管理、导出、应用内更新状态机 |
+| `update/*` | GitHub Release 检查、下载与 SHA-256 校验、签名比对与安装 |
 | `service/BtLoggerForegroundService.kt` | 蓝牙事件采集与落库 |
 | `data/RecordTimeline.kt` | 累计时长与统计（纯函数，有单测） |
 | `utils/JxlUtils.kt` | Excel 导出 |
@@ -67,6 +68,7 @@ BtLoggerApp → DeviceListScreen / DeviceDetailScreen（无状态 Compose）
 
 - `.github/workflows/ci.yml`：push 到 main 与 PR 时运行单元测试并构建 debug APK
 - `.github/workflows/release.yml`：推送 `v*.*.*` tag 触发发布，versionName 取自 tag
+- debug 包固定用 `app/debug.keystore` 签名（应用内更新要求同签名覆盖安装），CI 校验证书指纹，不要替换该文件
 
 # Role: Android Expert & Architect
 - **身份**: 10年+经验 Android 架构师，精通 Google Modern Android Development (MAD)。

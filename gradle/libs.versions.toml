@@ -15,7 +15,7 @@ lifecycle-runtime-ktx = "2.3.1"
 activity-compose = "1.5.1"
 compose-bom = "2022.10.00"
 room-runtime = "2.5.0"
-rxdownload4 = "1.1.4"
+json = "20240303"
 
 [libraries]
 analytics = { module = "com.pgyer:analytics", version.ref = "analytics" }
@@ -34,7 +34,7 @@ espresso-core = { group = "androidx.test.espresso", name = "espresso-core", vers
 lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycle-runtime-ktx" }
 activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activity-compose" }
 compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "compose-bom" }
-rxdownload4 = { module = "com.github.ssseasonnn.RxDownload:rxdownload4", version.ref = "rxdownload4" }
+json = { module = "org.json:json", version.ref = "json" }
 ui = { group = "androidx.compose.ui", name = "ui" }
 ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics" }
 ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }

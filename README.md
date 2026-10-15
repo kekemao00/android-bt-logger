@@ -55,7 +55,7 @@ BtLogger 在后台持续记录蓝牙耳机、音箱、车机等 A2DP 设备的**
 | 蓝牙版本 | 综合 Device Information Service、BLE 广播指纹与设备目录推断，只会用更可信的结果覆盖已有值 |
 | 固定连接音量 | 每次连接蓝牙音频设备后自动把媒体音量调到设定值，App 在后台同样生效，设置重启后保留 |
 | 导出 | 导出单个设备或全部设备为 `.xls`，通过系统分享面板发送到微信、邮件、网盘等 |
-| 应用内更新 | 通过蒲公英检查新版本、下载并安装，可随时取消下载 |
+| 应用内更新 | 启动时与菜单「检查更新」查询 GitHub 最新 Release，展示更新日志；下载可取消，SHA-256 校验后调起系统安装，可跳过某个版本 |
 
 ## 使用
 
@@ -95,7 +95,8 @@ Android 8.0 以上才提供 Codec 信息，且各厂商实现差异较大；有�
 | `POST_NOTIFICATIONS`（13+） | 显示前台服务通知 |
 | `FOREGROUND_SERVICE` / `FOREGROUND_SERVICE_CONNECTED_DEVICE` | 后台持续监听 |
 | `RECEIVE_BOOT_COMPLETED` | 开机自动恢复记录 |
-| `INTERNET` 等 | 仅用于蒲公英更新检查 |
+| `INTERNET` 等 | 检查与下载 GitHub Release 更新 |
+| `REQUEST_INSTALL_PACKAGES` | 下载完成后调起系统安装器 |
 
 ## 构建
 
@@ -150,6 +151,10 @@ app/src/main/java/com/xingkeqi/btlogger/
   ```
 
   流水线会运行测试、以 tag 作为 `versionName` 构建、签名、按 Conventional Commits 分组生成更新日志，并上传 APK 与校验文件。也可以不在本地打 tag：在 Actions → Release → Run workflow 中填写新版本号（如 `v1.3.0`），流水线会基于 `main` 自动创建 tag 并发布。合并 PR 本身不会发布新版本。
+
+  应用内更新直接读取 GitHub 最新 Release（不含草稿与预发布），按当前安装包类型选择 debug 或 release APK，并用 `SHA256SUMS.txt` 校验。发布新版本后，已安装的用户打开应用即可收到提示。
+
+  Android 只允许同签名的包覆盖安装。debug 包固定使用仓库内的 `app/debug.keystore`（标准 debug 口令）签名，CI 与 Release 都会校验证书指纹，保证每次发布都能在应用内直接升级。v1.4.0 及更早的版本每次构建签名随机，从这些版本升级时需要先导出数据、卸载后重装一次，应用会检测到签名不同并给出提示。
 
   正式签名需要在仓库 Secrets 中配置 `KEYSTORE_FILE`（keystore 的 base64）、`KEYSTORE_PASSWORD`、`KEY_ALIAS`、`KEY_PASSWORD`。未配置时只发布 debug APK，不会让发布失败。
 
