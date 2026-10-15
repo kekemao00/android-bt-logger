@@ -46,8 +46,9 @@ android {
     android.applicationVariants.configureEach {
         variant ->
             variant.outputs.configureEach {
-                //在这里修改apk文件名
-                outputFileName = "BtLogger-${variant.name}-v${variant.versionName}-${variant.versionCode}(${applicationId}).apk"
+                // 不用括号等特殊字符：GitHub Release 上传附件时会改写这些字符，
+                // 导致附件名与 SHA256SUMS.txt 中的文件名对不上
+                outputFileName = "BtLogger-${variant.name}-v${variant.versionName}-${variant.versionCode}-${applicationId}.apk"
             }
     }
 

@@ -96,7 +96,7 @@ jobs:
           VERSION_NAME: ${{ steps.version.outputs.VERSION_NAME }}
 
       # app/build.gradle 将 APK 重命名为
-      # BtLogger-{variant}-v{versionName}-{versionCode}({applicationId}).apk
+      # BtLogger-{variant}-v{versionName}-{versionCode}-{applicationId}.apk
       - name: Locate APKs
         id: locate
         run: |

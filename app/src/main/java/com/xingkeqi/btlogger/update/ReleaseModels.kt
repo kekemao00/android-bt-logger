@@ -113,6 +113,21 @@ fun parseSha256Sums(text: String): Map<String, String> =
         .toMap()
 
 /**
+ * 在 SHA256SUMS.txt 中查找附件的哈希。
+ *
+ * Why: GitHub 上传附件时会把括号等字符改写成 `.`（v1.5.0 的
+ * `...-123(com.xingkeqi.btlogger).apk` 变成了 `...-123.com.xingkeqi.btlogger.apk`），
+ * 而校验文件里记录的是构建时的原始文件名，因此精确匹配失败时按同样规则归一化后再比。
+ */
+fun findSha256(sums: Map<String, String>, assetName: String): String? =
+    sums[assetName] ?: normalizeAssetName(assetName).let { target ->
+        sums.entries.firstOrNull { normalizeAssetName(it.key) == target }?.value
+    }
+
+private fun normalizeAssetName(name: String): String =
+    name.replace(Regex("[^A-Za-z0-9._-]"), ".").replace(Regex("\\.{2,}"), ".")
+
+/**
  * 把 Release 说明精简为适合弹框展示的纯文本。
  *
  * Why: Release 说明由流水线生成，包含标题、下载说明、对比链接与构建信息，

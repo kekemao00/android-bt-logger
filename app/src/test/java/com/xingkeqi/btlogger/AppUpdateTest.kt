@@ -2,6 +2,7 @@ package com.xingkeqi.btlogger
 
 import com.xingkeqi.btlogger.update.ReleaseAsset
 import com.xingkeqi.btlogger.update.compareVersions
+import com.xingkeqi.btlogger.update.findSha256
 import com.xingkeqi.btlogger.update.isNewerVersion
 import com.xingkeqi.btlogger.update.parseRelease
 import com.xingkeqi.btlogger.update.parseSha256Sums
@@ -54,6 +55,15 @@ class AppUpdateTest {
         assertEquals(hashA, sums["BtLogger-debug.apk"])
         assertEquals("b".repeat(64), sums["BtLogger-release.apk"])
         assertEquals(2, sums.size)
+    }
+
+    @Test
+    fun findSha256_matchesAssetRenamedByGitHub() {
+        val hash = "c".repeat(64)
+        val sums = mapOf("BtLogger-debug-v1.5.0-11167596(com.xingkeqi.btlogger).apk" to hash)
+        assertEquals(hash, findSha256(sums, "BtLogger-debug-v1.5.0-11167596.com.xingkeqi.btlogger.apk"))
+        assertEquals(hash, findSha256(sums, "BtLogger-debug-v1.5.0-11167596(com.xingkeqi.btlogger).apk"))
+        assertNull(findSha256(sums, "BtLogger-release-v1.5.0-11167596.com.xingkeqi.btlogger.apk"))
     }
 
     @Test
