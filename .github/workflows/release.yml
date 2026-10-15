@@ -111,6 +111,22 @@ jobs:
           echo "DEBUG_APK=$DEBUG_APK" >> "$GITHUB_OUTPUT"
           echo "RELEASE_APK=$RELEASE_APK" >> "$GITHUB_OUTPUT"
 
+      # Why: 应用内更新只能覆盖安装同签名的包。debug 包固定使用仓库内 app/debug.keystore 签名，
+      # 这里校验证书指纹，防止签名配置被意外改动后发布出无法覆盖升级的安装包。
+      - name: Verify debug APK signing key
+        env:
+          DEBUG_APK: ${{ steps.locate.outputs.DEBUG_APK }}
+          EXPECTED_CERT_SHA256: 76a9a03a5e38848584549fa8b6057fdd8602e77ef3150eece7ac6af1e413f894
+        run: |
+          set -euo pipefail
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1)"
+          ACTUAL=$("$APKSIGNER" verify --print-certs "$DEBUG_APK" | grep -m1 'certificate SHA-256 digest' | awk '{print $NF}')
+          echo "debug APK 证书 SHA-256: $ACTUAL"
+          if [ "$ACTUAL" != "$EXPECTED_CERT_SHA256" ]; then
+            echo "::error::debug APK 签名证书与 app/debug.keystore 不一致，已安装用户将无法在应用内覆盖升级"
+            exit 1
+          fi
+
       # Why: apksigner 生成 v2+ 签名（targetSdk 30+ 必需）；密码通过 env: 读取，
       # 避免出现在进程命令行中。
       - name: Sign release APK
@@ -204,6 +220,8 @@ jobs:
             echo "$SIGNING_NOTE"
             echo "- **Debug APK**：调试版本，日志更完整"
             echo "- \`SHA256SUMS.txt\`：校验文件完整性"
+            echo
+            echo "> 已安装的用户可在应用右上角菜单「检查更新」直接下载安装。"
             echo
             cat CHANGELOG_BODY.md
             echo

@@ -6,4 +6,8 @@
     <files-path
         name="btlogger_files"
         path="." />
+    <!-- 应用内更新下载的安装包，交给系统安装器读取 -->
+    <cache-path
+        name="btlogger_updates"
+        path="updates/" />
 </paths>

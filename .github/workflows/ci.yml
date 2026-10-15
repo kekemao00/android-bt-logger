@@ -41,6 +41,21 @@ jobs:
       - name: Build debug APK
         run: ./gradlew assembleDebug --stacktrace
 
+      # Why: 应用内更新依赖每次构建的 debug 包签名一致，在合入前就发现签名配置被改动
+      - name: Verify debug APK signing key
+        env:
+          EXPECTED_CERT_SHA256: 76a9a03a5e38848584549fa8b6057fdd8602e77ef3150eece7ac6af1e413f894
+        run: |
+          set -euo pipefail
+          DEBUG_APK=$(find app/build/outputs/apk/debug -maxdepth 1 -name '*.apk' | head -n 1)
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1)"
+          ACTUAL=$("$APKSIGNER" verify --print-certs "$DEBUG_APK" | grep -m1 'certificate SHA-256 digest' | awk '{print $NF}')
+          echo "debug APK 证书 SHA-256: $ACTUAL"
+          if [ "$ACTUAL" != "$EXPECTED_CERT_SHA256" ]; then
+            echo "::error::debug APK 签名证书与 app/debug.keystore 不一致"
+            exit 1
+          fi
+
       - name: Upload test reports
         if: failure()
         uses: actions/upload-artifact@v4

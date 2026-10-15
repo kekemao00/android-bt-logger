@@ -38,10 +38,20 @@ class AppSettings private constructor(context: Context) {
         prefs.edit().putInt(KEY_FIXED_VOLUME_PERCENT, resolved).apply()
     }
 
+    /**
+     * 用户选择“跳过此版本”的 tag；启动时的自动检查不再提示该版本，手动检查仍会提示
+     */
+    var skippedUpdateTag: String?
+        get() = prefs.getString(KEY_SKIPPED_UPDATE_TAG, null)
+        set(value) {
+            prefs.edit().putString(KEY_SKIPPED_UPDATE_TAG, value).apply()
+        }
+
     companion object {
         private const val PREFS_NAME = "bt_logger_settings"
         private const val KEY_FIXED_VOLUME_ENABLED = "fixed_volume_enabled"
         private const val KEY_FIXED_VOLUME_PERCENT = "fixed_volume_percent"
+        private const val KEY_SKIPPED_UPDATE_TAG = "skipped_update_tag"
         const val DEFAULT_FIXED_VOLUME_PERCENT = 60
 
         @Volatile

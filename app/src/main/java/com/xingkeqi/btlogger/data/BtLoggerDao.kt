@@ -122,6 +122,18 @@ interface RecordDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(connectionRecord: DeviceConnectionRecord)
 
+    @Insert
+    suspend fun insertAll(records: List<DeviceConnectionRecord>)
+
+    /**
+     * 导入去重：导出表格的时间只精确到秒，因此按同一秒内、同设备、同事件判断是否已存在
+     */
+    @Query(
+        "SELECT COUNT(*) FROM device_connection_records WHERE device_mac = :mac " +
+            "AND event_type = :eventType AND timestamp >= :fromInclusive AND timestamp < :toExclusive"
+    )
+    suspend fun countRecordsInRange(mac: String, eventType: String, fromInclusive: Long, toExclusive: Long): Int
+
     @Update
     suspend fun update(connectionRecord: DeviceConnectionRecord)
 

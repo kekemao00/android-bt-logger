@@ -31,6 +31,18 @@ android {
         }
     }
 
+    // Why: CI 每次在全新的 runner 上构建，默认 debug 签名每次都随机生成，
+    // 导致新版本无法覆盖安装旧版本。固定使用仓库内的 debug.keystore（标准 debug 口令），
+    // 保证每次发布的 debug 包签名一致，应用内更新才能直接覆盖安装。
+    signingConfigs {
+        debug {
+            storeFile file('debug.keystore')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+    }
+
     android.applicationVariants.configureEach {
         variant ->
             variant.outputs.configureEach {
@@ -40,7 +52,9 @@ android {
     }
 
     buildTypes {
-        debug {}
+        debug {
+            signingConfig signingConfigs.debug
+        }
         release {}
     }
     compileOptions {
@@ -74,6 +88,8 @@ dependencies {
     implementation libs.ui.tooling.preview
     implementation libs.material3
     testImplementation libs.junit
+    // 本地单测的 android.jar 中 org.json 只有桩实现，解析 Release 响应需要真实实现
+    testImplementation libs.json
     androidTestImplementation libs.androidx.test.ext.junit
     androidTestImplementation libs.espresso.core
     androidTestImplementation platform(libs.compose.bom)
@@ -100,7 +116,6 @@ dependencies {
     // https://seed.pgyer.com/site/2Umq3b49JJ
     // implementation 'com.pgyer:analytics:4.+'//最好写上具体依赖的版本号 如：4.2.1
     implementation libs.analytics//最好写上具体依赖的版本号 如：4.2.1
-    implementation libs.rxdownload4
     // https://developer.android.com/training/dependency-injection/hilt-android?hl=zh-cn#groovy
     implementation libs.hilt.android
     kapt libs.hilt.compiler

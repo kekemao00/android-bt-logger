@@ -2,10 +2,13 @@ package com.xingkeqi.btlogger.ui.dialogs
 
 import android.text.format.Formatter
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
@@ -152,56 +155,81 @@ fun FixedVolumeDialog(
     }
 }
 
+/**
+ * 应用内更新：发现新版本 -> 下载（可取消）-> 安装；签名不一致时引导导出数据后重装
+ */
 @Composable
 fun UpdateDialogs(
     state: UpdateUiState,
     onUpdateNow: () -> Unit,
+    onSkip: () -> Unit,
     onDismiss: () -> Unit,
-    onCancelDownload: () -> Unit
+    onCancelDownload: () -> Unit,
+    onInstall: () -> Unit,
+    onExportData: () -> Unit,
+    onOpenRelease: (String) -> Unit
 ) {
     val colors = BtTheme.colors
+    val context = LocalContext.current
     when (state) {
         UpdateUiState.Hidden -> Unit
         is UpdateUiState.Available -> WmPanel(
             title = stringResource(id = R.string.update_title),
             onDismissRequest = onDismiss,
+            closeContentDescription = stringResource(id = R.string.update_later),
             actions = {
                 WmButton(
-                    text = stringResource(id = R.string.update_later),
-                    onClick = onDismiss,
-                    style = WmButtonStyle.Secondary
+                    text = stringResource(id = R.string.update_skip),
+                    onClick = onSkip,
+                    style = WmButtonStyle.Ghost
                 )
                 WmButton(text = stringResource(id = R.string.update_now), onClick = onUpdateNow)
             }
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(Dimens.spacingSm)) {
                 Text(
-                    text = stringResource(id = R.string.update_body),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = colors.ink2
-                )
-                Text(
-                    text = stringResource(id = R.string.update_version, state.version.buildVersion.orEmpty()),
-                    style = MaterialTheme.typography.titleSmall,
+                    text = stringResource(
+                        id = R.string.update_version_change,
+                        state.currentVersion,
+                        state.release.versionName
+                    ),
+                    style = MonoTextStyle,
                     color = colors.ink
                 )
-                state.version.buildUpdateDescription
-                    ?.takeIf { it.isNotBlank() }
-                    ?.let {
-                        Text(
-                            text = stringResource(id = R.string.update_description, it),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = colors.ink2
-                        )
-                    }
+                if (state.asset.size > 0) {
+                    Text(
+                        text = stringResource(
+                            id = R.string.update_size,
+                            Formatter.formatShortFileSize(context, state.asset.size)
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.ink3
+                    )
+                }
+                if (state.notes.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(Dimens.spacingXs))
+                    Text(
+                        text = stringResource(id = R.string.update_notes_title),
+                        style = MaterialTheme.typography.titleSmall,
+                        color = colors.ink
+                    )
+                    // 更新日志可能很长，限制高度并允许滚动，按钮始终可见
+                    Text(
+                        text = state.notes,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.ink2,
+                        modifier = Modifier
+                            .heightIn(max = 240.dp)
+                            .verticalScroll(rememberScrollState())
+                    )
+                }
             }
         }
 
         is UpdateUiState.Downloading -> {
-            val context = LocalContext.current
             // 下载过程中返回键与点遮罩都不关闭，避免用户误以为已取消
             WmPanel(
-                title = stringResource(id = R.string.update_downloading),
+                title = stringResource(id = R.string.update_downloading, state.versionName),
                 onDismissRequest = {},
                 dismissible = false,
                 actions = {
@@ -225,6 +253,44 @@ fun UpdateDialogs(
                     color = colors.ink2
                 )
             }
+        }
+
+        is UpdateUiState.ReadyToInstall -> WmPanel(
+            title = stringResource(id = R.string.update_ready_title),
+            onDismissRequest = onDismiss,
+            closeContentDescription = stringResource(id = R.string.update_later),
+            actions = {
+                WmButton(text = stringResource(id = R.string.update_install), onClick = onInstall)
+            }
+        ) {
+            Text(
+                text = stringResource(id = R.string.update_ready_body, state.versionName),
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.ink2
+            )
+        }
+
+        is UpdateUiState.SignatureMismatch -> WmPanel(
+            title = stringResource(id = R.string.update_signature_title),
+            onDismissRequest = onDismiss,
+            closeContentDescription = stringResource(id = R.string.update_later),
+            actions = {
+                WmButton(
+                    text = stringResource(id = R.string.update_export_data),
+                    onClick = onExportData,
+                    style = WmButtonStyle.Secondary
+                )
+                WmButton(
+                    text = stringResource(id = R.string.update_open_release),
+                    onClick = { onOpenRelease(state.releaseUrl) }
+                )
+            }
+        ) {
+            Text(
+                text = stringResource(id = R.string.update_signature_body, state.versionName),
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.ink2
+            )
         }
     }
 }
