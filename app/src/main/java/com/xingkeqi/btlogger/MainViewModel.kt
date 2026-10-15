@@ -1,6 +1,7 @@
 package com.xingkeqi.btlogger
 
 import android.content.Context
+import android.net.Uri
 import android.util.Log
 import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
@@ -12,9 +13,11 @@ import com.xingkeqi.btlogger.data.DeviceInfo
 import com.xingkeqi.btlogger.data.DeviceWithRecordsDao
 import com.xingkeqi.btlogger.data.RecordDao
 import com.xingkeqi.btlogger.data.RecordInfo
+import com.xingkeqi.btlogger.data.RecordImporter
 import com.xingkeqi.btlogger.data.RecordStats
 import com.xingkeqi.btlogger.data.buildRecordTimeline
 import com.xingkeqi.btlogger.data.computeRecordStats
+import com.xingkeqi.btlogger.data.parseExportedRows
 import com.xingkeqi.btlogger.update.ApkInstaller
 import com.xingkeqi.btlogger.update.GitHubUpdateRepository
 import com.xingkeqi.btlogger.update.ReleaseAsset
@@ -24,6 +27,7 @@ import com.xingkeqi.btlogger.update.selectApkAsset
 import com.xingkeqi.btlogger.update.simplifyReleaseNotes
 import com.xingkeqi.btlogger.utils.AppSettings
 import com.xingkeqi.btlogger.utils.MediaVolumeSnapshot
+import com.xingkeqi.btlogger.utils.readExportSheet
 import com.xingkeqi.btlogger.utils.saveDataToSheet
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -46,6 +50,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.InputStream
 
 /**
  * 一次性 UI 事件（Toast、分享文件等），避免用 State 表达导致旋转屏幕后重复触发
@@ -100,6 +105,8 @@ class MainViewModel(
     private val deviceWithRecordsDao: DeviceWithRecordsDao,
     private val settings: AppSettings,
     private val exportDir: File,
+    private val recordImporter: RecordImporter,
+    private val openUri: (Uri) -> InputStream?,
     private val updateRepository: GitHubUpdateRepository,
     private val appVersionName: String,
     private val debuggable: Boolean,
@@ -261,6 +268,32 @@ class MainViewModel(
     }
 
     /**
+     * 从导出的 Excel 恢复记录。
+     *
+     * Why: 旧版本签名随机，升级到新版本需卸载重装；导出 -> 重装 -> 导入是唯一保留历史记录的途径。
+     */
+    fun importFromExcel(uri: Uri) = launchIo("importFromExcel") {
+        val result = runCatching {
+            val (header, rows) = openUri(uri)?.use { readExportSheet(it) }
+                ?: error("无法读取所选文件")
+            val parsed = parseExportedRows(header, rows)
+            Log.i(tag, "[MainViewModel] importFromExcel -> rows=${rows.size}, parsed=${parsed.size}")
+            if (parsed.isEmpty()) null else recordImporter.import(parsed)
+        }
+        result.onSuccess { imported ->
+            Log.i(tag, "[MainViewModel] importFromExcel -> $imported")
+            if (imported == null) {
+                emit(UiEvent.ShowMessage(R.string.import_empty))
+            } else {
+                emit(UiEvent.ShowMessage(R.string.import_success, listOf(imported.imported, imported.skipped)))
+            }
+        }.onFailure { e ->
+            Log.e(tag, "[MainViewModel] importFromExcel -> failed", e)
+            emit(UiEvent.ShowMessage(R.string.import_failed))
+        }
+    }
+
+    /**
      * 查询 GitHub 最新 Release 并与当前版本比较。
      *
      * @param manual 用户主动检查时才提示“已是最新/检查失败”，并忽略“跳过此版本”；启动时静默检查
@@ -391,6 +424,8 @@ class MainViewModel(
                             deviceWithRecordsDao = database.deviceWithRecordsDao(),
                             settings = AppSettings.get(applicationContext),
                             exportDir = File(applicationContext.filesDir, "exports"),
+                            recordImporter = RecordImporter(database.deviceDao(), database.connectionRecordDao()),
+                            openUri = { applicationContext.contentResolver.openInputStream(it) },
                             updateRepository = GitHubUpdateRepository(
                                 downloadDir = File(applicationContext.cacheDir, "updates")
                             ),

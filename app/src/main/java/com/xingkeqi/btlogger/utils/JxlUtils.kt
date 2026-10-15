@@ -9,6 +9,7 @@ import com.xingkeqi.btlogger.data.RecordInfo
 import jxl.Workbook
 import jxl.write.Label
 import java.io.File
+import java.io.InputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -78,6 +79,24 @@ fun saveDataToSheet(
         workbook.close()
     }
     return file
+}
+
+/**
+ * 读取导出的 .xls 第一个工作表：首行为表头，其余为数据行（全部按文本读取）。
+ *
+ * 必须在 IO 线程调用。
+ */
+fun readExportSheet(input: InputStream): Pair<List<String>, List<List<String>>> {
+    val workbook = Workbook.getWorkbook(input)
+    try {
+        val sheet = workbook.getSheet(0)
+        val rows = (0 until sheet.rows).map { row ->
+            sheet.getRow(row).map { it.contents.orEmpty() }
+        }
+        return rows.firstOrNull().orEmpty() to rows.drop(1)
+    } finally {
+        workbook.close()
+    }
 }
 
 /**

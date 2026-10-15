@@ -69,4 +69,5 @@
 - [x] 移除蒲公英更新检查与 rxdownload4
 - [x] 固定 debug 签名（app/debug.keystore），CI 与 Release 校验证书指纹
 - [x] 单元测试：版本比较、资源选择、SHA256SUMS 与 Release 解析、更新日志精简
+- [x] 新增「导入记录」：读回导出的 .xls（兼容 v1.2.x 起的表头），设备缺失时补齐、记录按秒去重，供旧版卸载重装后恢复数据
 - [ ] CI 构建通过

@@ -13,6 +13,8 @@ import android.os.Looper
 import android.provider.Settings
 import android.util.Log
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -128,6 +130,10 @@ fun BtLoggerApp(
         Unit
     }
 
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let(viewModel::importFromExcel)
+    }
+
     LaunchedEffect(viewModel) {
         viewModel.events.collect { event ->
             when (event) {
@@ -198,6 +204,10 @@ fun BtLoggerApp(
                 onOpenBluetoothSettings = openBluetoothSettings,
                 onExportDevice = { viewModel.exportSelectedDevice() },
                 onExportAll = { viewModel.exportAll(context.getString(R.string.export_all_name)) },
+                onImport = {
+                    runCatching { importLauncher.launch(IMPORT_MIME_TYPES) }
+                        .onFailure { Log.e(TAG, "[BtLoggerApp] import -> no document picker", it) }
+                },
                 onClearAll = { pendingConfirm = PendingConfirm.ClearAll },
                 onCheckUpdate = { viewModel.checkUpdate(manual = true) },
                 onClearDeviceRecords = { device -> pendingConfirm = PendingConfirm.ClearDeviceRecords(device) }
@@ -310,6 +320,7 @@ private fun AppTopBar(
     onOpenBluetoothSettings: () -> Unit,
     onExportDevice: () -> Unit,
     onExportAll: () -> Unit,
+    onImport: () -> Unit,
     onClearAll: () -> Unit,
     onCheckUpdate: () -> Unit,
     onClearDeviceRecords: (DeviceInfo) -> Unit
@@ -409,6 +420,14 @@ private fun AppTopBar(
                         onClick = {
                             onShowOverflowChange(false)
                             onExportAll()
+                        }
+                    )
+                    MenuItem(
+                        text = stringResource(id = R.string.action_import),
+                        icon = LineIcons.Import,
+                        onClick = {
+                            onShowOverflowChange(false)
+                            onImport()
                         }
                     )
                     MenuItem(
@@ -557,6 +576,11 @@ private fun shareExportedFile(context: Context, file: File): Boolean {
         false
     }
 }
+
+/**
+ * jxl 导出的 .xls；部分文件管理器/聊天应用转存后 MIME 会变成 octet-stream
+ */
+private val IMPORT_MIME_TYPES = arrayOf(EXCEL_MIME_TYPE, "application/octet-stream")
 
 /**
  * 拉起系统安装器；未授权“安装未知应用”时先跳转授权页，返回后由用户再点一次“安装”。

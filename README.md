@@ -154,7 +154,7 @@ app/src/main/java/com/xingkeqi/btlogger/
 
   应用内更新直接读取 GitHub 最新 Release（不含草稿与预发布），按当前安装包类型选择 debug 或 release APK，并用 `SHA256SUMS.txt` 校验。发布新版本后，已安装的用户打开应用即可收到提示。
 
-  Android 只允许同签名的包覆盖安装。debug 包固定使用仓库内的 `app/debug.keystore`（标准 debug 口令）签名，CI 与 Release 都会校验证书指纹，保证每次发布都能在应用内直接升级。v1.4.0 及更早的版本每次构建签名随机，从这些版本升级时需要先导出数据、卸载后重装一次，应用会检测到签名不同并给出提示。
+  Android 只允许同签名的包覆盖安装。debug 包固定使用仓库内的 `app/debug.keystore`（标准 debug 口令）签名，CI 与 Release 都会校验证书指纹，保证每次发布都能在应用内直接升级。v1.4.0 及更早的版本每次构建签名随机，从这些版本升级需要卸载重装一次：先在旧版菜单「导出全部记录」保存 .xls，卸载后安装新版本，再用菜单「导入记录」选择该文件恢复（按表头读取，重复导入不会产生重复记录）。
 
   正式签名需要在仓库 Secrets 中配置 `KEYSTORE_FILE`（keystore 的 base64）、`KEYSTORE_PASSWORD`、`KEY_ALIAS`、`KEY_PASSWORD`。未配置时只发布 debug APK，不会让发布失败。
 
