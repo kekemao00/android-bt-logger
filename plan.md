@@ -71,3 +71,10 @@
 - [x] 单元测试：版本比较、资源选择、SHA256SUMS 与 Release 解析、更新日志精简
 - [x] 新增「导入记录」：读回导出的 .xls（兼容 v1.2.x 起的表头），设备缺失时补齐、记录按秒去重，供旧版卸载重装后恢复数据
 - [ ] CI 构建通过
+
+# 16 KB 页面对齐修复
+
+- [x] 定位 v1.5.0 警告根因：`libandroidx.graphics.path.so` 的 ELF 段已按 16 KB 对齐，但 AGP 8.2.2 打包时只按 4 KB 做 zip 对齐
+- [x] 升级 AGP 8.2.2 → 8.5.2（Gradle 8.5 → 8.7），由打包流程按 16 KB 对齐未压缩的 .so
+- [x] CI 与 Release 流水线增加 `zipalign -c -P 16` 校验，未对齐时阻断发布
+- [x] CI 构建通过（debug APK 通过 16 KB 对齐校验）

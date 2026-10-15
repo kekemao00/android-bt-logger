@@ -127,6 +127,24 @@ jobs:
             exit 1
           fi
 
+      # Why: Android 15+ 的 16 KB 页面设备要求 APK 内未压缩的 .so 按 16 KB 对齐，
+      # 否则安装后弹出兼容性警告（v1.5.0 即因 AGP 8.2.2 只按 4 KB 对齐而触发）
+      - name: Verify 16 KB page alignment
+        env:
+          DEBUG_APK: ${{ steps.locate.outputs.DEBUG_APK }}
+          RELEASE_APK: ${{ steps.locate.outputs.RELEASE_APK }}
+        run: |
+          set -euo pipefail
+          ZIPALIGN="$(find "$ANDROID_HOME/build-tools" -name zipalign | sort -V | tail -n 1)"
+          for APK in "$DEBUG_APK" "$RELEASE_APK"; do
+            if ! "$ZIPALIGN" -c -P 16 -v 4 "$APK" > zipalign.log; then
+              grep -v ' (OK' zipalign.log || true
+              echo "::error::$APK 未通过 16 KB 页面对齐校验"
+              exit 1
+            fi
+            echo "$APK 通过 16 KB 页面对齐校验"
+          done
+
       # Why: apksigner 生成 v2+ 签名（targetSdk 30+ 必需）；密码通过 env: 读取，
       # 避免出现在进程命令行中。
       - name: Sign release APK
