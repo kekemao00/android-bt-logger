@@ -64,6 +64,28 @@ class BatteryAnalyticsTest {
     }
 
     @Test
+    fun splitBatterySessions_closesSessionWhenDisconnectWasMissed() {
+        val sessions = splitBatterySessions(
+            listOf(
+                connect(t0, headset = 100),
+                sample(t0 + hour, headset = 90),
+                // 断开没记下来（服务被杀），几小时后又连上
+                connect(t0 + 5 * hour, headset = 100),
+                sample(t0 + 6 * hour, headset = 90),
+                disconnect(t0 + 7 * hour, headset = 80)
+            ),
+            now = t0 + 8 * hour
+        )
+
+        assertEquals(2, sessions.size)
+        assertTrue(sessions[0].ended)
+        assertEquals(t0 + hour, sessions[0].endTime)
+        assertEquals(listOf(100, 90), sessions[0].headset.map { it.level })
+        assertEquals(t0 + 5 * hour, sessions[1].startTime)
+        assertEquals(listOf(100, 90, 80), sessions[1].headset.map { it.level })
+    }
+
+    @Test
     fun splitBatterySessions_dropsUnknownLevels() {
         val session = splitBatterySessions(
             listOf(connect(t0, headset = null), sample(t0 + minute, headset = 101), sample(t0 + 2 * minute, headset = 60))
@@ -102,8 +124,36 @@ class BatteryAnalyticsTest {
 
         assertEquals(30, stats.consumed)
         assertEquals(2 * hour, stats.trackedMillis)
-        assertEquals(15.0, stats.ratePerHour!!, 1e-9)
+        // 第二段的测速区间从第一次跳档（90%）开始，之后只有回升，不计下降也不计时长
+        assertEquals(20.0, stats.ratePerHour!!, 1e-9)
         assertEquals(95, stats.endLevel)
+    }
+
+    @Test
+    fun computeDrainStats_measuresBetweenLevelChanges() {
+        // 连接时停在 100% 这一档的中间：整段计算会得到 30% / 2.5h = 12%/h，跳档之间才是真实的 10%/h
+        val midStep = computeDrainStats(
+            listOf(listOf(100 to 0, 90 to 30, 80 to 90, 70 to 150).map { (level, at) -> LevelPoint(t0 + at * minute, level) })
+        )!!
+        assertEquals(10.0, midStep.ratePerHour!!, 1e-9)
+        assertEquals(30, midStep.consumed)
+        assertEquals(150 * minute, midStep.trackedMillis)
+
+        // 最后一次跳档之后到断开没有下降，也不计入
+        val tail = computeDrainStats(
+            listOf(listOf(100 to 0, 90 to 60, 80 to 120, 80 to 200).map { (level, at) -> LevelPoint(t0 + at * minute, level) })
+        )!!
+        assertEquals(10.0, tail.ratePerHour!!, 1e-9)
+
+        // 区间内的回升（充电）不计下降也不计时长
+        val charging = computeDrainStats(
+            listOf(listOf(100 to 0, 90 to 60, 95 to 70, 85 to 130, 75 to 190).map { (level, at) -> LevelPoint(t0 + at * minute, level) })
+        )!!
+        assertEquals(10.0, charging.ratePerHour!!, 1e-9)
+
+        // 只有一次跳档时退回整段
+        val single = computeDrainStats(listOf(listOf(LevelPoint(t0, 100), LevelPoint(t0 + 40 * minute, 90))))!!
+        assertEquals(15.0, single.ratePerHour!!, 1e-9)
     }
 
     @Test
@@ -127,6 +177,10 @@ class BatteryAnalyticsTest {
         val clipped = session.clippedFrom(t0 + hour)!!
         assertEquals(t0 + hour, clipped.startTime)
         assertEquals(t0, clipped.connectedAt)
+        assertEquals(t0, clipped.carriedSince)
+        // 跳档前那一档从连接时就开始了，而不是从范围起点开始
+        assertEquals(2 * hour, levelStepAt(clipped.headset, 1, clipped.carriedSince)!!.millis)
+        assertEquals(hour, levelStepAt(clipped.headset, 1)!!.millis)
         assertEquals(listOf(LevelPoint(t0 + hour, 100), LevelPoint(t0 + 2 * hour, 70)), clipped.headset)
 
         assertNull(session.clippedFrom(t0 + 3 * hour))
@@ -161,6 +215,14 @@ class BatteryAnalyticsTest {
         val empty = buildBatteryOverview(emptyList(), BatteryRange.ALL, now)
         assertFalse(empty.hasData)
         assertNull(empty.stats)
+
+        // 横轴不为没上报电量的连接留空白
+        val leadingCarKit = buildBatteryOverview(
+            listOf(connect(t0, headset = null), disconnect(t0 + hour)) + readings.drop(2),
+            BatteryRange.ALL,
+            now
+        )
+        assertEquals(t0 + 30 * hour, leadingCarKit.windowStart)
     }
 
     @Test
@@ -211,9 +273,9 @@ class BatteryAnalyticsTest {
                 connect(t0, headset = 100),
                 sample(t0 + hour, headset = 80),
                 disconnect(t0 + 2 * hour, headset = 60),
-                // 测完后短暂连接一次，不应挤掉上面的测试
+                // 测完后又连了一会儿、电量没掉，不应挤掉上面的测试
                 connect(t0 + 5 * hour, headset = 100),
-                disconnect(t0 + 5 * hour + minute, headset = 100)
+                disconnect(t0 + 5 * hour + 20 * minute, headset = 100)
             )
         )
         val car = DeviceBatteryHistory(

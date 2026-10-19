@@ -32,15 +32,17 @@ data class LevelPoint(val timestamp: Long, val level: Int)
  * 耳机电量只在变化时记录，最后一个电量一直有效到 [endTime]：已断开时是断开时间，
  * 仍在连接中时是计算时的当前时间（未提供当前时间则为最后一条记录的时间）。
  *
- * @param ended 是否已断开
+ * @param ended 是否已断开（连接记录缺少对应的断开、被下一次连接截断时也视为已结束）
  * @param connectedAt 实际连接时间；按时间范围裁剪后 [startTime] 是范围起点，这里仍保留原值
+ * @param carriedSince 按时间范围裁剪时，起点沿用的电量实际开始的时间；未裁剪时为 null
  */
 data class BatterySession(
     val startTime: Long,
     val endTime: Long,
     val ended: Boolean,
     val readings: List<BatteryReading>,
-    val connectedAt: Long = startTime
+    val connectedAt: Long = startTime,
+    val carriedSince: Long? = null
 ) {
     /** 耳机电量实测点，按时间升序 */
     val headset: List<LevelPoint> = readings.mapNotNull { reading ->
@@ -51,12 +53,14 @@ data class BatterySession(
 /**
  * 掉电统计。
  *
- * 平均掉电速率 = 累计消耗 ÷ 记录时长：累计消耗只累加下降（中途回升不抵扣），
- * 记录时长是各段首尾采样的时间差之和，不含断开期间。记录不足 [MIN_RATE_WINDOW_MILLIS]
- * 或尚未掉电时速率为 null，界面显示“数据不足”，避免开头几分钟给出离谱的估算。
+ * 平均掉电速率 = 测速区间内的下降 ÷ 测速区间时长，见 [computeDrainStats]。
+ * 测速区间不足 [MIN_RATE_WINDOW_MILLIS] 或没有下降时速率为 null，界面显示“数据不足”，
+ * 避免开头几分钟给出离谱的估算。
  *
- * @param consumed 累计消耗的百分点
- * @param trackedMillis 参与计算的记录时长
+ * @param consumed 累计消耗的百分点（全部下降之和，中途回升不抵扣）
+ * @param trackedMillis 记录时长：各段首尾实测点的时间差之和，不含断开期间
+ * @param rateDrop 测速区间内的下降百分点
+ * @param rateWindowMillis 测速区间时长
  */
 data class DrainStats(
     val startLevel: Int,
@@ -65,12 +69,14 @@ data class DrainStats(
     val endTime: Long,
     val consumed: Int,
     val trackedMillis: Long,
-    val sampleCount: Int
+    val sampleCount: Int,
+    val rateDrop: Int = consumed,
+    val rateWindowMillis: Long = trackedMillis
 ) {
     /** 平均掉电速率（%/小时） */
     val ratePerHour: Double? =
-        if (trackedMillis >= MIN_RATE_WINDOW_MILLIS && consumed > 0) {
-            consumed * HOUR_MILLIS.toDouble() / trackedMillis
+        if (rateWindowMillis >= MIN_RATE_WINDOW_MILLIS && rateDrop > 0) {
+            rateDrop * HOUR_MILLIS.toDouble() / rateWindowMillis
         } else {
             null
         }
@@ -129,7 +135,9 @@ data class BatteryOverview(
 /**
  * 按时间顺序切分连接。
  *
- * - 连续多条“已连接”（服务重建时补记）视为同一次连接，与列表“已连接时长”的口径一致；
+ * - 紧挨着的多条“已连接”（广播与服务启动同步几乎同时写入）视为同一次连接；与上一条记录相隔超过
+ *   [SESSION_MERGE_WINDOW_MILLIS] 的“已连接”说明上一次断开没记下来（如服务被系统杀掉），上一段到此结束，
+ *   否则下一次连接会并进上一段，跨过整段断开期间计算掉电；
  * - 没有对应连接记录的“已断开”不构成一次连接；
  * - 连接与断开之间的任意事件都是采样点，断开记录本身带有断开时的电量，作为这一段的终点。
  *
@@ -142,6 +150,18 @@ fun splitBatterySessions(readings: List<BatteryReading>, now: Long? = null): Lis
     readings.sortedBy { it.timestamp }.forEach { reading ->
         when (reading.kind) {
             ReadingKind.SESSION_START, ReadingKind.SAMPLE -> {
+                val previous = current
+                if (reading.kind == ReadingKind.SESSION_START && previous != null &&
+                    reading.timestamp - previous.last().timestamp > SESSION_MERGE_WINDOW_MILLIS
+                ) {
+                    sessions += BatterySession(
+                        startTime = previous.first().timestamp,
+                        endTime = previous.last().timestamp,
+                        ended = true,
+                        readings = previous.toList()
+                    )
+                    current = null
+                }
                 val open = current ?: mutableListOf<BatteryReading>().also { current = it }
                 open += reading
             }
@@ -173,6 +193,14 @@ fun splitBatterySessions(readings: List<BatteryReading>, now: Long? = null): Lis
 /**
  * 计算若干段曲线合在一起的掉电统计；各段之间（断开期间）不计时、不计消耗。
  *
+ * 测速区间：一段里有至少两次电量变化、且首末两次变化相隔不少于 [MIN_RATE_WINDOW_MILLIS] 时，
+ * 只取“第一次变化 → 最后一次变化”；否则取整段。区间内电量回升（充电）的那几段既不计下降也不计时长。
+ *
+ * Why: 耳机多为 10% 一档上报，连接时刻（或时间范围的起点）往往落在某一档的中间，
+ * 用整段计算会把这一档的 10% 记在不到一档的时间上，速率偏高；最后一次变化之后到断开的时间又没有下降，
+ * 速率偏低。两台相同的耳机只因连接时机不同就会算出不同的续航。从一次跳档量到另一次跳档，
+ * 两端都落在档位边界上，才是这段时间真实的掉电速度。
+ *
  * @return 没有任何实测点时为 null
  */
 fun computeDrainStats(segments: List<List<LevelPoint>>): DrainStats? {
@@ -180,11 +208,29 @@ fun computeDrainStats(segments: List<List<LevelPoint>>): DrainStats? {
     if (nonEmpty.isEmpty()) return null
     var consumed = 0
     var tracked = 0L
+    var rateDrop = 0
+    var rateWindow = 0L
     nonEmpty.forEach { points ->
         points.zipWithNext { previous, next ->
             consumed += (previous.level - next.level).coerceAtLeast(0)
         }
         tracked += points.last().timestamp - points.first().timestamp
+
+        val changes = points.indices.filter { it > 0 && points[it].level != points[it - 1].level }
+        val window = if (
+            changes.size >= 2 &&
+            points[changes.last()].timestamp - points[changes.first()].timestamp >= MIN_RATE_WINDOW_MILLIS
+        ) {
+            points.subList(changes.first(), changes.last() + 1)
+        } else {
+            points
+        }
+        window.zipWithNext { previous, next ->
+            if (next.level <= previous.level) {
+                rateDrop += previous.level - next.level
+                rateWindow += next.timestamp - previous.timestamp
+            }
+        }
     }
     val first = nonEmpty.first().first()
     val last = nonEmpty.last().last()
@@ -195,7 +241,9 @@ fun computeDrainStats(segments: List<List<LevelPoint>>): DrainStats? {
         endTime = last.timestamp,
         consumed = consumed,
         trackedMillis = tracked,
-        sampleCount = nonEmpty.sumOf { it.size }
+        sampleCount = nonEmpty.sumOf { it.size },
+        rateDrop = rateDrop,
+        rateWindowMillis = rateWindow
     )
 }
 
@@ -210,7 +258,12 @@ fun BatterySession.clippedFrom(since: Long): BatterySession? {
     if (startTime >= since) return this
     val before = readings.filter { it.timestamp < since }
     val after = readings.filter { it.timestamp >= since }
-    val carriedHeadset = before.lastOrNull { it.headsetLevel?.let(::isValidLevel) == true }?.headsetLevel
+    val beforeLevels = before.filter { it.headsetLevel?.let(::isValidLevel) == true }
+    val carriedHeadset = beforeLevels.lastOrNull()?.headsetLevel
+    // 沿用的电量从哪一刻开始：往前找到同一档连续记录的第一条，游标读数“上一档持续”据此计算
+    val carriedSince = carriedHeadset?.let { level ->
+        beforeLevels.asReversed().takeWhile { it.headsetLevel == level }.lastOrNull()?.timestamp
+    }
     val carried = BatteryReading(
         timestamp = since,
         kind = ReadingKind.SAMPLE,
@@ -218,7 +271,7 @@ fun BatterySession.clippedFrom(since: Long): BatterySession? {
         volume = before.lastOrNull()?.volume ?: 0,
         isPlaying = before.lastOrNull()?.isPlaying ?: false
     )
-    return copy(startTime = since, readings = listOf(carried) + after)
+    return copy(startTime = since, readings = listOf(carried) + after, carriedSince = carriedSince)
 }
 
 /**
@@ -234,12 +287,14 @@ fun buildBatteryOverview(readings: List<BatteryReading>, range: BatteryRange, no
         BatteryRange.ALL -> sessions
     }
     if (selected.isEmpty()) return BatteryOverview.empty(range)
+    // 横轴只覆盖有耳机电量的连接，前后没上报电量的连接不在图上留出空白
+    val withData = selected.filter { it.headset.isNotEmpty() }.ifEmpty { selected }
     return BatteryOverview(
         range = range,
         sessions = selected,
         stats = computeDrainStats(selected.map { it.headset }),
-        windowStart = selected.first().startTime,
-        windowEnd = selected.last().endTime,
+        windowStart = withData.first().startTime,
+        windowEnd = withData.last().endTime,
         ongoing = !selected.last().ended
     )
 }
@@ -272,16 +327,18 @@ data class ComparisonCandidate(
 }
 
 /**
- * 选出用于对比的那一次连接：最近一次耳机电量有至少两个点、且跨度不少于 [MIN_RATE_WINDOW_MILLIS] 的连接；
- * 没有时退回最近一次有耳机电量的连接。
+ * 选出用于对比的那一次连接，依次取最近一次：
+ * 能算出掉电速率的连接 → 耳机电量跨度不少于 [MIN_RATE_WINDOW_MILLIS] 的连接 → 有耳机电量的连接。
  *
- * Why: 测完一轮后耳机常会再短暂连一下，只取“最近一次”会把真正的测试挤掉。
+ * Why: 测完一轮后耳机常会再连一会儿（哪怕十几分钟、电量没掉），只取“最近一次”会把真正的测试挤掉。
  */
 fun pickComparisonSession(sessions: List<BatterySession>): BatterySession? =
-    sessions.lastOrNull { session ->
-        session.headset.size >= 2 &&
-            session.headset.last().timestamp - session.headset.first().timestamp >= MIN_RATE_WINDOW_MILLIS
-    } ?: sessions.lastOrNull { it.headset.isNotEmpty() }
+    sessions.lastOrNull { computeDrainStats(listOf(it.headset))?.ratePerHour != null }
+        ?: sessions.lastOrNull { session ->
+            session.headset.size >= 2 &&
+                session.headset.last().timestamp - session.headset.first().timestamp >= MIN_RATE_WINDOW_MILLIS
+        }
+        ?: sessions.lastOrNull { it.headset.isNotEmpty() }
 
 /**
  * 多设备对比候选，按最近一次对比连接的开始时间倒序（最近测试的在前）。
@@ -356,20 +413,25 @@ data class LevelStep(val delta: Int, val millis: Long)
  * 游标读数用：耳机多为 10% 一档上报，“这一档用了多久”比相邻两点的时间差更能说明掉电快慢。
  *
  * @param points 按时间升序；平台中段可以已被 [compressPlateaus] 去掉
+ * @param firstRunStart 首个点所在那一档实际开始的时间（按时间范围裁剪时首点是沿用的电量，见 [BatterySession.carriedSince]）
  * @return 首个点或下标越界时为 null
  */
-fun levelStepAt(points: List<LevelPoint>, index: Int): LevelStep? {
+fun levelStepAt(points: List<LevelPoint>, index: Int, firstRunStart: Long? = null): LevelStep? {
     if (index !in 1..points.lastIndex) return null
     val current = points[index]
     val previous = points[index - 1]
     var runStart = index - 1
     while (runStart > 0 && points[runStart - 1].level == previous.level) runStart--
-    return LevelStep(delta = current.level - previous.level, millis = current.timestamp - points[runStart].timestamp)
+    val since = if (runStart == 0 && firstRunStart != null) minOf(firstRunStart, points[0].timestamp) else points[runStart].timestamp
+    return LevelStep(delta = current.level - previous.level, millis = current.timestamp - since)
 }
 
 fun isValidLevel(level: Int): Boolean = level in 0..FULL_LEVEL
 
 const val MIN_RATE_WINDOW_MILLIS = 10 * 60_000L
+
+/** 相隔不超过它的两条“已连接”视为同一次连接（广播与服务启动同步几乎同时写入） */
+const val SESSION_MERGE_WINDOW_MILLIS = 2 * 60_000L
 private const val HOUR_MILLIS = 3_600_000L
 private const val DAY_MILLIS = 24 * HOUR_MILLIS
 private const val FULL_LEVEL = 100

@@ -54,8 +54,9 @@ class BatteryExportTest {
         assertEquals(100, session.startLevel)
         assertEquals(80, session.endLevel)
         assertEquals(20, session.consumed)
-        assertEquals(17.1, session.ratePerHour!!, 1e-9)
-        assertEquals(5.8, session.fullRuntimeHours!!, 1e-9)
+        // 测速区间：90%（30 分）→ 80%（60 分）
+        assertEquals(20.0, session.ratePerHour!!, 1e-9)
+        assertEquals(5.0, session.fullRuntimeHours!!, 1e-9)
         assertEquals(5, session.sampleCount)
 
         assertEquals(listOf(0.0, 30.0, 40.0, 60.0, 70.0), export.samples.map { it.minutesSinceConnect })
@@ -74,7 +75,7 @@ class BatteryExportTest {
                 workbook.sheetNames.toList()
             )
             val stats = workbook.getSheet("电量统计")
-            assertEquals("17.1", stats.getCell(9, 1).contents)
+            assertEquals("20", stats.getCell(9, 1).contents)
         } finally {
             workbook.close()
         }
