@@ -16,7 +16,14 @@ object RecordEventType {
     const val DISCONNECTED = "DISCONNECTED"
     const val CODEC_CHANGED = "CODEC_CHANGED"
     const val BATTERY_CHANGED = "BATTERY_CHANGED"
+
+    /** 定时采样：耳机电量未变化时按设置的间隔补记一条，保证曲线连续、能看出记录是否中断 */
+    const val BATTERY_SAMPLE = "BATTERY_SAMPLE"
 }
+
+/** 电量更新与定时采样都是“电量记录”，筛选、导出与曲线一并处理 */
+fun isBatteryEvent(eventType: String): Boolean =
+    eventType == RecordEventType.BATTERY_CHANGED || eventType == RecordEventType.BATTERY_SAMPLE
 
 data class DeviceInfo(
     val mac: String = "",
