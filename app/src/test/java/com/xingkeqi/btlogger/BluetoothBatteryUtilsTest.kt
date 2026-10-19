@@ -31,10 +31,17 @@ class BluetoothBatteryUtilsTest {
     fun parseVendorBatteryLevel_parsesXEventCurrentAndMax() {
         val level = BluetoothBatteryUtils.parseVendorBatteryLevel(
             command = "+XEVENT",
-            args = listOf("BATTERY", "3", "6")
+            args = listOf("BATTERY", "3", "6", "0", "0")
         )
 
-        assertEquals(50, level)
+        // 6 档、档位从 0 起算：3 / (6 - 1) = 60%，与系统换算一致
+        assertEquals(60, level)
+    }
+
+    @Test
+    fun parseVendorBatteryLevel_rejectsInvalidXEventLevels() {
+        assertNull(BluetoothBatteryUtils.parseVendorBatteryLevel(command = "+XEVENT", args = listOf("BATTERY", "7", "6")))
+        assertNull(BluetoothBatteryUtils.parseVendorBatteryLevel(command = "+XEVENT", args = listOf("BATTERY", "1", "1")))
     }
 
     @Test

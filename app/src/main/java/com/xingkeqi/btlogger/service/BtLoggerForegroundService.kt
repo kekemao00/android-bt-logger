@@ -195,7 +195,7 @@ class BtLoggerForegroundService : Service() {
             addCategory(vendorEventCategory(BluetoothAssignedNumbers.PLANTRONICS))
         }
         registerReceiver(btReceiver, intentFilter)
-        Log.i(tag, "onCreate: 已注册蓝牙与耳机电量广播接收器")
+        Log.i(tag, "[BtLoggerForegroundService] onCreate -> receiver registered: vendorCategories=APPLE,PLANTRONICS")
         syncAlreadyConnectedDevices()
     }
 
