@@ -24,6 +24,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -93,7 +94,14 @@ fun BatteryCompareScreen(
     modifier: Modifier = Modifier
 ) {
     if (state.loading) {
-        Box(modifier = modifier.fillMaxSize())
+        Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(20.dp),
+                color = BtTheme.colors.ink,
+                strokeWidth = 1.75.dp,
+                trackColor = BtTheme.colors.surface3
+            )
+        }
         return
     }
     if (state.candidates.isEmpty()) {
@@ -110,11 +118,12 @@ fun BatteryCompareScreen(
     val relative = state.alignment == CompareAlignment.RELATIVE
     val chartState = rememberBatteryChartState(state.alignment)
     val selected = state.selected
-    val series = remember(selected, state.slots, relative, colors) {
+    val unknownDevice = stringResource(id = R.string.unknown_device)
+    val series = remember(selected, state.slots, relative, colors, unknownDevice) {
         selected.map { candidate ->
             ChartSeries(
                 key = candidate.key,
-                label = candidate.name,
+                label = candidate.name.ifBlank { unknownDevice },
                 color = colors.chartSeries(state.slots[candidate.key] ?: 0),
                 segments = listOf(compressPlateaus(if (relative) candidate.relativeHeadset else candidate.session.headset)),
                 holdUntil = listOf(if (relative) candidate.relativeEnd else candidate.session.endTime)
@@ -216,7 +225,7 @@ private fun CompareChartCard(
         ) {
             if (cursorTime != null && cursorLevel != null) {
                 Text(
-                    text = "$cursorLevel%",
+                    text = stringResource(id = R.string.battery_percent, cursorLevel),
                     style = MonoTextStyle.copy(fontSize = 22.sp, lineHeight = 26.sp),
                     color = colors.ink
                 )
@@ -231,7 +240,7 @@ private fun CompareChartCard(
                     )
                     Text(
                         text = if (relative) {
-                            "+" + getCompactDurationString(cursorTime)
+                            stringResource(id = R.string.compare_cursor_elapsed, getCompactDurationString(cursorTime))
                         } else {
                             TimeUtils.millis2String(cursorTime, "MM-dd HH:mm:ss")
                         },
@@ -380,9 +389,10 @@ private fun CompareTable(
                         modifier = Modifier.weight(1f)
                     )
                     if (showCursor) {
+                        val value = cursorValueOf(candidate)?.let { stringResource(id = R.string.battery_percent, it) }
+                            ?: stringResource(id = R.string.placeholder_dash)
                         Text(
-                            text = stringResource(id = R.string.compare_cursor) + " " +
-                                (cursorValueOf(candidate)?.let { "$it%" } ?: stringResource(id = R.string.placeholder_dash)),
+                            text = stringResource(id = R.string.compare_cursor_value, value),
                             style = MonoTextStyle,
                             color = colors.ink2
                         )

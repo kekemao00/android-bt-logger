@@ -118,6 +118,8 @@
     <string name="battery_cursor_step">较上一档 %1$+d%% · 上一档持续 %2$s</string>
     <string name="battery_cursor_hold">本档已持续 %1$s</string>
     <string name="battery_cursor_first">本段首个电量</string>
+    <string name="battery_cursor_window_start">范围起点，电量沿用此前的记录</string>
+    <string name="battery_percent">%1$d%%</string>
     <string name="battery_stat_levels">起止电量</string>
     <string name="battery_stat_levels_value">%1$d%% → %2$d%%</string>
     <string name="battery_stat_duration">记录时长</string>
@@ -138,11 +140,12 @@
     <string name="compare_limit">最多同时对比 %1$d 台</string>
     <string name="compare_table_caption">续航对比 · 按满电续航排序</string>
     <string name="compare_session_start">%1$s 开始</string>
-    <string name="compare_cursor">游标处</string>
-    <string name="compare_none_selected">选择上方的耳机查看曲线</string>
+    <string name="compare_cursor_value">游标处 %1$s</string>
+    <string name="compare_cursor_elapsed">+%1$s</string>
+    <string name="compare_none_selected">选择下方的耳机查看曲线</string>
     <string name="compare_empty_title">暂无可对比的耳机</string>
     <string name="compare_empty_body">耳机连接并上报电量后会出现在这里。</string>
-    <string name="compare_note">每台耳机取最近一次有效连接（耳机电量记录跨度不少于 10 分钟）。按开始对齐时，以这次连接的首个电量记录为起点。</string>
+    <string name="compare_note">每台耳机取最近一次能算出掉电速率的连接（10 分钟以上且电量有下降），没有时取最近一次有电量的连接。按开始对齐时，以这次连接的首个电量记录为起点。</string>
 
     <!-- 固定音量 -->
     <string name="volume_dialog_title">固定连接音量</string>

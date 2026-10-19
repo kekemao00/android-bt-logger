@@ -1,8 +1,10 @@
 package com.xingkeqi.btlogger
 
 import com.xingkeqi.btlogger.domain.battery.CurvePoint
+import com.xingkeqi.btlogger.domain.battery.clipX
 import com.xingkeqi.btlogger.domain.battery.monotoneCubicSegments
 import com.xingkeqi.btlogger.domain.battery.pointAt
+import com.xingkeqi.btlogger.domain.battery.splitAt
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -88,5 +90,40 @@ class MonotoneCurveTest {
         )
         assertEquals(2, deduped.size)
         assertEquals(90.0, deduped[0].end.y, 1e-9)
+    }
+
+    @Test
+    fun splitAt_keepsTheSameCurve() {
+        val segment = monotoneCubicSegments(steps)[1]
+        val (left, right) = segment.splitAt(0.3)
+
+        for (s in listOf(0.0, 0.25, 0.5, 0.75, 1.0)) {
+            assertPoint(segment.pointAt(0.3 * s), left.pointAt(s))
+            assertPoint(segment.pointAt(0.3 + 0.7 * s), right.pointAt(s))
+        }
+    }
+
+    @Test
+    fun clipX_keepsOnlyTheVisiblePartOfTheCurve() {
+        val segments = monotoneCubicSegments(steps)
+        val clipped = segments.clipX(12.0, 42.5)
+
+        // 跨左边界的 10..14、整段在内的 14..40 与 40..42、跨右边界的 42..43
+        assertEquals(4, clipped.size)
+        assertEquals(12.0, clipped.first().start.x, 1e-9)
+        assertEquals(42.5, clipped.last().end.x, 1e-9)
+        // 边界处的高度与原曲线一致，曲线本身没有变形
+        assertPoint(segments[1].pointAt(0.5), clipped.first().start)
+        assertPoint(segments[4].pointAt(0.5), clipped.last().end)
+        assertPoint(segments[1].pointAt(0.75), clipped.first().pointAt(0.5))
+        clipped.zipWithNext { a, b -> assertPoint(a.end, b.start) }
+
+        assertTrue(segments.clipX(200.0, 300.0).isEmpty())
+        assertEquals(segments, segments.clipX(-10.0, 1_000.0))
+    }
+
+    private fun assertPoint(expected: CurvePoint, actual: CurvePoint) {
+        assertEquals(expected.x, actual.x, 1e-9)
+        assertEquals(expected.y, actual.y, 1e-9)
     }
 }

@@ -86,6 +86,43 @@ fun CubicSegment.pointAt(t: Double): CurvePoint {
 }
 
 /**
+ * de Casteljau 在参数 [t] 处把一段贝塞尔分成前后两段，两段拼起来与原曲线完全重合
+ */
+fun CubicSegment.splitAt(t: Double): Pair<CubicSegment, CubicSegment> {
+    fun lerp(a: CurvePoint, b: CurvePoint) = CurvePoint(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t)
+    val p01 = lerp(start, control1)
+    val p12 = lerp(control1, control2)
+    val p23 = lerp(control2, end)
+    val p012 = lerp(p01, p12)
+    val p123 = lerp(p12, p23)
+    val middle = lerp(p012, p123)
+    return CubicSegment(start, p01, p012, middle) to CubicSegment(middle, p123, p23, end)
+}
+
+/**
+ * 只保留横坐标落在 [minX]..[maxX] 内的部分，跨边界的那一段在边界处切开。
+ *
+ * Why: 放大后可见范围外的点换算到屏幕坐标可能远到上百倍屏宽，整条路径交给绘制会白白光栅化屏幕外的部分，
+ * 坐标过大时还会损失精度。[monotoneCubicSegments] 的控制点在三等分处，x 随参数线性变化，
+ * 所以边界对应的参数可以直接按比例算出，切开后的曲线与原曲线一致。
+ *
+ * @receiver 按 x 升序首尾相接的若干段，如 [monotoneCubicSegments] 的结果
+ */
+fun List<CubicSegment>.clipX(minX: Double, maxX: Double): List<CubicSegment> = mapNotNull { segment ->
+    val x0 = segment.start.x
+    val width = segment.end.x - x0
+    if (segment.end.x < minX || x0 > maxX) return@mapNotNull null
+    if (width <= 0.0) return@mapNotNull segment
+    val tEnd = ((maxX - x0) / width).coerceAtMost(1.0)
+    val tStart = ((minX - x0) / width).coerceAtLeast(0.0)
+    if (tStart >= tEnd) return@mapNotNull null
+    var piece = if (tEnd < 1.0) segment.splitAt(tEnd).first else segment
+    // 前半段的参数已缩放到 0..tEnd，起点要换算到新参数上
+    if (tStart > 0.0) piece = piece.splitAt(tStart / tEnd).second
+    piece
+}
+
+/**
  * d3 的端点切线 `(3 * slope - neighbor) / 2`，再限制在 [0, 3 * slope] 内保证单调
  */
 private fun endpointTangent(slope: Double, neighborTangent: Double): Double {

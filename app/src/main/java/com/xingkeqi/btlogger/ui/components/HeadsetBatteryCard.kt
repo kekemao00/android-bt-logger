@@ -70,7 +70,12 @@ fun HeadsetBatteryCard(
 ) {
     val colors = BtTheme.colors
     val scope = rememberCoroutineScope()
-    val chartState = rememberBatteryChartState(deviceKey, overview.range)
+    // “本次连接”换成新的一次连接时也重置缩放与游标，否则会停在上一次连接的时间范围上
+    val chartState = rememberBatteryChartState(
+        deviceKey,
+        overview.range,
+        overview.sessions.lastOrNull()?.connectedAt.takeIf { overview.range == BatteryRange.LATEST_SESSION }
+    )
     val sessions = remember(overview) { overview.sessions.filter { it.headset.isNotEmpty() } }
     // 平台中段的重复点不影响曲线形状，去掉后游标只停在电量变化处与各段首尾
     val segments = remember(sessions) { sessions.map { compressPlateaus(it.headset) } }
@@ -137,6 +142,7 @@ fun HeadsetBatteryCard(
             cursorPoint = chartState.cursor?.point,
             segments = segments,
             sessionStarts = sessions.map { it.connectedAt },
+            carriedSince = sessions.map { it.carriedSince },
             latest = segments.last().last()
         )
         Spacer(modifier = Modifier.height(Dimens.spacingXs))
@@ -165,12 +171,15 @@ fun HeadsetBatteryCard(
 /**
  * 读数区固定高度放在曲线上方，不用浮层：手指在图上拖动时不会挡住数值，布局也不跳动。
  * 第一行是记录时间与连接后用时；第二行是相对上一档的变化，没有游标时显示操作提示。
+ *
+ * @param carriedSince 与 [segments] 一一对应，见 [com.xingkeqi.btlogger.domain.battery.BatterySession.carriedSince]
  */
 @Composable
 private fun BatteryReadout(
     cursorPoint: LevelPoint?,
     segments: List<List<LevelPoint>>,
     sessionStarts: List<Long>,
+    carriedSince: List<Long?>,
     latest: LevelPoint
 ) {
     val colors = BtTheme.colors
@@ -182,10 +191,13 @@ private fun BatteryReadout(
         TimeUtils.millis2String(point.timestamp, "MM-dd HH:mm:ss"),
         elapsed?.let { stringResource(id = R.string.battery_cursor_elapsed, getCompactDurationString(it)) }
     ).joinToString(" · ")
-    val detail = if (cursorPoint == null) {
-        stringResource(id = R.string.battery_chart_hint)
-    } else {
-        levelStepAt(segment, segment.indexOf(point))?.let {
+    val pointIndex = segment.indexOf(point)
+    val firstRunStart = carriedSince.getOrNull(segmentIndex)
+    val detail = when {
+        cursorPoint == null -> stringResource(id = R.string.battery_chart_hint)
+        // 裁剪出的首点不是真实记录，只是范围起点处沿用的电量
+        pointIndex == 0 && firstRunStart != null -> stringResource(id = R.string.battery_cursor_window_start)
+        else -> levelStepAt(segment, pointIndex, firstRunStart)?.let {
             if (it.delta == 0) {
                 stringResource(id = R.string.battery_cursor_hold, getCompactDurationString(it.millis))
             } else {
@@ -201,7 +213,7 @@ private fun BatteryReadout(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
-            text = "${point.level}%",
+            text = stringResource(id = R.string.battery_percent, point.level),
             style = MonoTextStyle.copy(fontSize = 26.sp, lineHeight = 30.sp),
             color = if (cursorPoint == null) colors.ink else colors.accent
         )
