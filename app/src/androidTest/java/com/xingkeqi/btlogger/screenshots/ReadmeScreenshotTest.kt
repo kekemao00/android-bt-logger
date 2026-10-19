@@ -4,19 +4,26 @@ import android.bluetooth.BluetoothDevice
 import android.graphics.Bitmap
 import android.os.SystemClock
 import android.util.Log
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.test.click
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasScrollToKeyAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToKey
+import androidx.compose.ui.test.performTouchInput
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.xingkeqi.btlogger.MainActivity
 import com.xingkeqi.btlogger.R
 import com.xingkeqi.btlogger.data.BtLoggerDatabase
+import com.xingkeqi.btlogger.data.DEVICE_BATTERY_LEVEL_UNKNOWN
 import com.xingkeqi.btlogger.data.Device
 import com.xingkeqi.btlogger.data.DeviceConnectionRecord
 import com.xingkeqi.btlogger.data.RecordEventType
@@ -32,7 +39,8 @@ import java.io.File
 private const val TAG = "ReadmeScreenshotTest"
 private const val STATE_CONNECTED = 2
 private const val STATE_DISCONNECTED = 0
-private const val MINUTE = 60_000L
+private const val SECOND = 1_000L
+private const val MINUTE = 60 * SECOND
 private const val HOUR = 60 * MINUTE
 private const val DAY = 24 * HOUR
 private const val UI_TIMEOUT_MILLIS = 15_000L
@@ -82,8 +90,20 @@ class ReadmeScreenshotTest {
             waitForText(context.getString(R.string.stat_connect_count))
             capture("device-detail")
 
+            // 把整张耳机电量卡片滚进屏幕，轻触曲线展示游标读数
+            composeRule.onNodeWithText(context.getString(R.string.battery_note)).performScrollTo()
+            tapChart(context.getString(R.string.battery_chart_description), fraction = 0.62f)
+            capture("battery-curve")
+
             composeRule.onNode(hasScrollToKeyAction()).performScrollToKey("filters")
             capture("device-history")
+
+            composeRule.onNodeWithContentDescription(context.getString(R.string.action_back)).performClick()
+            waitForText(PRIMARY_DEVICE_NAME)
+            composeRule.onNodeWithContentDescription(context.getString(R.string.action_compare)).performClick()
+            waitForText(context.getString(R.string.compare_table_caption))
+            tapChart(context.getString(R.string.compare_title), fraction = 0.4f)
+            capture("battery-compare")
 
             composeRule.onNodeWithContentDescription(context.getString(R.string.action_back)).performClick()
             waitForText(PRIMARY_DEVICE_NAME)
@@ -96,6 +116,16 @@ class ReadmeScreenshotTest {
         composeRule.waitUntil(UI_TIMEOUT_MILLIS) {
             composeRule.onAllNodes(hasText(text, substring = true)).fetchSemanticsNodes().isNotEmpty()
         }
+    }
+
+    /**
+     * 轻触曲线横向 [fraction] 处，游标吸附到最近的实测点。
+     * 对比页标题与顶栏按钮的无障碍描述相同，这里排除可点击的按钮，只匹配图表画布。
+     */
+    private fun tapChart(description: String, fraction: Float) {
+        composeRule.waitForIdle()
+        composeRule.onNode(hasContentDescription(description) and !hasClickAction())
+            .performTouchInput { click(Offset(width * fraction, height / 2f)) }
     }
 
     /**
@@ -113,30 +143,46 @@ class ReadmeScreenshotTest {
     }
 
     /**
-     * 写入三台示例设备：一台当前已连接、带多次连接与电量变化的耳机，两台已断开的设备
+     * 写入五台示例设备：三台耳机用于电量曲线与多机对比（其中一台当前已连接），车机与音箱不上报耳机电量。
+     * 耳机电量只在变化时落库、手机电量写未知，与前台服务的记录方式一致。
      */
     private fun seedSampleData(now: Long) = runBlocking {
         val database = BtLoggerDatabase.getDatabase(context)
         database.deviceWithRecordsDao().deleteAll()
 
         val buds = sampleDevice("3C:4D:BE:21:7A:10", PRIMARY_DEVICE_NAME, "5.3", BluetoothDevice.DEVICE_TYPE_DUAL, "LDAC")
+        val studio = sampleDevice("88:C9:E8:4A:19:6F", "Studio ANC", "5.2", BluetoothDevice.DEVICE_TYPE_DUAL, "AAC")
+        val neckband = sampleDevice("5C:FB:7C:63:0E:2A", "Sport Neckband", "5.0", BluetoothDevice.DEVICE_TYPE_CLASSIC, "AAC")
         val car = sampleDevice("00:1A:7D:DA:71:13", "车载蓝牙 CarKit", "5.0", BluetoothDevice.DEVICE_TYPE_CLASSIC, "SBC")
         val speaker = sampleDevice("F4:4E:FD:08:3B:52", "Soundbar Mini", "4.2", BluetoothDevice.DEVICE_TYPE_CLASSIC, "AAC")
-        listOf(buds, car, speaker).forEach { database.deviceDao().insert(it) }
+        val devices = listOf(buds, studio, neckband, car, speaker)
+        devices.forEach { database.deviceDao().insert(it) }
 
         val records = buildList {
-            // Buds Pro：过去三天的三段连接，以及当前仍在进行的一段
-            addSession(buds.mac, start = now - 3 * DAY, length = 3 * HOUR + 20 * MINUTE, phone = 96, headset = 100, codec = "AAC")
-            addSession(buds.mac, start = now - 2 * DAY + 2 * HOUR, length = 1 * HOUR + 45 * MINUTE, phone = 88, headset = 90, codec = "AAC")
-            addSession(buds.mac, start = now - 1 * DAY - 5 * HOUR, length = 2 * HOUR + 10 * MINUTE, phone = 79, headset = 100, codec = "LDAC")
-            addSession(buds.mac, start = now - 2 * HOUR - 17 * MINUTE, length = null, phone = 91, headset = 100, codec = "LDAC")
+            // Buds Pro：过去三天的三段连接，以及当前仍在进行的一段；10% 一档上报
+            addSession(now, buds.mac, start = now - 3 * DAY, length = 3 * HOUR + 20 * MINUTE,
+                drain = HeadsetDrain(100, 10, listOf(34, 36, 33, 35, 37)), codec = "AAC")
+            addSession(now, buds.mac, start = now - 2 * DAY + 2 * HOUR, length = 1 * HOUR + 45 * MINUTE,
+                drain = HeadsetDrain(90, 10, listOf(38, 35)), codec = "AAC")
+            addSession(now, buds.mac, start = now - 1 * DAY - 5 * HOUR, length = 2 * HOUR + 10 * MINUTE,
+                drain = HeadsetDrain(100, 10, listOf(36, 34, 37)), codec = "LDAC")
+            addSession(now, buds.mac, start = now - 2 * HOUR - 17 * MINUTE, length = null,
+                drain = HeadsetDrain(100, 10, listOf(33, 36, 34, 35)), codec = "LDAC")
 
-            // 车载：昨天两次通勤
-            addSession(car.mac, start = now - 1 * DAY - 10 * HOUR, length = 42 * MINUTE, phone = 67, headset = null, codec = "SBC")
-            addSession(car.mac, start = now - 1 * DAY + 8 * HOUR, length = 38 * MINUTE, phone = 54, headset = null, codec = "SBC")
+            // Studio ANC：头戴降噪，5% 一档、掉电慢
+            addSession(now, studio.mac, start = now - 3 * DAY + 4 * HOUR, length = 2 * HOUR + 30 * MINUTE,
+                drain = HeadsetDrain(85, 5, listOf(40, 42, 39)), codec = "AAC")
+            addSession(now, studio.mac, start = now - 1 * DAY + 1 * HOUR, length = 5 * HOUR + 40 * MINUTE,
+                drain = HeadsetDrain(100, 5, listOf(41, 38, 44, 40, 43, 39, 42, 41)), codec = "AAC")
 
-            // 音箱：三天前一次
-            addSession(speaker.mac, start = now - 3 * DAY - 6 * HOUR, length = 1 * HOUR + 5 * MINUTE, phone = 72, headset = 60, codec = "AAC")
+            // Sport Neckband：运动颈挂，掉电快
+            addSession(now, neckband.mac, start = now - 2 * DAY - 4 * HOUR, length = 3 * HOUR + 5 * MINUTE,
+                drain = HeadsetDrain(100, 10, listOf(26, 24, 27, 25, 23, 26)), codec = "AAC")
+
+            // 车载：昨天两次通勤；音箱：三天前一次，二者都不上报耳机电量
+            addSession(now, car.mac, start = now - 1 * DAY - 10 * HOUR, length = 42 * MINUTE, drain = null, codec = "SBC")
+            addSession(now, car.mac, start = now - 1 * DAY + 8 * HOUR, length = 38 * MINUTE, drain = null, codec = "SBC")
+            addSession(now, speaker.mac, start = now - 3 * DAY - 6 * HOUR, length = 1 * HOUR + 5 * MINUTE, drain = null, codec = "AAC")
         }
         records.forEach { database.connectionRecordDao().insert(it) }
         // 打开固定连接音量，弹框截图里展示开启后的状态
@@ -144,7 +190,7 @@ class ReadmeScreenshotTest {
             setFixedVolumeEnabled(true)
             setFixedVolumePercent(60)
         }
-        Log.i(TAG, "[ReadmeScreenshotTest] seedSampleData -> devices=3 records=${records.size}")
+        Log.i(TAG, "[ReadmeScreenshotTest] seedSampleData -> devices=${devices.size} records=${records.size}")
     }
 
     private fun sampleDevice(mac: String, name: String, version: String, type: Int, codec: String) = Device(
@@ -162,43 +208,44 @@ class ReadmeScreenshotTest {
     )
 
     /**
-     * 追加一段连接：连接 -> 若干电量采样（-> 编解码切换）-> 断开；length 为 null 表示仍在连接中
+     * 一段连接里的耳机电量变化：从 [startLevel] 起，每档分别持续 [holdMinutes] 后下降 [step]。
+     * 每档时长不等并带秒级偏差，接近真实耳机的上报节奏。
+     */
+    private class HeadsetDrain(val startLevel: Int, val step: Int, val holdMinutes: List<Int>)
+
+    /**
+     * 追加一段连接：连接（带首个耳机电量）->（编解码切换）-> 每次电量变化一条 -> 断开。
+     * length 为 null 表示仍在连接中，此时只写到当前时刻之前的变化；drain 为 null 表示设备不上报电量。
      */
     private fun MutableList<DeviceConnectionRecord>.addSession(
+        now: Long,
         mac: String,
         start: Long,
         length: Long?,
-        phone: Int,
-        headset: Int?,
+        drain: HeadsetDrain?,
         codec: String
     ) {
-        val end = start + (length ?: (System.currentTimeMillis() - start - 5 * MINUTE))
-        val samples = 4
-        val step = (end - start) / (samples + 1)
-        val headsetLevel = { index: Int -> headset?.let { (it - index * 10).coerceAtLeast(10) } ?: -1 }
+        val end = if (length != null) start + length else now - MINUTE
+        val firstLevel = drain?.startLevel ?: DEVICE_BATTERY_LEVEL_UNKNOWN
 
-        add(record(mac, start, STATE_CONNECTED, RecordEventType.CONNECTED, phone, headsetLevel(0), codec, playing = false))
+        add(record(mac, start, STATE_CONNECTED, RecordEventType.CONNECTED, firstLevel, codec, playing = false))
         if (codec == "LDAC") {
             // 首次连接时协商为 AAC，随后切换到 LDAC，展示编解码切换记录
-            add(record(mac, start + step / 2, STATE_CONNECTED, RecordEventType.CODEC_CHANGED, phone, headsetLevel(0), codec, playing = true))
+            add(record(mac, start + 20 * SECOND, STATE_CONNECTED, RecordEventType.CODEC_CHANGED, firstLevel, codec, playing = true))
         }
-        for (index in 1..samples) {
-            add(
-                record(
-                    mac,
-                    start + step * index,
-                    STATE_CONNECTED,
-                    RecordEventType.BATTERY_CHANGED,
-                    phone - index * 3,
-                    headsetLevel(index),
-                    codec,
-                    // 最后一次采样处于播放中，让详情页头部展示“播放中”状态
-                    playing = index % 2 == 0
-                )
-            )
+        if (drain != null) {
+            var timestamp = start
+            var level = drain.startLevel
+            for ((index, hold) in drain.holdMinutes.withIndex()) {
+                timestamp += hold * MINUTE + (index * 17 % 50) * SECOND
+                if (timestamp >= end) break
+                level -= drain.step
+                // 电量变化时处于播放中，让详情页头部展示“播放中”状态
+                add(record(mac, timestamp, STATE_CONNECTED, RecordEventType.BATTERY_CHANGED, level, codec, playing = true))
+            }
         }
         if (length != null) {
-            add(record(mac, end, STATE_DISCONNECTED, RecordEventType.DISCONNECTED, phone - samples * 3 - 1, -1, codec, playing = false))
+            add(record(mac, end, STATE_DISCONNECTED, RecordEventType.DISCONNECTED, DEVICE_BATTERY_LEVEL_UNKNOWN, codec, playing = false))
         }
     }
 
@@ -207,7 +254,6 @@ class ReadmeScreenshotTest {
         timestamp: Long,
         state: Int,
         type: String,
-        phone: Int,
         headset: Int,
         codec: String,
         playing: Boolean
@@ -215,7 +261,7 @@ class ReadmeScreenshotTest {
         deviceMac = mac,
         timestamp = timestamp,
         connectState = state,
-        batteryLevel = phone,
+        batteryLevel = DEVICE_BATTERY_LEVEL_UNKNOWN,
         headsetBatteryLevel = headset,
         volume = 60,
         isPlaying = playing,

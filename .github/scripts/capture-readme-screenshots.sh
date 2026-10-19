@@ -7,7 +7,7 @@ APP_ID="com.xingkeqi.btlogger"
 RUNNER="${APP_ID}.test/androidx.test.runner.AndroidJUnitRunner"
 TEST_CLASS="${APP_ID}.screenshots.ReadmeScreenshotTest"
 OUT_DIR="docs/screenshots"
-SHOTS=(device-list device-detail device-history fixed-volume)
+SHOTS=(device-list device-detail battery-curve battery-compare device-history fixed-volume)
 
 adb install -r -g app/build/outputs/apk/debug/*.apk
 adb install -r -g app/build/outputs/apk/androidTest/debug/*.apk
