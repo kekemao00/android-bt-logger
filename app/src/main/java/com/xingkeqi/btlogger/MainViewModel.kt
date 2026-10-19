@@ -18,6 +18,13 @@ import com.xingkeqi.btlogger.data.RecordStats
 import com.xingkeqi.btlogger.data.buildRecordTimeline
 import com.xingkeqi.btlogger.data.computeRecordStats
 import com.xingkeqi.btlogger.data.parseExportedRows
+import com.xingkeqi.btlogger.data.toBatteryReading
+import com.xingkeqi.btlogger.data.toDeviceHistories
+import com.xingkeqi.btlogger.domain.battery.BatteryOverview
+import com.xingkeqi.btlogger.domain.battery.BatteryRange
+import com.xingkeqi.btlogger.domain.battery.ComparisonCandidate
+import com.xingkeqi.btlogger.domain.battery.buildBatteryOverview
+import com.xingkeqi.btlogger.domain.battery.buildComparisonCandidates
 import com.xingkeqi.btlogger.update.ApkInstaller
 import com.xingkeqi.btlogger.update.GitHubUpdateRepository
 import com.xingkeqi.btlogger.update.ReleaseAsset
@@ -34,6 +41,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -41,10 +49,14 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -166,6 +178,81 @@ class MainViewModel(
     private val _recordFilter = MutableStateFlow(RecordFilter.ALL)
     val recordFilter: StateFlow<RecordFilter> = _recordFilter.asStateFlow()
 
+    private val _batteryRange = MutableStateFlow(BatteryRange.LATEST_SESSION)
+    val batteryRange: StateFlow<BatteryRange> = _batteryRange.asStateFlow()
+
+    /**
+     * 每分钟推进一次的当前时间。
+     *
+     * Why: 耳机电量只在变化时记录，连接中可能很久都没有新记录；曲线末端的保持段与“预计剩余”
+     * 要随时间推进，不能停在最后一条记录写入的那一刻。
+     */
+    private val batteryClock: Flow<Long> = flow {
+        while (true) {
+            emit(System.currentTimeMillis())
+            delay(BATTERY_CLOCK_INTERVAL_MILLIS)
+        }
+    }
+
+    /**
+     * 详情页耳机电量曲线与掉电统计；记录、范围变化或每分钟在后台线程重算
+     */
+    val batteryOverview: StateFlow<BatteryOverview> = combine(records, _batteryRange, batteryClock) { list, range, now ->
+        buildBatteryOverview(
+            readings = list.asReversed().map { it.toBatteryReading() },
+            range = range,
+            now = now
+        )
+    }
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BatteryOverview.empty(BatteryRange.LATEST_SESSION))
+
+    private val _compareOpen = MutableStateFlow(false)
+    val compareOpen: StateFlow<Boolean> = _compareOpen.asStateFlow()
+
+    /** null 表示还没有选择；每次打开后首批候选到达时写入默认（最近测试的几台），页面打开期间不再随候选顺序变化 */
+    private val _compareSelection = MutableStateFlow<Map<String, Int>?>(null)
+
+    /** 用户是否改过选择：改过就一直沿用，没改过则每次打开按最新的测试重新挑选 */
+    private var compareSelectionTouched = false
+    private val _compareAlignment = MutableStateFlow(CompareAlignment.RELATIVE)
+
+    /**
+     * 只在对比页打开时查询全部设备的电量记录。
+     *
+     * 关闭时不发射任何值，保留上一次的候选：页面退出动画期间仍显示原内容，再次打开也能立即显示再刷新。
+     */
+    private val comparisonCandidates: Flow<List<ComparisonCandidate>> = _compareOpen
+        .flatMapLatest { open ->
+            if (!open) {
+                emptyFlow<List<ComparisonCandidate>>()
+            } else {
+                combine(recordDao.getBatteryRecordRows().map { it.toDeviceHistories() }, batteryClock) { histories, now ->
+                    buildComparisonCandidates(histories, now)
+                }.flowOn(Dispatchers.Default)
+                    .onEach { candidates ->
+                        // Why: 默认选择只定一次。每分钟刷新或有新记录时候选顺序会变，每次重算默认会让已显示的曲线换色
+                        if (_compareSelection.compareAndSet(null, defaultCompareSlots(candidates))) {
+                            Log.i(tag, "[MainViewModel] comparisonCandidates -> default selection from ${candidates.size} candidates")
+                        }
+                    }
+            }
+        }
+
+    val batteryComparison: StateFlow<BatteryComparisonUiState> = combine(
+        comparisonCandidates,
+        _compareSelection,
+        _compareAlignment
+    ) { candidates, selection, alignment ->
+        val keys = candidates.mapTo(HashSet()) { it.key }
+        BatteryComparisonUiState(
+            loading = false,
+            candidates = candidates,
+            slots = (selection ?: defaultCompareSlots(candidates)).filterKeys { it in keys },
+            alignment = alignment
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BatteryComparisonUiState())
+
     val fixedVolumeEnabled: StateFlow<Boolean> = settings.fixedVolumeEnabled
     val fixedVolumePercent: StateFlow<Int> = settings.fixedVolumePercent
 
@@ -197,6 +284,50 @@ class MainViewModel(
     fun setRecordFilter(filter: RecordFilter) {
         _recordFilter.value = filter
     }
+
+    fun setBatteryRange(range: BatteryRange) {
+        Log.i(tag, "[MainViewModel] setBatteryRange -> ${_batteryRange.value} -> $range")
+        _batteryRange.value = range
+    }
+
+    fun openCompare() {
+        Log.i(tag, "[MainViewModel] openCompare -> selectionTouched=$compareSelectionTouched")
+        if (!compareSelectionTouched) _compareSelection.value = null
+        _compareOpen.value = true
+    }
+
+    fun closeCompare() {
+        Log.i(tag, "[MainViewModel] closeCompare")
+        _compareOpen.value = false
+    }
+
+    fun setCompareAlignment(alignment: CompareAlignment) {
+        Log.i(tag, "[MainViewModel] setCompareAlignment -> $alignment")
+        _compareAlignment.value = alignment
+    }
+
+    /**
+     * 选中或取消一台耳机；新选中的设备占用最小的空闲颜色槽位
+     */
+    fun toggleCompareDevice(key: String) {
+        val current = batteryComparison.value.slots
+        val next = if (key in current) {
+            current - key
+        } else {
+            val freeSlot = (0 until MAX_COMPARE_SERIES).firstOrNull { it !in current.values }
+            if (freeSlot == null) {
+                emit(UiEvent.ShowMessage(R.string.compare_limit, listOf(MAX_COMPARE_SERIES)))
+                return
+            }
+            current + (key to freeSlot)
+        }
+        Log.i(tag, "[MainViewModel] toggleCompareDevice -> key=$key, selected=${current.size} -> ${next.size}")
+        compareSelectionTouched = true
+        _compareSelection.value = next
+    }
+
+    private fun defaultCompareSlots(candidates: List<ComparisonCandidate>): Map<String, Int> =
+        candidates.take(MAX_COMPARE_SERIES).mapIndexed { index, candidate -> candidate.key to index }.toMap()
 
     fun updateMediaVolumeSnapshot(snapshot: MediaVolumeSnapshot) {
         _mediaVolumeSnapshot.value = snapshot
@@ -407,6 +538,8 @@ class MainViewModel(
     }
 
     companion object {
+        private const val BATTERY_CLOCK_INTERVAL_MILLIS = 60_000L
+
         private fun appVersionName(context: Context): String = runCatching {
             context.packageManager.getPackageInfo(context.packageName, 0).versionName
         }.getOrNull().orEmpty()

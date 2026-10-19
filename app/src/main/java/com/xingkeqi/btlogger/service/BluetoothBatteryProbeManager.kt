@@ -24,8 +24,10 @@ import java.util.concurrent.ConcurrentHashMap
  * 主动补齐系统未广播给三方应用的耳机电量来源。
  *
  * Why:
- * 1. 反射 `BluetoothDevice.getBatteryLevel()` 可以读取部分系统蓝牙缓存值。
- * 2. 对支持标准 Battery Service 的 LE/双模设备，额外通过 GATT 读取或订阅电量变化。
+ * 1. 反射 `BluetoothDevice.getBatteryLevel()` 可以读取部分系统蓝牙缓存值；只是一次进程间调用、不会唤醒耳机，
+ *    每 30 秒读一次，作为系统广播被限制时的兜底，漏掉的电量变化最迟 30 秒内也会落库。
+ * 2. 对支持标准 Battery Service 的 LE/双模设备，额外通过 GATT 读取或订阅电量变化；
+ *    单次读取要建立一次 GATT 连接，仍保持至少 5 分钟一次，避免频繁唤醒耳机反过来影响续航测试。
  */
 class BluetoothBatteryProbeManager(
     private val context: Context,
@@ -60,7 +62,7 @@ class BluetoothBatteryProbeManager(
             )
             while (isActive) {
                 probe(address, reason = "poll")
-                delay(BATTERY_PROBE_INTERVAL_MS)
+                delay(SYSTEM_CACHE_POLL_INTERVAL_MS)
             }
         }
     }
@@ -108,6 +110,16 @@ class BluetoothBatteryProbeManager(
             )
             return
         }
+
+        val now = System.currentTimeMillis()
+        if (now - session.lastGattProbeAt < GATT_READ_INTERVAL_MS) {
+            Log.d(
+                tag,
+                "[BluetoothBatteryProbeManager] probe -> throttle gatt read: device=${device.name.orEmpty()}[$address], reason=$reason"
+            )
+            return
+        }
+        session.lastGattProbeAt = now
 
         val characteristic = session.batteryCharacteristic
         val gatt = session.gatt
@@ -478,11 +490,13 @@ class BluetoothBatteryProbeManager(
         @Volatile var gattUnsupported: Boolean = false,
         @Volatile var isConnecting: Boolean = false,
         @Volatile var lastGattAttemptAt: Long = 0L,
+        @Volatile var lastGattProbeAt: Long = 0L,
         var pollJob: Job? = null
     )
 
     private companion object {
-        const val BATTERY_PROBE_INTERVAL_MS = 5 * 60 * 1000L
+        const val SYSTEM_CACHE_POLL_INTERVAL_MS = 30 * 1000L
+        const val GATT_READ_INTERVAL_MS = 5 * 60 * 1000L
         const val GATT_RETRY_INTERVAL_MS = 60 * 1000L
         val BATTERY_SERVICE_UUID: UUID = UUID.fromString(BluetoothBatteryUtils.BATTERY_SERVICE_UUID)
         val BATTERY_LEVEL_CHARACTERISTIC_UUID: UUID =

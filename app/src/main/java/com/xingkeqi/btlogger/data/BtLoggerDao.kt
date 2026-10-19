@@ -248,6 +248,28 @@ interface RecordDao {
     )
     fun getRecordInfoListAll(): Flow<List<RecordInfo>>
 
+    /**
+     * 所有设备的耳机电量相关字段，按时间升序；用于多设备电量对比
+     */
+    @Query(
+        """
+        SELECT
+            devices.mac AS mac,
+            devices.name AS name,
+            device_connection_records.id AS id,
+            device_connection_records.timestamp AS timestamp,
+            device_connection_records.event_type AS eventType,
+            device_connection_records.headset_battery_level AS headsetBatteryLevel,
+            device_connection_records.volume AS volume,
+            device_connection_records.is_playing AS isPlaying
+        FROM devices
+        INNER JOIN device_connection_records
+            ON devices.mac = device_connection_records.device_mac
+        ORDER BY device_connection_records.timestamp ASC, device_connection_records.id ASC
+        """
+    )
+    fun getBatteryRecordRows(): Flow<List<BatteryRecordRow>>
+
     @Query("DELETE FROM device_connection_records WHERE device_mac= :mac")
     suspend fun deleteRecordByDeviceMac(mac: String)
     @Query("DELETE FROM device_connection_records WHERE id= :id")

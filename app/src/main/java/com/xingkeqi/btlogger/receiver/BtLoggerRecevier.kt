@@ -8,10 +8,8 @@ import android.bluetooth.BluetoothHeadset
 import android.bluetooth.BluetoothProfile
 import android.content.BroadcastReceiver
 import android.content.Context
-import android.content.Context.BATTERY_SERVICE
 import android.content.Intent
 import android.media.AudioManager
-import android.os.BatteryManager
 import android.os.Build
 import android.util.Log
 import com.blankj.utilcode.util.ToastUtils
@@ -100,7 +98,6 @@ class BtLoggerReceiver : BroadcastReceiver() {
         val volumeSnapshot = readMediaVolumeSnapshotSafely()
         val volume = volumeSnapshot.percent
         val now = System.currentTimeMillis()
-        val batteryLevel = getBatteryLevelSafely()
 
         val isConnected = state == BluetoothProfile.STATE_CONNECTED
         val connectStatus = if (isConnected) {
@@ -113,7 +110,7 @@ class BtLoggerReceiver : BroadcastReceiver() {
             tag,
             "[$profileName] ${if (isConnected) "已连接" else "已断开"} $name[$address], " +
                     "设备类型：$type, 当前音量：$volume(${volumeSnapshot.currentLevel}/${volumeSnapshot.maxLevel}), 蓝牙输出连接：${volumeSnapshot.hasBluetoothOutput}, 是否在播放音乐：$isPlaying, " +
-                    "当前手机电量：$batteryLevel, 配对状态：$bondState, " +
+                    "配对状态：$bondState, " +
                     "uuids=${uuids?.joinToString()}: $now"
         )
 
@@ -133,7 +130,7 @@ class BtLoggerReceiver : BroadcastReceiver() {
             deviceMac = address,
             timestamp = now,
             connectState = connectStatus,
-            batteryLevel = batteryLevel,
+            batteryLevel = DEVICE_BATTERY_LEVEL_UNKNOWN,
             headsetBatteryLevel = DEVICE_BATTERY_LEVEL_UNKNOWN,
             isPlaying = isPlaying,
             volume = volume,
@@ -252,18 +249,6 @@ class BtLoggerReceiver : BroadcastReceiver() {
         }
     }
 
-    private fun getBatteryLevelSafely(): Int {
-        return try {
-            getBatteryLevel()
-        } catch (e: Exception) {
-            Log.e(tag, "[BtLoggerReceiver] getBatteryLevelSafely -> failed", e)
-            0
-        } catch (e: LinkageError) {
-            Log.e(tag, "[BtLoggerReceiver] getBatteryLevelSafely -> platform API unavailable", e)
-            0
-        }
-    }
-
     private fun showConnectionToastSafely(name: String, isConnected: Boolean) {
         try {
             ToastUtils.showLong("$name - ${if (isConnected) "已连接" else "已断开"}")
@@ -292,10 +277,4 @@ fun isPlaying(): Boolean {
     val audioManager =
         BtLoggerApplication.instance.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     return audioManager.isMusicActive
-}
-
-private fun getBatteryLevel(): Int {
-    val batteryManager =
-        BtLoggerApplication.instance.getSystemService(BATTERY_SERVICE) as BatteryManager
-    return batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
 }

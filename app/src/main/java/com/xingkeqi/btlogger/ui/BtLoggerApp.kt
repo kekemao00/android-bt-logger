@@ -68,6 +68,7 @@ import com.xingkeqi.btlogger.ui.dialogs.ConfirmDeleteDialog
 import com.xingkeqi.btlogger.ui.dialogs.FixedVolumeDialog
 import com.xingkeqi.btlogger.ui.dialogs.UpdateDialogs
 import com.xingkeqi.btlogger.update.ApkInstaller
+import com.xingkeqi.btlogger.ui.screens.BatteryCompareScreen
 import com.xingkeqi.btlogger.ui.screens.DeviceDetailScreen
 import com.xingkeqi.btlogger.ui.screens.DeviceListScreen
 import com.xingkeqi.btlogger.ui.theme.BtTheme
@@ -83,6 +84,25 @@ import kotlinx.coroutines.launch
 private const val TAG = "BtLoggerApp"
 private const val STATE_CONNECTED = 2
 private const val EXIT_CONFIRM_WINDOW_MILLIS = 2_000L
+
+/**
+ * 当前页面：列表、设备详情或电量对比；对比页可以从列表或详情进入，返回时回到来源页
+ */
+private sealed interface AppPage {
+    val key: String
+
+    object List : AppPage {
+        override val key = "list"
+    }
+
+    data class Detail(val device: DeviceInfo) : AppPage {
+        override val key = "detail:${device.mac}"
+    }
+
+    object Compare : AppPage {
+        override val key = "compare"
+    }
+}
 
 /**
  * 需要用户二次确认的危险操作
@@ -117,6 +137,9 @@ fun BtLoggerApp(
     val fixedVolumePercent by viewModel.fixedVolumePercent.collectAsState()
     val mediaVolumeSnapshot by viewModel.mediaVolumeSnapshot.collectAsState()
     val updateState by viewModel.updateState.collectAsState()
+    val batteryOverview by viewModel.batteryOverview.collectAsState()
+    val compareOpen by viewModel.compareOpen.collectAsState()
+    val batteryComparison by viewModel.batteryComparison.collectAsState()
 
     var searchActive by rememberSaveable { mutableStateOf(false) }
     var showVolumeDialog by rememberSaveable { mutableStateOf(false) }
@@ -159,13 +182,14 @@ fun BtLoggerApp(
         }
     }
 
-    // 返回键：详情 -> 列表；搜索 -> 关闭搜索；列表 -> 2 秒内再按一次退出
-    BackHandler(enabled = selectedDevice != null) { viewModel.clearSelection() }
-    BackHandler(enabled = selectedDevice == null && searchActive) {
+    // 返回键：对比 -> 来源页；详情 -> 列表；搜索 -> 关闭搜索；列表 -> 2 秒内再按一次退出
+    BackHandler(enabled = compareOpen) { viewModel.closeCompare() }
+    BackHandler(enabled = !compareOpen && selectedDevice != null) { viewModel.clearSelection() }
+    BackHandler(enabled = !compareOpen && selectedDevice == null && searchActive) {
         searchActive = false
         viewModel.setSearchQuery("")
     }
-    BackHandler(enabled = selectedDevice == null && !searchActive) {
+    BackHandler(enabled = !compareOpen && selectedDevice == null && !searchActive) {
         val now = System.currentTimeMillis()
         if (now - lastBackPressAt < EXIT_CONFIRM_WINDOW_MILLIS) {
             onExit()
@@ -178,6 +202,11 @@ fun BtLoggerApp(
     }
 
     val detailDevice = selectedDevice
+    val page: AppPage = when {
+        compareOpen -> AppPage.Compare
+        detailDevice != null -> AppPage.Detail(detailDevice)
+        else -> AppPage.List
+    }
     val colors = BtTheme.colors
 
     Box(
@@ -187,12 +216,15 @@ fun BtLoggerApp(
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             AppTopBar(
-                detailDevice = detailDevice,
+                page = page,
                 searchActive = searchActive,
                 fixedVolumeEnabled = fixedVolumeEnabled,
                 showOverflow = showOverflow,
                 onShowOverflowChange = { showOverflow = it },
-                onBack = { viewModel.clearSelection() },
+                onBack = {
+                    if (compareOpen) viewModel.closeCompare() else viewModel.clearSelection()
+                },
+                onOpenCompare = viewModel::openCompare,
                 onToggleSearch = {
                     searchActive = !searchActive
                     if (!searchActive) viewModel.setSearchQuery("")
@@ -213,19 +245,18 @@ fun BtLoggerApp(
                 onClearDeviceRecords = { device -> pendingConfirm = PendingConfirm.ClearDeviceRecords(device) }
             )
 
-            // 列表与详情之间用模糊交叉淡化切换：同一块内容区换内容，而不是叠一个新页面上来
+            // 页面之间用模糊交叉淡化切换：同一块内容区换内容，而不是叠一个新页面上来
             BlurSwap(
-                targetState = detailDevice,
-                contentKey = { it?.mac },
+                targetState = page,
+                contentKey = { it.key },
                 contentAlignment = Alignment.TopStart,
                 label = "pageSwap",
                 modifier = Modifier.fillMaxSize()
-            ) { device ->
-                if (device == null) {
-                    val total = allDevices?.size ?: 0
-                    DeviceListScreen(
+            ) { target ->
+                when (target) {
+                    AppPage.List -> DeviceListScreen(
                         devices = filteredDevices,
-                        totalCount = total,
+                        totalCount = allDevices?.size ?: 0,
                         connectedCount = allDevices.orEmpty().count { it.connectState == STATE_CONNECTED },
                         searchActive = searchActive,
                         searchQuery = searchQuery,
@@ -234,14 +265,23 @@ fun BtLoggerApp(
                         onDeviceLongClick = { pendingConfirm = PendingConfirm.DeleteDevice(it) },
                         onOpenBluetoothSettings = openBluetoothSettings
                     )
-                } else {
-                    DeviceDetailScreen(
-                        device = device,
+
+                    is AppPage.Detail -> DeviceDetailScreen(
+                        device = target.device,
                         records = records,
                         stats = stats,
+                        batteryOverview = batteryOverview,
                         filter = recordFilter,
                         onFilterChange = viewModel::setRecordFilter,
+                        onBatteryRangeChange = viewModel::setBatteryRange,
+                        onOpenCompare = viewModel::openCompare,
                         onRecordLongClick = { pendingConfirm = PendingConfirm.DeleteRecord(it) }
+                    )
+
+                    AppPage.Compare -> BatteryCompareScreen(
+                        state = batteryComparison,
+                        onAlignmentChange = viewModel::setCompareAlignment,
+                        onToggleDevice = viewModel::toggleCompareDevice
                     )
                 }
             }
@@ -304,17 +344,18 @@ fun BtLoggerApp(
 }
 
 /**
- * 顶栏：canvas 底、无阴影。列表页是大标题 + 幽灵图标按钮，详情页是返回 + 设备名；
- * 标题与操作按钮在两种状态之间用模糊交叉淡化切换。
+ * 顶栏：canvas 底、无阴影。列表页是大标题 + 幽灵图标按钮，详情页是返回 + 设备名，对比页是返回 + 标题；
+ * 标题与操作按钮在不同页面之间用模糊交叉淡化切换。
  */
 @Composable
 private fun AppTopBar(
-    detailDevice: DeviceInfo?,
+    page: AppPage,
     searchActive: Boolean,
     fixedVolumeEnabled: Boolean,
     showOverflow: Boolean,
     onShowOverflowChange: (Boolean) -> Unit,
     onBack: () -> Unit,
+    onOpenCompare: () -> Unit,
     onToggleSearch: () -> Unit,
     onOpenVolume: () -> Unit,
     onOpenBluetoothSettings: () -> Unit,
@@ -326,7 +367,7 @@ private fun AppTopBar(
     onClearDeviceRecords: (DeviceInfo) -> Unit
 ) {
     val colors = BtTheme.colors
-    val inDetail = detailDevice != null
+    val detailDevice = (page as? AppPage.Detail)?.device
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -334,15 +375,15 @@ private fun AppTopBar(
             .padding(start = 6.dp, end = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // 以设备 MAC 为键：退出详情时旧标题仍显示原设备名，直到淡出完成
+        // 以页面为键：退出详情时旧标题仍显示原设备名，直到淡出完成
         BlurSwap(
-            targetState = detailDevice,
-            contentKey = { it?.mac },
+            targetState = page,
+            contentKey = { it.key },
             label = "topBarNavigation",
             modifier = Modifier.weight(1f)
-        ) { device ->
+        ) { target ->
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (device != null) {
+                if (target != AppPage.List) {
                     WmIconButton(
                         icon = LineIcons.ArrowLeft,
                         contentDescription = stringResource(id = R.string.action_back),
@@ -350,7 +391,10 @@ private fun AppTopBar(
                     )
                     Spacer(modifier = Modifier.width(2.dp))
                     Text(
-                        text = device.name.ifBlank { stringResource(id = R.string.unknown_device) },
+                        text = when (target) {
+                            is AppPage.Detail -> target.device.name.ifBlank { stringResource(id = R.string.unknown_device) }
+                            else -> stringResource(id = R.string.compare_title)
+                        },
                         style = MaterialTheme.typography.titleMedium,
                         color = colors.ink,
                         maxLines = 1,
@@ -369,18 +413,23 @@ private fun AppTopBar(
         }
 
         BlurSwap(
-            targetState = inDetail,
+            targetState = page::class,
             label = "topBarActions",
             contentAlignment = Alignment.CenterEnd
-        ) { detail ->
+        ) { pageType ->
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (!detail) {
+                if (pageType == AppPage.List::class) {
                     WmIconButton(
                         icon = if (searchActive) LineIcons.Close else LineIcons.Search,
                         contentDescription = stringResource(
                             id = if (searchActive) R.string.action_close_search else R.string.action_search
                         ),
                         onClick = onToggleSearch
+                    )
+                    WmIconButton(
+                        icon = LineIcons.ChartLine,
+                        contentDescription = stringResource(id = R.string.action_compare),
+                        onClick = onOpenCompare
                     )
                     WmIconButton(
                         icon = LineIcons.Volume,
@@ -393,7 +442,7 @@ private fun AppTopBar(
                         contentDescription = stringResource(id = R.string.action_bluetooth_settings),
                         onClick = onOpenBluetoothSettings
                     )
-                } else {
+                } else if (pageType == AppPage.Detail::class) {
                     WmIconButton(
                         icon = LineIcons.Share,
                         contentDescription = stringResource(id = R.string.action_export_device),
@@ -403,7 +452,8 @@ private fun AppTopBar(
             }
         }
 
-        Box {
+        // 对比页没有可用的菜单项
+        if (page != AppPage.Compare) Box {
             WmIconButton(
                 icon = LineIcons.MoreVertical,
                 contentDescription = stringResource(id = R.string.action_more),

@@ -65,7 +65,9 @@ fun parseExportedRows(
             } else {
                 BluetoothA2dp.STATE_CONNECTED
             },
-            batteryLevel = row.cell("手机电量").toIntOrNull() ?: 0,
+            // 新导出的表格没有“手机电量”列，与新记录一样写未知值，而不是 0%
+            batteryLevel = row.cell("手机电量").toIntOrNull()?.takeIf { it in 0..100 }
+                ?: DEVICE_BATTERY_LEVEL_UNKNOWN,
             headsetBatteryLevel = row.cell("耳机电量").toIntOrNull()?.takeIf { it in 0..100 }
                 ?: DEVICE_BATTERY_LEVEL_UNKNOWN,
             volume = row.cell("媒体音量").removeSuffix("%").trim().toIntOrNull() ?: 0,

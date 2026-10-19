@@ -52,7 +52,7 @@ data class RecordInfo(
     val volume: Int = 0,
     //  播放状态（0：未播放，1：正在播放）
     val isPlaying: Int = 0,
-    // 手机电量（0~100）
+    // 手机电量（0~100）；只记录耳机电量后新记录固定为 -1，仅旧记录与导入数据有值
     val batteryLevel: Int = 0,
     // 耳机电量（0~100，-1 表示当前机型或链路未上报）
     val headsetBatteryLevel: Int = DEVICE_BATTERY_LEVEL_UNKNOWN,

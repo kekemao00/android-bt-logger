@@ -10,17 +10,21 @@
 ![Compose](https://img.shields.io/badge/UI-Jetpack%20Compose-4285F4)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 
-BtLogger 在后台持续记录蓝牙耳机、音箱、车机等 A2DP 设备的**连接 / 断开、编解码切换、手机与耳机电量、媒体音量、播放状态**，并按设备聚合展示、统计与导出。它面向蓝牙音频研发、测试与客诉复盘，把“偶现断连”“电量不准”“Codec 不对”这类难以复现的问题变成可追溯的数据。
+BtLogger 在后台持续记录蓝牙耳机、音箱、车机等 A2DP 设备的**连接 / 断开、编解码切换、耳机电量变化、媒体音量、播放状态**，并按设备聚合展示、统计与导出。耳机电量画成经过每个实测点的平滑曲线，算出掉电速率与续航，还能把多台耳机放在一起对比。它面向蓝牙音频研发、测试与客诉复盘，把“偶现断连”“续航不达标”“Codec 不对”这类难以复现的问题变成可追溯的数据。
 
 所有数据只保存在本机，不会上传。
 
 <p align="center">
-  <img src="docs/screenshots/device-list.png" width="24%" alt="设备列表" />
-  <img src="docs/screenshots/device-detail.png" width="24%" alt="设备详情：统计、编解码与电量趋势" />
-  <img src="docs/screenshots/device-history.png" width="24%" alt="可筛选的历史记录" />
-  <img src="docs/screenshots/fixed-volume.png" width="24%" alt="固定连接音量" />
+  <img src="docs/screenshots/device-list.png" width="32%" alt="设备列表" />
+  <img src="docs/screenshots/device-detail.png" width="32%" alt="设备详情：连接统计与编解码" />
+  <img src="docs/screenshots/battery-curve.png" width="32%" alt="耳机电量曲线：游标读数与掉电统计" />
 </p>
-<p align="center"><sub>设备列表 · 设备详情 · 历史记录 · 固定连接音量（截图使用示例数据，详见<a href="#截图">截图</a>）</sub></p>
+<p align="center">
+  <img src="docs/screenshots/battery-compare.png" width="32%" alt="多台耳机电量对比" />
+  <img src="docs/screenshots/device-history.png" width="32%" alt="可筛选的历史记录" />
+  <img src="docs/screenshots/fixed-volume.png" width="32%" alt="固定连接音量" />
+</p>
+<p align="center"><sub>设备列表 · 设备详情 · 耳机电量曲线 · 多耳机对比 · 历史记录 · 固定连接音量（截图使用示例数据，详见<a href="#截图">截图</a>）</sub></p>
 
 ## 目录
 
@@ -36,6 +40,7 @@ BtLogger 在后台持续记录蓝牙耳机、音箱、车机等 A2DP 设备的**
 
 - **耳机 / 音箱研发与测试**：长时间挂机记录连接稳定性，统计断连次数与单次连接时长。
 - **客诉复盘**：让用户安装后正常使用，导出 Excel 即可看到“什么时候断的、当时电量多少、用的什么 Codec”。
+- **续航测试**：耳机电量每变化一档记一条，曲线、掉电速率与满电续航自动算好；多台耳机可按连接开始对齐对比，导出表可直接在 Excel 里画图。
 - **兼容性验证**：对比不同手机上可用 / 实际使用的编解码，以及耳机电量是否能正确上报。
 
 ## 下载
@@ -47,14 +52,16 @@ BtLogger 在后台持续记录蓝牙耳机、音箱、车机等 A2DP 设备的**
 | 能力 | 说明 |
 |------|------|
 | 后台持续记录 | 前台服务监听 A2DP 连接状态；开机、应用更新后自动恢复；服务重建时自动同步已连接设备 |
-| 事件类型 | 连接、断开、编解码切换、电量采样（手机电量或耳机电量变化时） |
-| 每条记录字段 | 时间、手机电量、耳机电量、媒体音量、是否播放、手机支持 / 双方可用 / 当前使用的编解码、设备类型、蓝牙版本、绑定状态、UUID |
+| 事件类型 | 连接、断开、编解码切换、耳机电量变化 |
+| 每条记录字段 | 时间、耳机电量、媒体音量、是否播放、手机支持 / 双方可用 / 当前使用的编解码、设备类型、蓝牙版本、绑定状态、UUID（不记录手机电量） |
 | 设备列表 | 按最近活动排序、实时显示已连接时长、按名称或 MAC 搜索、长按删除 |
-| 设备详情 | 连接 / 断开时长占比、连接与断开次数、最长与平均单次连接时长、编解码快照、电量趋势图、可按类型筛选的历史记录 |
-| 耳机电量 | 多通道采集：系统缓存（反射）、`BATTERY_LEVEL_CHANGED` 广播、HFP `+IPHONEACCEV` / `+XEVENT`、BLE Battery Service（0x180F）；后到的数据会回填当前连接记录 |
+| 设备详情 | 连接 / 断开时长占比、连接与断开次数、最长与平均单次连接时长、编解码快照、耳机电量曲线、可按类型筛选的历史记录（电量更新显示“上一档 → 当前”与上一档持续时长） |
+| 耳机电量记录 | 多通道采集：`BATTERY_LEVEL_CHANGED` 广播、HFP `+IPHONEACCEV` / `+XEVENT`、BLE Battery Service（0x180F），系统缓存每 30 秒兜底读取一次；只在电量变化时落库，时间取电量到达的时刻；连接后 2 分钟内到达的首个电量补到连接记录上 |
+| 耳机电量曲线 | 本次连接 / 24 小时 / 全部；单调分段三次贝塞尔曲线经过每个实测点且不过冲，最后一个电量用虚线延伸到断开或当前时刻；轻触吸附实测点、拖动查看、双指缩放平移、双击还原；展示起止电量、记录时长、平均掉电（%/小时）与预计剩余 / 满电续航 |
+| 多耳机对比 | 最多 6 台耳机各取最近一次能算出掉电速率的连接，可按连接开始对齐或按实际时间叠加；表格对比起止电量、时长、掉电速率与满电续航 |
 | 蓝牙版本 | 综合 Device Information Service、BLE 广播指纹与设备目录推断，只会用更可信的结果覆盖已有值 |
 | 固定连接音量 | 每次连接蓝牙音频设备后自动把媒体音量调到设定值，App 在后台同样生效，设置重启后保留 |
-| 导出 / 导入 | 导出单个设备或全部设备为 `.xls`，通过系统分享面板发送到微信、邮件、网盘等；菜单「导入记录」可把导出的文件读回（重装或换机后恢复） |
+| 导出 / 导入 | 导出单个设备或全部设备为 `.xls`，通过系统分享面板发送到微信、邮件、网盘等；除“连接记录”外还有“电量统计”（每次连接一行）与“耳机电量明细”（连接后分钟数 + 电量，可直接画曲线），超过行数上限自动分表；菜单「导入记录」可把导出的文件读回（重装或换机后恢复） |
 | 应用内更新 | 启动时与菜单「检查更新」查询 GitHub 最新 Release，展示更新日志；下载可取消，SHA-256 校验后调起系统安装，可跳过某个版本 |
 
 ## 使用
@@ -62,7 +69,8 @@ BtLogger 在后台持续记录蓝牙耳机、音箱、车机等 A2DP 设备的**
 1. 安装并打开应用，授予“附近的设备”权限（Android 12+）；Android 13+ 建议同时允许通知，以便在通知栏看到记录状态。
 2. 连接任意蓝牙音频设备，记录会自动开始。之后关闭 App 也会继续记录。
 3. 在列表中点击设备查看详情；右上角分享按钮导出该设备记录，溢出菜单可导出全部或清空。
-4. 首页的音量按钮可开启“固定连接音量”。
+4. 首页顶栏的曲线按钮（或详情页电量卡片的「多机对比」）打开电量对比，勾选要对比的耳机。
+5. 首页的音量按钮可开启“固定连接音量”。
 
 > 部分国产 ROM 会限制后台运行，请在系统设置里允许 BtLogger 自启动并关闭电池优化。
 
@@ -72,7 +80,13 @@ BtLogger 在后台持续记录蓝牙耳机、音箱、车机等 A2DP 设备的**
 会。记录由前台服务完成，通知栏常驻“蓝牙日志记录中”通知即表示服务在运行；开机和应用更新后也会自动恢复。若通知消失，多半是系统清理了后台，请按上面的提示放开自启动与电池优化。
 
 **为什么耳机电量显示“耳机未上报”？**
-耳机电量依赖耳机通过 HFP 指令、电量广播或 BLE Battery Service 主动上报，部分耳机或手机组合不提供这些信息。只要任一通道后续拿到数据，就会回填到当前连接记录。
+耳机电量依赖耳机通过 HFP 指令、电量广播或 BLE Battery Service 主动上报，部分耳机或手机组合不提供这些信息。连接后 2 分钟内拿到的首个电量会补到连接记录上，之后的变化单独记录。
+
+**耳机电量多久记录一次？为什么曲线是一档一档的？**
+只在耳机电量变化时记录一条，电量不变就不写，时间取手机收到电量的时刻；系统缓存每 30 秒兜底读取一次，个别漏掉的广播最晚 30 秒内补上。精度取决于耳机本身的上报粒度，多数耳机按 10% 一档上报，所以曲线呈台阶状下降。掉电速率从第一次跳档量到最后一次跳档（两端都落在档位边界上，不受连接时机影响），需要满 10 分钟且电量有下降才计算。
+
+**还记录手机电量吗？**
+不再记录。新记录的手机电量为空，升级前已有的旧记录保持原样；导出表也不再有“手机电量”列。
 
 **编解码显示“不可用”或“未知”？**
 Android 8.0 以上才提供 Codec 信息，且各厂商实现差异较大；有的系统只在开始播放后才完成协商。播放一段音频后通常会出现编解码切换记录。
@@ -119,12 +133,12 @@ BtLoggerForegroundService ──(广播: A2DP / Codec / 电量)──▶ Room (d
         ▼                                                                                        ▼
    常驻通知（已连接设备）                         MainViewModel (StateFlow / 一次性 UiEvent)
                                                                 │
-                                         BtLoggerApp ─▶ DeviceListScreen / DeviceDetailScreen (无状态 Compose)
+                                         BtLoggerApp ─▶ DeviceListScreen / DeviceDetailScreen / BatteryCompareScreen (无状态 Compose)
 ```
 
 - **采集**全部在前台服务中完成，不依赖界面是否存活；每条链路都有防崩边界，探测失败只降级，不影响基础连接记录。
 - **ViewModel** 暴露 `StateFlow`，页面组件无状态，事件通过回调上抛；Toast / 分享等一次性事件走 `Channel`。
-- **统计**（累计时长、单次连接时长等）是纯函数 `buildRecordTimeline` / `computeRecordStats`，有单元测试覆盖。
+- **统计**（累计时长、单次连接时长等）是纯函数 `buildRecordTimeline` / `computeRecordStats`；耳机电量的按连接切分、掉电速率、多机对比与单调贝塞尔插值在 `domain/battery`（纯 Kotlin），都有单元测试覆盖。
 - **设置**保存在 `AppSettings`（SharedPreferences + StateFlow），前台服务与界面共享。
 
 主要目录：
@@ -132,7 +146,8 @@ BtLoggerForegroundService ──(广播: A2DP / Codec / 电量)──▶ Room (d
 ```text
 app/src/main/java/com/xingkeqi/btlogger/
 ├── MainActivity.kt / MainViewModel.kt
-├── data/       Room 实体、DAO、记录时间线统计
+├── data/       Room 实体、DAO、记录时间线统计、电量导出数据
+├── domain/     耳机电量分析（纯 Kotlin，无 Android 依赖）
 ├── service/    前台服务、编解码解析、电量与蓝牙版本探测
 ├── receiver/   开机自启接收器
 ├── ui/         BtLoggerApp、screens/、dialogs/、components/、theme/
@@ -164,23 +179,27 @@ app/src/main/java/com/xingkeqi/btlogger/
 
 ## 截图
 
-README 中的截图由 [Screenshots](.github/workflows/screenshots.yml) 工作流生成：在 Android 11 模拟器上写入三台示例设备的数据，启动真实应用并截取浅色与深色界面，结果提交到 [`docs/screenshots/`](docs/screenshots)。界面有较大改动时，在 Actions → Screenshots → Run workflow 选择分支即可重新生成。
+README 中的截图由 [Screenshots](.github/workflows/screenshots.yml) 工作流生成：在 Android 11 模拟器上写入五台示例设备的数据，启动真实应用并截取浅色与深色界面，结果提交到 [`docs/screenshots/`](docs/screenshots)。界面有较大改动时，在 Actions → Screenshots → Run workflow 选择分支即可重新生成。
 
 截图逻辑在 [`ReadmeScreenshotTest`](app/src/androidTest/java/com/xingkeqi/btlogger/screenshots/ReadmeScreenshotTest.kt)。它会清空设备上的记录，所以只有传入 `-e readmeScreenshots true` 时才运行，普通的 `connectedAndroidTest` 会自动跳过。
 
 <details>
 <summary>深色模式</summary>
 <p align="center">
-  <img src="docs/screenshots/device-list-dark.png" width="24%" alt="设备列表（深色）" />
-  <img src="docs/screenshots/device-detail-dark.png" width="24%" alt="设备详情（深色）" />
-  <img src="docs/screenshots/device-history-dark.png" width="24%" alt="历史记录（深色）" />
-  <img src="docs/screenshots/fixed-volume-dark.png" width="24%" alt="固定连接音量（深色）" />
+  <img src="docs/screenshots/device-list-dark.png" width="32%" alt="设备列表（深色）" />
+  <img src="docs/screenshots/device-detail-dark.png" width="32%" alt="设备详情（深色）" />
+  <img src="docs/screenshots/battery-curve-dark.png" width="32%" alt="耳机电量曲线（深色）" />
+</p>
+<p align="center">
+  <img src="docs/screenshots/battery-compare-dark.png" width="32%" alt="多台耳机电量对比（深色）" />
+  <img src="docs/screenshots/device-history-dark.png" width="32%" alt="历史记录（深色）" />
+  <img src="docs/screenshots/fixed-volume-dark.png" width="32%" alt="固定连接音量（深色）" />
 </p>
 </details>
 
 ## 已知限制
 
-- 耳机电量、完整 Codec 信息依赖手机系统与耳机实现，部分组合无法获取。
+- 耳机电量、完整 Codec 信息依赖手机系统与耳机实现，部分组合无法获取；耳机电量精度受耳机上报粒度限制（常见 10% 一档）。
 - 蓝牙版本为多源推断结果，不保证 100% 准确。
 - 数据库升级使用破坏性迁移，大版本升级前请先导出数据。
 

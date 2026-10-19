@@ -3,7 +3,6 @@ package com.xingkeqi.btlogger.utils
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothHeadset
 import android.content.Intent
-import android.os.BatteryManager
 import android.util.Log
 import com.xingkeqi.btlogger.data.DEVICE_BATTERY_LEVEL_UNKNOWN
 import kotlin.math.roundToInt
@@ -60,13 +59,6 @@ object BluetoothBatteryUtils {
 
             else -> null
         }
-    }
-
-    fun extractPhoneBatteryLevel(intent: Intent): Int? {
-        if (intent.action != Intent.ACTION_BATTERY_CHANGED) return null
-        val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
-        val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
-        return scaleBatteryLevel(level, scale)
     }
 
     fun isKnownBatteryLevel(level: Int): Boolean = level in 0..100
@@ -150,12 +142,13 @@ object BluetoothBatteryUtils {
         val numericArgs = args.drop(1).mapNotNull(::extractInt)
         if (numericArgs.isEmpty()) return null
 
+        // 格式 +XEVENT=BATTERY,档位,档位数,通话分钟,是否充电：档位从 0 起算，与系统（AOSP HeadsetStateMachine）
+        // 的换算保持一致，否则同一时刻本应用记录的电量会和系统设置里显示的不同
         if (numericArgs.size >= 2) {
-            val current = numericArgs[0]
-            val max = numericArgs[1]
-            if (current >= 0 && max > 0) {
-                return ((current.toFloat() / max.toFloat()) * 100f).roundToInt().coerceIn(0, 100)
-            }
+            val level = numericArgs[0]
+            val levels = numericArgs[1]
+            if (level < 0 || levels <= 1 || level > levels) return null
+            return (level * 100 / (levels - 1)).coerceIn(0, 100)
         }
 
         val rawLevel = numericArgs.first()
