@@ -49,12 +49,14 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -208,19 +210,32 @@ class MainViewModel(
     private val _compareOpen = MutableStateFlow(false)
     val compareOpen: StateFlow<Boolean> = _compareOpen.asStateFlow()
 
-    /** null 表示用户还没改过选择，默认选最近测试的几台 */
+    /** null 表示还没有选择；每次打开后首批候选到达时写入默认（最近测试的几台），页面打开期间不再随候选顺序变化 */
     private val _compareSelection = MutableStateFlow<Map<String, Int>?>(null)
+
+    /** 用户是否改过选择：改过就一直沿用，没改过则每次打开按最新的测试重新挑选 */
+    private var compareSelectionTouched = false
     private val _compareAlignment = MutableStateFlow(CompareAlignment.RELATIVE)
 
-    /** 只在对比页打开时查询全部设备的电量记录 */
-    private val comparisonCandidates: Flow<List<ComparisonCandidate>?> = _compareOpen
+    /**
+     * 只在对比页打开时查询全部设备的电量记录。
+     *
+     * 关闭时不发射任何值，保留上一次的候选：页面退出动画期间仍显示原内容，再次打开也能立即显示再刷新。
+     */
+    private val comparisonCandidates: Flow<List<ComparisonCandidate>> = _compareOpen
         .flatMapLatest { open ->
             if (!open) {
-                flowOf(null)
+                emptyFlow<List<ComparisonCandidate>>()
             } else {
                 combine(recordDao.getBatteryRecordRows().map { it.toDeviceHistories() }, batteryClock) { histories, now ->
                     buildComparisonCandidates(histories, now)
                 }.flowOn(Dispatchers.Default)
+                    .onEach { candidates ->
+                        // Why: 默认选择只定一次。每分钟刷新或有新记录时候选顺序会变，每次重算默认会让已显示的曲线换色
+                        if (_compareSelection.compareAndSet(null, defaultCompareSlots(candidates))) {
+                            Log.i(tag, "[MainViewModel] comparisonCandidates -> default selection from ${candidates.size} candidates")
+                        }
+                    }
             }
         }
 
@@ -229,18 +244,13 @@ class MainViewModel(
         _compareSelection,
         _compareAlignment
     ) { candidates, selection, alignment ->
-        if (candidates == null) {
-            BatteryComparisonUiState(loading = true, alignment = alignment)
-        } else {
-            val keys = candidates.mapTo(HashSet()) { it.key }
-            val slots = (selection ?: defaultCompareSlots(candidates)).filterKeys { it in keys }
-            BatteryComparisonUiState(
-                loading = false,
-                candidates = candidates,
-                slots = slots,
-                alignment = alignment
-            )
-        }
+        val keys = candidates.mapTo(HashSet()) { it.key }
+        BatteryComparisonUiState(
+            loading = false,
+            candidates = candidates,
+            slots = (selection ?: defaultCompareSlots(candidates)).filterKeys { it in keys },
+            alignment = alignment
+        )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BatteryComparisonUiState())
 
     val fixedVolumeEnabled: StateFlow<Boolean> = settings.fixedVolumeEnabled
@@ -281,7 +291,8 @@ class MainViewModel(
     }
 
     fun openCompare() {
-        Log.i(tag, "[MainViewModel] openCompare")
+        Log.i(tag, "[MainViewModel] openCompare -> selectionTouched=$compareSelectionTouched")
+        if (!compareSelectionTouched) _compareSelection.value = null
         _compareOpen.value = true
     }
 
@@ -311,6 +322,7 @@ class MainViewModel(
             current + (key to freeSlot)
         }
         Log.i(tag, "[MainViewModel] toggleCompareDevice -> key=$key, selected=${current.size} -> ${next.size}")
+        compareSelectionTouched = true
         _compareSelection.value = next
     }
 
