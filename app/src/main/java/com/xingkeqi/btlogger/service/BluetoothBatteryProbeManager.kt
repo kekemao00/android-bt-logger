@@ -24,8 +24,8 @@ import java.util.concurrent.ConcurrentHashMap
  * 主动补齐系统未广播给三方应用的耳机电量来源。
  *
  * Why:
- * 1. 反射 `BluetoothDevice.getBatteryLevel()` 可以读取部分系统蓝牙缓存值；只是一次进程间调用，
- *    每分钟读一次，让电量变化的时间点误差从 5 分钟缩到 1 分钟以内，曲线才足够细。
+ * 1. 反射 `BluetoothDevice.getBatteryLevel()` 可以读取部分系统蓝牙缓存值；只是一次进程间调用、不会唤醒耳机，
+ *    每 30 秒读一次，作为系统广播被限制时的兜底，漏掉的电量变化最迟 30 秒内也会落库。
  * 2. 对支持标准 Battery Service 的 LE/双模设备，额外通过 GATT 读取或订阅电量变化；
  *    单次读取要建立一次 GATT 连接，仍保持至少 5 分钟一次，避免频繁唤醒耳机反过来影响续航测试。
  */
@@ -495,7 +495,7 @@ class BluetoothBatteryProbeManager(
     )
 
     private companion object {
-        const val SYSTEM_CACHE_POLL_INTERVAL_MS = 60 * 1000L
+        const val SYSTEM_CACHE_POLL_INTERVAL_MS = 30 * 1000L
         const val GATT_READ_INTERVAL_MS = 5 * 60 * 1000L
         const val GATT_RETRY_INTERVAL_MS = 60 * 1000L
         val BATTERY_SERVICE_UUID: UUID = UUID.fromString(BluetoothBatteryUtils.BATTERY_SERVICE_UUID)

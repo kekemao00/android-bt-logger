@@ -3,7 +3,6 @@ package com.xingkeqi.btlogger.utils
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothHeadset
 import android.content.Intent
-import android.os.BatteryManager
 import android.util.Log
 import com.xingkeqi.btlogger.data.DEVICE_BATTERY_LEVEL_UNKNOWN
 import kotlin.math.roundToInt
@@ -60,13 +59,6 @@ object BluetoothBatteryUtils {
 
             else -> null
         }
-    }
-
-    fun extractPhoneBatteryLevel(intent: Intent): Int? {
-        if (intent.action != Intent.ACTION_BATTERY_CHANGED) return null
-        val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
-        val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
-        return scaleBatteryLevel(level, scale)
     }
 
     fun isKnownBatteryLevel(level: Int): Boolean = level in 0..100

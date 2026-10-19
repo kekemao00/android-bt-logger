@@ -5,7 +5,7 @@ import com.xingkeqi.btlogger.domain.battery.DeviceBatteryHistory
 import com.xingkeqi.btlogger.domain.battery.ReadingKind
 
 /**
- * 多设备电量对比只需要的字段，不查询编解码、UUID 等大字段。
+ * 多设备耳机电量对比只需要的字段，不查询编解码、UUID 等大字段。
  */
 data class BatteryRecordRow(
     val mac: String,
@@ -13,7 +13,6 @@ data class BatteryRecordRow(
     val id: Int,
     val timestamp: Long,
     val eventType: String,
-    val batteryLevel: Int,
     val headsetBatteryLevel: Int,
     val volume: Int,
     val isPlaying: Boolean
@@ -29,7 +28,6 @@ fun RecordInfo.toBatteryReading(): BatteryReading = BatteryReading(
     timestamp = timestamp,
     kind = readingKindOf(eventType),
     headsetLevel = headsetBatteryLevel.takeIf { it in 0..100 },
-    phoneLevel = phoneLevelOrNull(batteryLevel),
     volume = volume,
     isPlaying = isPlaying == 1
 )
@@ -38,7 +36,6 @@ fun BatteryRecordRow.toBatteryReading(): BatteryReading = BatteryReading(
     timestamp = timestamp,
     kind = readingKindOf(eventType),
     headsetLevel = headsetBatteryLevel.takeIf { it in 0..100 },
-    phoneLevel = phoneLevelOrNull(batteryLevel),
     volume = volume,
     isPlaying = isPlaying
 )
@@ -54,8 +51,3 @@ fun List<BatteryRecordRow>.toDeviceHistories(): List<DeviceBatteryHistory> =
             readings = rows.map { it.toBatteryReading() }
         )
     }
-
-/**
- * Why: 导入的旧表格缺少手机电量时按 0 写入；手机电量为 0 时不可能还在记录，按未知处理，避免曲线掉到 0%
- */
-private fun phoneLevelOrNull(level: Int): Int? = level.takeIf { it in 1..100 }

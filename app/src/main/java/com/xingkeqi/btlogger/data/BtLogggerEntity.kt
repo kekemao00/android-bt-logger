@@ -16,14 +16,7 @@ object RecordEventType {
     const val DISCONNECTED = "DISCONNECTED"
     const val CODEC_CHANGED = "CODEC_CHANGED"
     const val BATTERY_CHANGED = "BATTERY_CHANGED"
-
-    /** 定时采样：耳机电量未变化时按设置的间隔补记一条，保证曲线连续、能看出记录是否中断 */
-    const val BATTERY_SAMPLE = "BATTERY_SAMPLE"
 }
-
-/** 电量更新与定时采样都是“电量记录”，筛选、导出与曲线一并处理 */
-fun isBatteryEvent(eventType: String): Boolean =
-    eventType == RecordEventType.BATTERY_CHANGED || eventType == RecordEventType.BATTERY_SAMPLE
 
 data class DeviceInfo(
     val mac: String = "",
@@ -59,7 +52,7 @@ data class RecordInfo(
     val volume: Int = 0,
     //  播放状态（0：未播放，1：正在播放）
     val isPlaying: Int = 0,
-    // 手机电量（0~100）
+    // 手机电量（0~100）；只记录耳机电量后新记录固定为 -1，仅旧记录与导入数据有值
     val batteryLevel: Int = 0,
     // 耳机电量（0~100，-1 表示当前机型或链路未上报）
     val headsetBatteryLevel: Int = DEVICE_BATTERY_LEVEL_UNKNOWN,

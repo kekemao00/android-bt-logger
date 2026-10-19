@@ -13,13 +13,12 @@ package com.xingkeqi.btlogger.domain.battery
 enum class ReadingKind { SESSION_START, SESSION_END, SAMPLE }
 
 /**
- * 记录中与电量相关的字段；电量为 null 表示该条记录没有拿到有效值（如耳机未上报）。
+ * 记录中与耳机电量相关的字段；电量为 null 表示该条记录没有拿到有效值（如耳机未上报）。
  */
 data class BatteryReading(
     val timestamp: Long,
     val kind: ReadingKind,
     val headsetLevel: Int?,
-    val phoneLevel: Int?,
     val volume: Int = 0,
     val isPlaying: Boolean = false
 )
@@ -38,20 +37,11 @@ data class BatterySession(
     val ended: Boolean,
     val readings: List<BatteryReading>
 ) {
+    /** 耳机电量实测点，按时间升序 */
     val headset: List<LevelPoint> = readings.mapNotNull { reading ->
         reading.headsetLevel?.takeIf(::isValidLevel)?.let { LevelPoint(reading.timestamp, it) }
     }
-    val phone: List<LevelPoint> = readings.mapNotNull { reading ->
-        reading.phoneLevel?.takeIf(::isValidLevel)?.let { LevelPoint(reading.timestamp, it) }
-    }
-
-    fun points(source: BatterySource): List<LevelPoint> = when (source) {
-        BatterySource.HEADSET -> headset
-        BatterySource.PHONE -> phone
-    }
 }
-
-enum class BatterySource { HEADSET, PHONE }
 
 /**
  * 掉电统计。
@@ -91,28 +81,25 @@ data class DrainStats(
 enum class BatteryRange { LATEST_SESSION, LAST_24_HOURS, ALL }
 
 /**
- * 详情页电量概览：所选范围内的连接（已按范围裁剪）与掉电统计。
+ * 详情页耳机电量概览：所选范围内的连接（已按范围裁剪）与掉电统计。
  *
  * @param ongoing 最后一段仍在连接中，此时展示“预计剩余”，否则展示“满电续航”
  */
 data class BatteryOverview(
     val range: BatteryRange,
     val sessions: List<BatterySession>,
-    val headsetStats: DrainStats?,
-    val phoneStats: DrainStats?,
+    val stats: DrainStats?,
     val windowStart: Long,
     val windowEnd: Long,
     val ongoing: Boolean
 ) {
-    val hasHeadsetData: Boolean get() = sessions.any { it.headset.isNotEmpty() }
-    val hasPhoneData: Boolean get() = sessions.any { it.phone.isNotEmpty() }
+    val hasData: Boolean get() = sessions.any { it.headset.isNotEmpty() }
 
     companion object {
         fun empty(range: BatteryRange) = BatteryOverview(
             range = range,
             sessions = emptyList(),
-            headsetStats = null,
-            phoneStats = null,
+            stats = null,
             windowStart = 0L,
             windowEnd = 0L,
             ongoing = false
@@ -192,9 +179,6 @@ fun computeDrainStats(segments: List<List<LevelPoint>>): DrainStats? {
     )
 }
 
-fun computeDrainStats(session: BatterySession, source: BatterySource): DrainStats? =
-    computeDrainStats(listOf(session.points(source)))
-
 /**
  * 只保留 [since] 之后的部分。范围起点落在连接中间时，用起点之前最后一个电量补一个起点，
  * 曲线从窗口左边缘开始而不是凭空缺一截（电量在两次上报之间保持不变）。
@@ -207,12 +191,10 @@ fun BatterySession.clippedFrom(since: Long): BatterySession? {
     val before = readings.filter { it.timestamp < since }
     val after = readings.filter { it.timestamp >= since }
     val carriedHeadset = before.lastOrNull { it.headsetLevel?.let(::isValidLevel) == true }?.headsetLevel
-    val carriedPhone = before.lastOrNull { it.phoneLevel?.let(::isValidLevel) == true }?.phoneLevel
     val carried = BatteryReading(
         timestamp = since,
         kind = ReadingKind.SAMPLE,
         headsetLevel = carriedHeadset,
-        phoneLevel = carriedPhone,
         volume = before.lastOrNull()?.volume ?: 0,
         isPlaying = before.lastOrNull()?.isPlaying ?: false
     )
@@ -235,8 +217,7 @@ fun buildBatteryOverview(readings: List<BatteryReading>, range: BatteryRange, no
     return BatteryOverview(
         range = range,
         sessions = selected,
-        headsetStats = computeDrainStats(selected.map { it.headset }),
-        phoneStats = computeDrainStats(selected.map { it.phone }),
+        stats = computeDrainStats(selected.map { it.headset }),
         windowStart = selected.first().startTime,
         windowEnd = selected.last().endTime,
         ongoing = !selected.last().ended
@@ -290,15 +271,15 @@ fun buildComparisonCandidates(devices: List<DeviceBatteryHistory>): List<Compari
             key = device.key,
             name = device.name,
             session = session,
-            stats = computeDrainStats(session, BatterySource.HEADSET)
+            stats = computeDrainStats(listOf(session.headset))
         )
     }.sortedByDescending { it.session.startTime }
 
 /**
  * 去掉平台中段的重复点，只保留每段相同电量的首尾两点。
  *
- * 定时采样会产生大量相同电量的点；首尾两点已经决定了这一段水平线，去掉中间点后
- * 折线与单调插值曲线的形状都完全不变（平台上的切线恒为 0），绘制量却小得多。
+ * 连接、编解码切换等记录也带着当时的耳机电量，会在平台上留下重复点；首尾两点已经决定了这一段水平线，
+ * 去掉中间点后折线与单调插值曲线的形状都完全不变（平台上的切线恒为 0），绘制量却小得多。
  */
 fun compressPlateaus(points: List<LevelPoint>): List<LevelPoint> {
     if (points.size <= 2) return points

@@ -249,7 +249,7 @@ interface RecordDao {
     fun getRecordInfoListAll(): Flow<List<RecordInfo>>
 
     /**
-     * 所有设备的电量相关字段，按时间升序；用于多设备电量对比
+     * 所有设备的耳机电量相关字段，按时间升序；用于多设备电量对比
      */
     @Query(
         """
@@ -259,7 +259,6 @@ interface RecordDao {
             device_connection_records.id AS id,
             device_connection_records.timestamp AS timestamp,
             device_connection_records.event_type AS eventType,
-            device_connection_records.battery_level AS batteryLevel,
             device_connection_records.headset_battery_level AS headsetBatteryLevel,
             device_connection_records.volume AS volume,
             device_connection_records.is_playing AS isPlaying

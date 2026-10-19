@@ -25,14 +25,14 @@ class BatteryAnalyticsTest {
     private val minute = 60_000L
     private val hour = 60 * minute
 
-    private fun connect(at: Long, headset: Int? = null, phone: Int? = 90) =
-        BatteryReading(at, ReadingKind.SESSION_START, headset, phone)
+    private fun connect(at: Long, headset: Int? = null) =
+        BatteryReading(at, ReadingKind.SESSION_START, headset)
 
-    private fun sample(at: Long, headset: Int?, phone: Int? = 90) =
-        BatteryReading(at, ReadingKind.SAMPLE, headset, phone)
+    private fun sample(at: Long, headset: Int?) =
+        BatteryReading(at, ReadingKind.SAMPLE, headset)
 
-    private fun disconnect(at: Long, headset: Int? = null, phone: Int? = 90) =
-        BatteryReading(at, ReadingKind.SESSION_END, headset, phone)
+    private fun disconnect(at: Long, headset: Int? = null) =
+        BatteryReading(at, ReadingKind.SESSION_END, headset)
 
     @Test
     fun splitBatterySessions_mergesRepeatedConnectsAndIgnoresLoneDisconnect() {
@@ -68,7 +68,7 @@ class BatteryAnalyticsTest {
         ).single()
 
         assertEquals(listOf(LevelPoint(t0 + 2 * minute, 60)), session.headset)
-        assertEquals(3, session.phone.size)
+        assertEquals(3, session.readings.size)
     }
 
     @Test
@@ -119,13 +119,12 @@ class BatteryAnalyticsTest {
     @Test
     fun clippedFrom_carriesLevelAtWindowStart() {
         val session = splitBatterySessions(
-            listOf(connect(t0, headset = 100, phone = 90), sample(t0 + 2 * hour, headset = 70, phone = 80))
+            listOf(connect(t0, headset = 100), sample(t0 + 2 * hour, headset = 70))
         ).single()
 
         val clipped = session.clippedFrom(t0 + hour)!!
         assertEquals(t0 + hour, clipped.startTime)
         assertEquals(listOf(LevelPoint(t0 + hour, 100), LevelPoint(t0 + 2 * hour, 70)), clipped.headset)
-        assertEquals(listOf(90, 80), clipped.phone.map { it.level })
 
         assertNull(session.clippedFrom(t0 + 3 * hour))
         assertEquals(session, session.clippedFrom(t0))
@@ -146,19 +145,19 @@ class BatteryAnalyticsTest {
         assertEquals(1, latest.sessions.size)
         assertTrue(latest.ongoing)
         assertEquals(t0 + 30 * hour, latest.windowStart)
-        assertEquals(10.0, latest.headsetStats!!.ratePerHour!!, 1e-9)
+        assertEquals(10.0, latest.stats!!.ratePerHour!!, 1e-9)
 
         val lastDay = buildBatteryOverview(readings, BatteryRange.LAST_24_HOURS, now)
         assertEquals(1, lastDay.sessions.size)
 
         val all = buildBatteryOverview(readings, BatteryRange.ALL, now)
         assertEquals(2, all.sessions.size)
-        assertEquals(30, all.headsetStats!!.consumed)
-        assertEquals(3 * hour, all.headsetStats!!.trackedMillis)
+        assertEquals(30, all.stats!!.consumed)
+        assertEquals(3 * hour, all.stats!!.trackedMillis)
 
         val empty = buildBatteryOverview(emptyList(), BatteryRange.ALL, now)
-        assertFalse(empty.hasHeadsetData)
-        assertNull(empty.headsetStats)
+        assertFalse(empty.hasData)
+        assertNull(empty.stats)
     }
 
     @Test
