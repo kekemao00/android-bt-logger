@@ -10,7 +10,9 @@ import com.xingkeqi.btlogger.domain.battery.buildComparisonCandidates
 import com.xingkeqi.btlogger.domain.battery.clippedFrom
 import com.xingkeqi.btlogger.domain.battery.compressPlateaus
 import com.xingkeqi.btlogger.domain.battery.computeDrainStats
+import com.xingkeqi.btlogger.domain.battery.LevelStep
 import com.xingkeqi.btlogger.domain.battery.lastPointAtOrBefore
+import com.xingkeqi.btlogger.domain.battery.levelStepAt
 import com.xingkeqi.btlogger.domain.battery.nearestPointIndex
 import com.xingkeqi.btlogger.domain.battery.splitBatterySessions
 import org.junit.Assert.assertEquals
@@ -124,6 +126,7 @@ class BatteryAnalyticsTest {
 
         val clipped = session.clippedFrom(t0 + hour)!!
         assertEquals(t0 + hour, clipped.startTime)
+        assertEquals(t0, clipped.connectedAt)
         assertEquals(listOf(LevelPoint(t0 + hour, 100), LevelPoint(t0 + 2 * hour, 70)), clipped.headset)
 
         assertNull(session.clippedFrom(t0 + 3 * hour))
@@ -219,5 +222,18 @@ class BatteryAnalyticsTest {
         assertEquals(80, lastPointAtOrBefore(points, t0 + 20 * minute)?.level)
         assertNull(lastPointAtOrBefore(points, t0 - 1))
         assertNull(lastPointAtOrBefore(points, t0 + 21 * minute))
+    }
+
+    @Test
+    fun levelStepAt_measuresHowLongThePreviousLevelLasted() {
+        val points = listOf(100 to 0, 100 to 10, 90 to 14, 90 to 40, 80 to 42).map { (level, at) ->
+            LevelPoint(t0 + at * minute, level)
+        }
+
+        assertNull(levelStepAt(points, 0))
+        assertEquals(LevelStep(delta = -10, millis = 14 * minute), levelStepAt(points, 2))
+        assertEquals(LevelStep(delta = 0, millis = 26 * minute), levelStepAt(points, 3))
+        assertEquals(LevelStep(delta = -10, millis = 28 * minute), levelStepAt(points, 4))
+        assertNull(levelStepAt(points, 5))
     }
 }

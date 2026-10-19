@@ -92,11 +92,8 @@
     <string name="record_disconnected_gap">断开间隔：%1$s</string>
     <string name="record_session_duration">本次连接：%1$s</string>
     <string name="record_active_codec">当前编解码：%1$s</string>
-    <string name="record_battery_summary">电量采样：%1$s，%2$s</string>
-    <string name="record_battery_phone">手机 %1$d%%</string>
-    <string name="record_battery_phone_unknown">手机 --</string>
-    <string name="record_battery_headset">耳机 %1$d%%</string>
-    <string name="record_battery_headset_unknown">耳机未上报</string>
+    <string name="record_battery_headset">耳机电量 %1$d%%</string>
+    <string name="record_battery_headset_unknown">耳机未上报电量</string>
     <string name="codec_phone_supported">手机支持</string>
     <string name="codec_negotiable">双方可用</string>
     <string name="codec_active">当前使用</string>
@@ -105,11 +102,45 @@
     <string name="duration_connected">连接 %1$s</string>
     <string name="duration_disconnected">断开 %1$s</string>
 
-    <!-- 电量 -->
-    <string name="battery_trend_title">电量趋势</string>
-    <string name="phone_battery_label">手机电量</string>
+    <!-- 耳机电量 -->
     <string name="headset_battery_label">耳机电量</string>
-    <string name="headset_battery_gap_note">耳机电量依赖设备主动上报，未上报的时间段会显示断线。</string>
+    <string name="battery_card_title">耳机电量</string>
+    <string name="battery_range_current">本次连接</string>
+    <string name="battery_range_last">上次连接</string>
+    <string name="battery_range_day">24 小时</string>
+    <string name="battery_range_all">全部</string>
+    <string name="battery_reset_zoom">还原</string>
+    <string name="battery_open_compare">多机对比</string>
+    <string name="battery_chart_hint">轻触查看读数 · 横向拖动浏览 · 双指缩放 · 双击还原</string>
+    <string name="battery_chart_description">耳机电量曲线</string>
+    <string name="battery_cursor_elapsed">连接后 %1$s</string>
+    <string name="battery_cursor_step">较上一档 %1$+d%% · 上一档持续 %2$s</string>
+    <string name="battery_cursor_hold">本档已持续 %1$s</string>
+    <string name="battery_stat_levels">起止电量</string>
+    <string name="battery_stat_levels_value">%1$d%% → %2$d%%</string>
+    <string name="battery_stat_duration">记录时长</string>
+    <string name="battery_stat_rate">平均掉电</string>
+    <string name="battery_stat_rate_value">%1$s%%/h</string>
+    <string name="battery_stat_remaining">预计剩余</string>
+    <string name="battery_stat_full_runtime">满电续航</string>
+    <string name="battery_insufficient">数据不足</string>
+    <string name="battery_empty">这段时间耳机没有上报电量。部分设备（如车机、音箱）不提供电量。</string>
+    <string name="battery_note">只在耳机电量变化时记录，曲线经过每个实测点。多数耳机按 10% 一档上报，掉电速率需记录满 10 分钟且有下降才计算。</string>
+
+    <!-- 电量对比 -->
+    <string name="action_compare">电量对比</string>
+    <string name="compare_title">电量对比</string>
+    <string name="compare_align_relative">按开始对齐</string>
+    <string name="compare_align_absolute">按实际时间</string>
+    <string name="compare_select_caption">选择耳机 · 最多 %1$d 台</string>
+    <string name="compare_limit">最多同时对比 %1$d 台</string>
+    <string name="compare_table_caption">续航对比 · 按满电续航排序</string>
+    <string name="compare_session_start">%1$s 开始</string>
+    <string name="compare_cursor">游标处</string>
+    <string name="compare_none_selected">选择上方的耳机查看曲线</string>
+    <string name="compare_empty_title">暂无可对比的耳机</string>
+    <string name="compare_empty_body">耳机连接并上报电量后会出现在这里。</string>
+    <string name="compare_note">每台耳机取最近一次有效连接（耳机电量记录跨度不少于 10 分钟）。按开始对齐时，以这次连接的首个电量记录为起点。</string>
 
     <!-- 固定音量 -->
     <string name="volume_dialog_title">固定连接音量</string>

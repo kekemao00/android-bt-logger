@@ -18,6 +18,13 @@ import com.xingkeqi.btlogger.data.RecordStats
 import com.xingkeqi.btlogger.data.buildRecordTimeline
 import com.xingkeqi.btlogger.data.computeRecordStats
 import com.xingkeqi.btlogger.data.parseExportedRows
+import com.xingkeqi.btlogger.data.toBatteryReading
+import com.xingkeqi.btlogger.data.toDeviceHistories
+import com.xingkeqi.btlogger.domain.battery.BatteryOverview
+import com.xingkeqi.btlogger.domain.battery.BatteryRange
+import com.xingkeqi.btlogger.domain.battery.ComparisonCandidate
+import com.xingkeqi.btlogger.domain.battery.buildBatteryOverview
+import com.xingkeqi.btlogger.domain.battery.buildComparisonCandidates
 import com.xingkeqi.btlogger.update.ApkInstaller
 import com.xingkeqi.btlogger.update.GitHubUpdateRepository
 import com.xingkeqi.btlogger.update.ReleaseAsset
@@ -44,6 +51,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
@@ -166,6 +174,60 @@ class MainViewModel(
     private val _recordFilter = MutableStateFlow(RecordFilter.ALL)
     val recordFilter: StateFlow<RecordFilter> = _recordFilter.asStateFlow()
 
+    private val _batteryRange = MutableStateFlow(BatteryRange.LATEST_SESSION)
+    val batteryRange: StateFlow<BatteryRange> = _batteryRange.asStateFlow()
+
+    /**
+     * 详情页耳机电量曲线与掉电统计；记录或范围变化时在后台线程重算
+     */
+    val batteryOverview: StateFlow<BatteryOverview> = combine(records, _batteryRange) { list, range ->
+        buildBatteryOverview(
+            readings = list.asReversed().map { it.toBatteryReading() },
+            range = range,
+            now = System.currentTimeMillis()
+        )
+    }
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BatteryOverview.empty(BatteryRange.LATEST_SESSION))
+
+    private val _compareOpen = MutableStateFlow(false)
+    val compareOpen: StateFlow<Boolean> = _compareOpen.asStateFlow()
+
+    /** null 表示用户还没改过选择，默认选最近测试的几台 */
+    private val _compareSelection = MutableStateFlow<Map<String, Int>?>(null)
+    private val _compareAlignment = MutableStateFlow(CompareAlignment.RELATIVE)
+
+    /** 只在对比页打开时查询全部设备的电量记录 */
+    private val comparisonCandidates: Flow<List<ComparisonCandidate>?> = _compareOpen
+        .flatMapLatest { open ->
+            if (!open) {
+                flowOf(null)
+            } else {
+                recordDao.getBatteryRecordRows()
+                    .map { rows -> buildComparisonCandidates(rows.toDeviceHistories()) }
+                    .flowOn(Dispatchers.Default)
+            }
+        }
+
+    val batteryComparison: StateFlow<BatteryComparisonUiState> = combine(
+        comparisonCandidates,
+        _compareSelection,
+        _compareAlignment
+    ) { candidates, selection, alignment ->
+        if (candidates == null) {
+            BatteryComparisonUiState(loading = true, alignment = alignment)
+        } else {
+            val keys = candidates.mapTo(HashSet()) { it.key }
+            val slots = (selection ?: defaultCompareSlots(candidates)).filterKeys { it in keys }
+            BatteryComparisonUiState(
+                loading = false,
+                candidates = candidates,
+                slots = slots,
+                alignment = alignment
+            )
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BatteryComparisonUiState())
+
     val fixedVolumeEnabled: StateFlow<Boolean> = settings.fixedVolumeEnabled
     val fixedVolumePercent: StateFlow<Int> = settings.fixedVolumePercent
 
@@ -197,6 +259,48 @@ class MainViewModel(
     fun setRecordFilter(filter: RecordFilter) {
         _recordFilter.value = filter
     }
+
+    fun setBatteryRange(range: BatteryRange) {
+        Log.i(tag, "[MainViewModel] setBatteryRange -> ${_batteryRange.value} -> $range")
+        _batteryRange.value = range
+    }
+
+    fun openCompare() {
+        Log.i(tag, "[MainViewModel] openCompare")
+        _compareOpen.value = true
+    }
+
+    fun closeCompare() {
+        Log.i(tag, "[MainViewModel] closeCompare")
+        _compareOpen.value = false
+    }
+
+    fun setCompareAlignment(alignment: CompareAlignment) {
+        Log.i(tag, "[MainViewModel] setCompareAlignment -> $alignment")
+        _compareAlignment.value = alignment
+    }
+
+    /**
+     * 选中或取消一台耳机；新选中的设备占用最小的空闲颜色槽位
+     */
+    fun toggleCompareDevice(key: String) {
+        val current = batteryComparison.value.slots
+        val next = if (key in current) {
+            current - key
+        } else {
+            val freeSlot = (0 until MAX_COMPARE_SERIES).firstOrNull { it !in current.values }
+            if (freeSlot == null) {
+                emit(UiEvent.ShowMessage(R.string.compare_limit, listOf(MAX_COMPARE_SERIES)))
+                return
+            }
+            current + (key to freeSlot)
+        }
+        Log.i(tag, "[MainViewModel] toggleCompareDevice -> key=$key, selected=${current.size} -> ${next.size}")
+        _compareSelection.value = next
+    }
+
+    private fun defaultCompareSlots(candidates: List<ComparisonCandidate>): Map<String, Int> =
+        candidates.take(MAX_COMPARE_SERIES).mapIndexed { index, candidate -> candidate.key to index }.toMap()
 
     fun updateMediaVolumeSnapshot(snapshot: MediaVolumeSnapshot) {
         _mediaVolumeSnapshot.value = snapshot

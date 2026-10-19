@@ -30,12 +30,14 @@ data class LevelPoint(val timestamp: Long, val level: Int)
  * 一次连接：最近一次断开后的首条记录到对应的断开记录。
  *
  * @param ended 是否已断开；仍在连接中时 [endTime] 为最后一条记录的时间
+ * @param connectedAt 实际连接时间；按时间范围裁剪后 [startTime] 是范围起点，这里仍保留原值
  */
 data class BatterySession(
     val startTime: Long,
     val endTime: Long,
     val ended: Boolean,
-    val readings: List<BatteryReading>
+    val readings: List<BatteryReading>,
+    val connectedAt: Long = startTime
 ) {
     /** 耳机电量实测点，按时间升序 */
     val headset: List<LevelPoint> = readings.mapNotNull { reading ->
@@ -317,6 +319,29 @@ fun lastPointAtOrBefore(points: List<LevelPoint>, timestamp: Long): LevelPoint? 
         if (points[mid].timestamp <= timestamp) low = mid else high = mid - 1
     }
     return points[low]
+}
+
+/**
+ * 实测点相对上一档电量的变化。
+ *
+ * @param delta 与前一个实测点的电量差；0 表示仍停在同一档
+ * @param millis 上一档电量持续的时长；[delta] 为 0 时是当前这一档已持续的时长
+ */
+data class LevelStep(val delta: Int, val millis: Long)
+
+/**
+ * 游标读数用：耳机多为 10% 一档上报，“这一档用了多久”比相邻两点的时间差更能说明掉电快慢。
+ *
+ * @param points 按时间升序；平台中段可以已被 [compressPlateaus] 去掉
+ * @return 首个点或下标越界时为 null
+ */
+fun levelStepAt(points: List<LevelPoint>, index: Int): LevelStep? {
+    if (index !in 1..points.lastIndex) return null
+    val current = points[index]
+    val previous = points[index - 1]
+    var runStart = index - 1
+    while (runStart > 0 && points[runStart - 1].level == previous.level) runStart--
+    return LevelStep(delta = current.level - previous.level, millis = current.timestamp - points[runStart].timestamp)
 }
 
 fun isValidLevel(level: Int): Boolean = level in 0..FULL_LEVEL

@@ -49,12 +49,14 @@ import com.xingkeqi.btlogger.data.DeviceInfo
 import com.xingkeqi.btlogger.data.RecordEventType
 import com.xingkeqi.btlogger.data.RecordInfo
 import com.xingkeqi.btlogger.data.RecordStats
+import com.xingkeqi.btlogger.domain.battery.BatteryOverview
+import com.xingkeqi.btlogger.domain.battery.BatteryRange
 import com.xingkeqi.btlogger.ui.components.BadgeType
 import com.xingkeqi.btlogger.ui.components.BatteryIndicator
-import com.xingkeqi.btlogger.ui.components.BatteryTrendChart
 import com.xingkeqi.btlogger.ui.components.ConnectionStatusIndicator
 import com.xingkeqi.btlogger.ui.components.DurationProgressBar
 import com.xingkeqi.btlogger.ui.components.EmptyState
+import com.xingkeqi.btlogger.ui.components.HeadsetBatteryCard
 import com.xingkeqi.btlogger.ui.components.LineIcons
 import com.xingkeqi.btlogger.ui.components.SectionCaption
 import com.xingkeqi.btlogger.ui.components.SegmentPosition
@@ -84,18 +86,21 @@ private val HistoryFilters = listOf(
 )
 
 /**
- * 设备详情（无状态）：概览、统计、编解码、电量趋势与可筛选的历史记录。
+ * 设备详情（无状态）：概览、耳机电量曲线、统计、编解码与可筛选的历史记录。
  *
- * 头部不再使用渐变底色，概览、统计与图表分别放在白色卡片里；历史记录是一张分组卡片，
- * 用分段标签页筛选。
+ * 头部不再使用渐变底色，概览、电量、统计分别放在白色卡片里；历史记录是一张分组卡片，
+ * 用分段标签页筛选。耳机电量是续航测试最常看的内容，紧跟在概览之后。
  */
 @Composable
 fun DeviceDetailScreen(
     device: DeviceInfo,
     records: List<RecordInfo>,
     stats: RecordStats,
+    batteryOverview: BatteryOverview,
     filter: RecordFilter,
     onFilterChange: (RecordFilter) -> Unit,
+    onBatteryRangeChange: (BatteryRange) -> Unit,
+    onOpenCompare: () -> Unit,
     onRecordLongClick: (RecordInfo) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -120,9 +125,6 @@ fun DeviceDetailScreen(
             }
         }
     }
-    // 图表按时间升序绘制
-    val chronologicalRecords = remember(records) { records.asReversed() }
-
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = Dimens.pageGutter, end = Dimens.pageGutter, bottom = Dimens.spacingXl)
@@ -132,7 +134,9 @@ fun DeviceDetailScreen(
                 device = device,
                 latestRecord = records.first(),
                 stats = stats,
-                chronologicalRecords = chronologicalRecords
+                batteryOverview = batteryOverview,
+                onBatteryRangeChange = onBatteryRangeChange,
+                onOpenCompare = onOpenCompare
             )
         }
 
@@ -170,7 +174,9 @@ private fun DetailHeader(
     device: DeviceInfo,
     latestRecord: RecordInfo,
     stats: RecordStats,
-    chronologicalRecords: List<RecordInfo>
+    batteryOverview: BatteryOverview,
+    onBatteryRangeChange: (BatteryRange) -> Unit,
+    onOpenCompare: () -> Unit
 ) {
     val colors = BtTheme.colors
     val isConnected = latestRecord.connectState == STATE_CONNECTED
@@ -222,6 +228,14 @@ private fun DetailHeader(
             RecordMetricsRow(record = latestRecord, recordedLabels = true)
         }
 
+        HeadsetBatteryCard(
+            overview = batteryOverview,
+            deviceKey = device.mac,
+            isConnected = isConnected,
+            onRangeChange = onBatteryRangeChange,
+            onOpenCompare = onOpenCompare
+        )
+
         StatCard(
             items = listOf(
                 StatItem(stringResource(id = R.string.stat_connect_count), stringResource(id = R.string.count_times, stats.connectCount)),
@@ -246,8 +260,6 @@ private fun DetailHeader(
                 activeCodec = latestRecord.activeCodec
             )
         }
-
-        BatteryTrendChart(records = chronologicalRecords)
     }
 }
 
@@ -307,9 +319,6 @@ private fun RecordMetricsRow(record: RecordInfo, recordedLabels: Boolean) {
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        record.batteryLevel.takeIf { it in 0..100 }?.let { level ->
-            BatteryIndicator(level = level, label = stringResource(id = R.string.phone_battery_label))
-        }
         record.headsetBatteryLevel.takeIf { it in 0..100 }?.let { level ->
             BatteryIndicator(level = level, label = stringResource(id = R.string.headset_battery_label))
         }
@@ -466,15 +475,10 @@ private fun EventIcon(icon: ImageVector, emphasized: Boolean) {
 }
 
 @Composable
-private fun batterySummary(record: RecordInfo): String {
-    val phone = record.batteryLevel.takeIf { it in 0..100 }
-        ?.let { stringResource(id = R.string.record_battery_phone, it) }
-        ?: stringResource(id = R.string.record_battery_phone_unknown)
-    val headset = record.headsetBatteryLevel.takeIf { it in 0..100 }
+private fun batterySummary(record: RecordInfo): String =
+    record.headsetBatteryLevel.takeIf { it in 0..100 }
         ?.let { stringResource(id = R.string.record_battery_headset, it) }
         ?: stringResource(id = R.string.record_battery_headset_unknown)
-    return stringResource(id = R.string.record_battery_summary, phone, headset)
-}
 
 /**
  * 编解码信息表：标签 ink-3 在左、值 ink 在右，行间 1px 分隔线，无竖线

@@ -89,3 +89,35 @@ val DarkWarmMonoColors = WarmMonoColors(
 )
 
 val LocalWarmMonoColors = staticCompositionLocalOf { LightWarmMonoColors }
+
+/**
+ * 多耳机对比曲线的分类色，按槽位固定顺序取用，颜色跟随设备而不是排名。
+ *
+ * Why:
+ * 界面平时只有一个强调色，但对比图需要同时区分最多 6 台耳机；这组颜色按亮度带、色度与
+ * 色觉障碍下的相邻色差校验过，第一个槽位就是强调色。浅色主题部分颜色对比度偏低，
+ * 因此图例与对比表始终同时给出设备名，不只靠颜色区分。
+ */
+private val LightChartSeriesColors = listOf(
+    Color(0xFF2F5BFF),
+    Color(0xFFEB6834),
+    Color(0xFF1BAF7A),
+    Color(0xFFEDA100),
+    Color(0xFFE87BA4),
+    Color(0xFF008300)
+)
+
+private val DarkChartSeriesColors = listOf(
+    Color(0xFF2F5BFF),
+    Color(0xFFD95926),
+    Color(0xFF199E70),
+    Color(0xFFC98500),
+    Color(0xFFD55181),
+    Color(0xFF008300)
+)
+
+/** 第 [slot] 个对比槽位的曲线颜色 */
+fun WarmMonoColors.chartSeries(slot: Int): Color {
+    val palette = if (isDark) DarkChartSeriesColors else LightChartSeriesColors
+    return palette[slot.mod(palette.size)]
+}
