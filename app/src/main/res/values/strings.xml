@@ -93,6 +93,7 @@
     <string name="record_session_duration">本次连接：%1$s</string>
     <string name="record_active_codec">当前编解码：%1$s</string>
     <string name="record_battery_headset">耳机电量 %1$d%%</string>
+    <string name="record_battery_step">耳机电量 %1$d%% → %2$d%% · 上一档持续 %3$s</string>
     <string name="record_battery_headset_unknown">耳机未上报电量</string>
     <string name="codec_phone_supported">手机支持</string>
     <string name="codec_negotiable">双方可用</string>

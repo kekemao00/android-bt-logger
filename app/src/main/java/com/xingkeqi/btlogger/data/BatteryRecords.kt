@@ -51,3 +51,39 @@ fun List<BatteryRecordRow>.toDeviceHistories(): List<DeviceBatteryHistory> =
             readings = rows.map { it.toBatteryReading() }
         )
     }
+
+/**
+ * 历史记录里一条“电量更新”相对上一档的变化。
+ *
+ * @param previousLevel 上一档耳机电量
+ * @param heldMillis 上一档从首次记录到这次变化持续的时长
+ */
+data class HeadsetLevelChange(val previousLevel: Int, val heldMillis: Long)
+
+/**
+ * 为每条“电量更新”找出它之前的那一档电量与持续时长，按记录 id 索引。
+ *
+ * Why: 只在耳机电量变化时记录后，历史列表里每条电量记录就是一次跳档；直接写出
+ * “80% → 70% · 上一档持续 34 分”，测试同事不用再上下比对相邻两条。
+ * 每次连接单独计算，不跨断开比较；电量没变的旧采样记录（改版前的定时采样）不产生条目。
+ *
+ * @param records 同一台设备的记录，任意顺序
+ */
+fun headsetLevelChanges(records: List<RecordInfo>): Map<Int, HeadsetLevelChange> {
+    val changes = HashMap<Int, HeadsetLevelChange>()
+    var level: Int? = null
+    var since = 0L
+    records.sortedWith(compareBy<RecordInfo> { it.timestamp }.thenBy { it.id }).forEach { record ->
+        val current = record.headsetBatteryLevel.takeIf { it in 0..100 }
+        val previous = level
+        if (current != null && current != previous) {
+            if (previous != null && record.eventType == RecordEventType.BATTERY_CHANGED) {
+                changes[record.id] = HeadsetLevelChange(previousLevel = previous, heldMillis = record.timestamp - since)
+            }
+            level = current
+            since = record.timestamp
+        }
+        if (record.eventType == RecordEventType.DISCONNECTED) level = null
+    }
+    return changes
+}

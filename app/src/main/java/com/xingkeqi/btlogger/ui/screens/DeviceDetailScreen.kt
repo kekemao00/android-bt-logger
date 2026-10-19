@@ -46,9 +46,11 @@ import com.xingkeqi.btlogger.RecordFilter
 import com.xingkeqi.btlogger.data.BLUETOOTH_VERSION_UNKNOWN
 import com.xingkeqi.btlogger.data.CODEC_UNKNOWN
 import com.xingkeqi.btlogger.data.DeviceInfo
+import com.xingkeqi.btlogger.data.HeadsetLevelChange
 import com.xingkeqi.btlogger.data.RecordEventType
 import com.xingkeqi.btlogger.data.RecordInfo
 import com.xingkeqi.btlogger.data.RecordStats
+import com.xingkeqi.btlogger.data.headsetLevelChanges
 import com.xingkeqi.btlogger.domain.battery.BatteryOverview
 import com.xingkeqi.btlogger.domain.battery.BatteryRange
 import com.xingkeqi.btlogger.ui.components.BadgeType
@@ -125,6 +127,8 @@ fun DeviceDetailScreen(
             }
         }
     }
+    // 在全部记录上计算，按类型筛选后每条电量记录仍能显示它前一档的电量
+    val levelChanges = remember(records) { headsetLevelChanges(records) }
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = Dimens.pageGutter, end = Dimens.pageGutter, bottom = Dimens.spacingXl)
@@ -162,6 +166,7 @@ fun DeviceDetailScreen(
         itemsIndexed(items = historyRecords, key = { _, record -> record.id }) { index, record ->
             RecordItem(
                 record = record,
+                levelChange = levelChanges[record.id],
                 position = segmentPositionOf(index, historyRecords.size),
                 onLongClick = { onRecordLongClick(record) }
             )
@@ -346,6 +351,7 @@ private fun RecordMetricsRow(record: RecordInfo, recordedLabels: Boolean) {
 @Composable
 private fun RecordItem(
     record: RecordInfo,
+    levelChange: HeadsetLevelChange?,
     position: SegmentPosition,
     onLongClick: () -> Unit
 ) {
@@ -417,7 +423,7 @@ private fun RecordItem(
 
             val summary = when {
                 isCodecChanged -> stringResource(id = R.string.record_active_codec, record.activeCodec.ifBlank { CODEC_UNKNOWN })
-                isBatteryChanged -> batterySummary(record)
+                isBatteryChanged -> batterySummary(record, levelChange)
                 record.timestamp == record.lastRecordTime -> stringResource(id = R.string.record_first)
                 else -> {
                     val duration = getDurationString(record.timestamp - (record.lastRecordTime ?: record.timestamp))
@@ -475,10 +481,13 @@ private fun EventIcon(icon: ImageVector, emphasized: Boolean) {
 }
 
 @Composable
-private fun batterySummary(record: RecordInfo): String =
-    record.headsetBatteryLevel.takeIf { it in 0..100 }
-        ?.let { stringResource(id = R.string.record_battery_headset, it) }
-        ?: stringResource(id = R.string.record_battery_headset_unknown)
+private fun batterySummary(record: RecordInfo, levelChange: HeadsetLevelChange?): String {
+    val level = record.headsetBatteryLevel.takeIf { it in 0..100 }
+        ?: return stringResource(id = R.string.record_battery_headset_unknown)
+    return levelChange?.let {
+        stringResource(id = R.string.record_battery_step, it.previousLevel, level, getDurationString(it.heldMillis))
+    } ?: stringResource(id = R.string.record_battery_headset, level)
+}
 
 /**
  * 编解码信息表：标签 ink-3 在左、值 ink 在右，行间 1px 分隔线，无竖线
