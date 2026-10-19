@@ -164,6 +164,45 @@ class BatteryAnalyticsTest {
     }
 
     @Test
+    fun splitBatterySessions_extendsOngoingSessionToNow() {
+        val readings = listOf(connect(t0, headset = 100), sample(t0 + hour, headset = 90))
+
+        // 电量没变化就没有新记录，但连接仍在继续：仍在连接的一段以当前时间结束
+        assertEquals(t0 + 3 * hour, splitBatterySessions(readings, now = t0 + 3 * hour).single().endTime)
+        assertEquals(t0 + hour, splitBatterySessions(readings).single().endTime)
+        // 时钟回拨时不缩短
+        assertEquals(t0 + hour, splitBatterySessions(readings, now = t0).single().endTime)
+        // 已断开的一段不受影响
+        val ended = splitBatterySessions(readings + disconnect(t0 + 2 * hour, headset = 90), now = t0 + 5 * hour).single()
+        assertEquals(t0 + 2 * hour, ended.endTime)
+    }
+
+    @Test
+    fun batteryOverview_remainingDeductsTimeSinceLastDrop() {
+        val readings = listOf(
+            connect(t0, headset = 100),
+            sample(t0 + hour, headset = 90),
+            sample(t0 + 2 * hour, headset = 80)
+        )
+
+        val justDropped = buildBatteryOverview(readings, BatteryRange.LATEST_SESSION, now = t0 + 2 * hour)
+        assertEquals(8 * hour, justDropped.estimatedRemainingMillis)
+
+        // 最后一次掉电后又过了 30 分钟：窗口延伸到当前，剩余扣掉这 30 分钟，掉电统计仍只用实测点
+        val later = buildBatteryOverview(readings, BatteryRange.LATEST_SESSION, now = t0 + 2 * hour + 30 * minute)
+        assertEquals(t0 + 2 * hour + 30 * minute, later.windowEnd)
+        assertEquals(7 * hour + 30 * minute, later.estimatedRemainingMillis)
+        assertEquals(2 * hour, later.stats!!.trackedMillis)
+
+        // 超出估算（长时间停在同一档）时不给出 0，而是数据不足
+        assertNull(buildBatteryOverview(readings, BatteryRange.LATEST_SESSION, now = t0 + 11 * hour).estimatedRemainingMillis)
+
+        val ended = buildBatteryOverview(readings + disconnect(t0 + 3 * hour, headset = 80), BatteryRange.LATEST_SESSION, now = t0 + 4 * hour)
+        assertNull(ended.estimatedRemainingMillis)
+        assertEquals(t0 + 3 * hour, ended.windowEnd)
+    }
+
+    @Test
     fun buildComparisonCandidates_prefersLatestMeaningfulSessionAndSkipsDevicesWithoutHeadset() {
         val buds = DeviceBatteryHistory(
             key = "AA",
@@ -194,7 +233,12 @@ class BatteryAnalyticsTest {
         val budsCandidate = candidates.last()
         assertEquals(t0, budsCandidate.origin)
         assertEquals(listOf(0L, hour, 2 * hour), budsCandidate.relativeHeadset.map { it.timestamp })
+        assertEquals(2 * hour, budsCandidate.relativeEnd)
         assertEquals(20.0, budsCandidate.stats!!.ratePerHour!!, 1e-9)
+
+        // 仍在连接的音箱：最后一个电量保持到当前时间
+        val ongoing = buildComparisonCandidates(listOf(speaker), now = t0 + 6 * hour).single()
+        assertEquals(3 * hour, ongoing.relativeEnd)
     }
 
     @Test

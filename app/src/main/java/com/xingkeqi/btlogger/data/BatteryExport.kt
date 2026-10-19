@@ -45,14 +45,15 @@ data class BatteryExport(
  * 按设备、按连接整理耳机电量，供导出使用；没有任何耳机电量的连接（如车机）不输出。
  *
  * @param records 任意顺序，可包含多台设备
+ * @param now 导出时间；仍在连接中的那一段以它为结束时间
  */
-fun buildBatteryExport(records: List<RecordInfo>): BatteryExport {
+fun buildBatteryExport(records: List<RecordInfo>, now: Long? = null): BatteryExport {
     val sessions = mutableListOf<BatterySessionRow>()
     val samples = mutableListOf<HeadsetSampleRow>()
     records.groupBy { it.mac }.forEach { (mac, deviceRecords) ->
         val ordered = deviceRecords.sortedWith(compareBy<RecordInfo> { it.timestamp }.thenBy { it.id })
         val name = ordered.last().name
-        splitBatterySessions(ordered.map { it.toBatteryReading() }).forEach { session ->
+        splitBatterySessions(ordered.map { it.toBatteryReading() }, now).forEach { session ->
             if (session.headset.isEmpty()) return@forEach
             val stats = computeDrainStats(listOf(session.headset))
             sessions += BatterySessionRow(

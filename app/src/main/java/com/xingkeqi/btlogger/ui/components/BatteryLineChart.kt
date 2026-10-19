@@ -25,6 +25,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -68,6 +69,8 @@ import kotlin.math.ceil
  * 一条耳机电量曲线。
  *
  * @param segments 每段是一次连接，段与段之间（断开期间）不连线；段内按时间升序
+ * @param holdUntil 与 [segments] 一一对应：该段最后一个电量保持到的时间（断开时间，或仍在连接时的当前时间）。
+ *   电量只在变化时记录，最后一次变化之后没有新记录并不代表连接结束，这一截画成同色虚线；为空时不画
  * @param emphasized 是否画面积渐变；单条曲线时打开，多条叠加时关闭避免互相遮挡
  */
 @Immutable
@@ -76,6 +79,7 @@ data class ChartSeries(
     val label: String,
     val color: Color,
     val segments: List<List<LevelPoint>>,
+    val holdUntil: List<Long> = emptyList(),
     val emphasized: Boolean = false
 ) {
     /** 全部实测点，按时间升序（各段时间不重叠） */
@@ -155,11 +159,27 @@ class BatteryChartState {
 fun rememberBatteryChartState(vararg keys: Any?): BatteryChartState = remember(*keys) { BatteryChartState() }
 
 /**
- * [timestamp] 时这条曲线最近一次上报的电量；不在任何一段连接内时为 null
+ * [timestamp] 时这条曲线最近一次上报的电量；不在任何一段连接内时为 null。
+ *
+ * 段内返回那次上报的实测点（标记画在实测点上，与读数一致）；落在最后一个电量的保持段时，
+ * 返回位于 [timestamp] 的同电量点，标记画在虚线上而不是退回很远的末点。
  */
-fun ChartSeries.valueAt(timestamp: Long): LevelPoint? =
-    segments.firstOrNull { it.isNotEmpty() && timestamp in it.first().timestamp..it.last().timestamp }
-        ?.let { lastPointAtOrBefore(it, timestamp) }
+fun ChartSeries.valueAt(timestamp: Long): LevelPoint? {
+    segments.forEachIndexed { index, segment ->
+        val last = segment.lastOrNull() ?: return@forEachIndexed
+        if (timestamp < segment.first().timestamp) return@forEachIndexed
+        if (timestamp <= last.timestamp) return lastPointAtOrBefore(segment, timestamp)
+        val holdEnd = holdUntil.getOrNull(index) ?: return@forEachIndexed
+        if (timestamp <= holdEnd) return LevelPoint(timestamp, last.level)
+    }
+    return null
+}
+
+/** 横轴上最晚的时间：各段末点与保持段终点中的最大值；没有点时为 null */
+fun ChartSeries.lastTimestamp(): Long? =
+    segments.mapIndexedNotNull { index, segment ->
+        segment.lastOrNull()?.timestamp?.let { maxOf(it, holdUntil.getOrNull(index) ?: it) }
+    }.maxOrNull()
 
 /**
  * 耳机电量曲线：单调分段三次贝塞尔 + 面积渐变，支持轻触吸附实测点、拖动查看、双指缩放平移、双击还原。
@@ -328,7 +348,8 @@ fun BatteryLineChart(
         val revealRight = plot.left + (plot.width + ring * 2) * reveal.value
         clipRect(plot.left - ring, plot.top - ring * 2, revealRight, plot.bottom + ring) {
             series.forEach { line ->
-                line.segments.forEach { segment ->
+                line.segments.forEachIndexed { index, segment ->
+                    drawHoldTail(segment, line.holdUntil.getOrNull(index), line, mapper, plot, viewMin, viewMax, stroke)
                     val visible = visibleSlice(segment, viewMin, viewMax)
                     if (visible.isEmpty()) return@forEach
                     val screen = visible.map { CurvePoint(mapper.x(it.timestamp).toDouble(), mapper.y(it.level).toDouble()) }
@@ -362,6 +383,47 @@ fun BatteryLineChart(
 }
 
 private enum class GestureMode { UNDECIDED, SCRUB, SCROLL, TRANSFORM }
+
+/**
+ * 最后一个电量的保持段：从末点水平延伸到 [holdUntil]，同色虚线；强调的曲线连同面积渐变一起延伸。
+ * 没有实测点落在这里，游标也不会吸附到这一截。
+ */
+private fun DrawScope.drawHoldTail(
+    segment: List<LevelPoint>,
+    holdUntil: Long?,
+    line: ChartSeries,
+    mapper: ChartMapper,
+    plot: Rect,
+    viewMin: Double,
+    viewMax: Double,
+    stroke: Float
+) {
+    val last = segment.lastOrNull() ?: return
+    if (holdUntil == null || holdUntil <= last.timestamp) return
+    if (holdUntil < viewMin || last.timestamp > viewMax) return
+    val startX = mapper.x(last.timestamp).coerceAtLeast(plot.left)
+    val endX = mapper.x(holdUntil).coerceAtMost(plot.right)
+    if (endX <= startX) return
+    val y = mapper.y(last.level)
+    if (line.emphasized) {
+        drawRect(
+            brush = Brush.verticalGradient(
+                colors = listOf(line.color.copy(alpha = AREA_TOP_ALPHA), line.color.copy(alpha = 0f)),
+                startY = plot.top,
+                endY = plot.bottom
+            ),
+            topLeft = Offset(startX, y),
+            size = Size(endX - startX, plot.bottom - y)
+        )
+    }
+    drawLine(
+        color = line.color.copy(alpha = HOLD_ALPHA),
+        start = Offset(startX, y),
+        end = Offset(endX, y),
+        strokeWidth = stroke,
+        pathEffect = PathEffect.dashPathEffect(floatArrayOf(HOLD_DASH.toPx(), HOLD_GAP.toPx()))
+    )
+}
 
 /** 数据坐标 -> 屏幕坐标 */
 private class ChartMapper(private val plot: Rect, private val viewMin: Double, private val viewSpan: Double) {
@@ -572,6 +634,9 @@ private val DOT_RADIUS = 2.5.dp
 private val DOT_MIN_SPACING = 12.dp
 private val CURSOR_RADIUS = 4.5.dp
 private val TICK_MIN_SPACING = 64.dp
+private val HOLD_DASH = 4.dp
+private val HOLD_GAP = 3.dp
+private const val HOLD_ALPHA = 0.7f
 private const val AREA_TOP_ALPHA = 0.22f
 private const val REVEAL_DURATION_MILLIS = 720
 

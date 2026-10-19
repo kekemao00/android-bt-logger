@@ -117,6 +117,7 @@
     <string name="battery_cursor_elapsed">连接后 %1$s</string>
     <string name="battery_cursor_step">较上一档 %1$+d%% · 上一档持续 %2$s</string>
     <string name="battery_cursor_hold">本档已持续 %1$s</string>
+    <string name="battery_cursor_first">本段首个电量</string>
     <string name="battery_stat_levels">起止电量</string>
     <string name="battery_stat_levels_value">%1$d%% → %2$d%%</string>
     <string name="battery_stat_duration">记录时长</string>
@@ -126,7 +127,7 @@
     <string name="battery_stat_full_runtime">满电续航</string>
     <string name="battery_insufficient">数据不足</string>
     <string name="battery_empty">这段时间耳机没有上报电量。部分设备（如车机、音箱）不提供电量。</string>
-    <string name="battery_note">只在耳机电量变化时记录，曲线经过每个实测点。多数耳机按 10% 一档上报，掉电速率需记录满 10 分钟且有下降才计算。</string>
+    <string name="battery_note">只在耳机电量变化时记录，曲线经过每个实测点；虚线表示最后一个电量一直保持到断开或当前。多数耳机按 10% 一档上报，掉电速率需记录满 10 分钟且有下降才计算。</string>
 
     <!-- 电量对比 -->
     <string name="action_compare">电量对比</string>

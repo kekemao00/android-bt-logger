@@ -214,7 +214,7 @@ class ReadmeScreenshotTest {
     private class HeadsetDrain(val startLevel: Int, val step: Int, val holdMinutes: List<Int>)
 
     /**
-     * 追加一段连接：连接（带首个耳机电量）->（编解码切换）-> 每次电量变化一条 -> 断开。
+     * 追加一段连接：连接（带首个耳机电量）->（编解码切换）-> 每次电量变化一条 -> 断开（带断开时的耳机电量）。
      * length 为 null 表示仍在连接中，此时只写到当前时刻之前的变化；drain 为 null 表示设备不上报电量。
      */
     private fun MutableList<DeviceConnectionRecord>.addSession(
@@ -233,9 +233,9 @@ class ReadmeScreenshotTest {
             // 首次连接时协商为 AAC，随后切换到 LDAC，展示编解码切换记录
             add(record(mac, start + 20 * SECOND, STATE_CONNECTED, RecordEventType.CODEC_CHANGED, firstLevel, codec, playing = true))
         }
+        var level = firstLevel
         if (drain != null) {
             var timestamp = start
-            var level = drain.startLevel
             for ((index, hold) in drain.holdMinutes.withIndex()) {
                 timestamp += hold * MINUTE + (index * 17 % 50) * SECOND
                 if (timestamp >= end) break
@@ -245,7 +245,8 @@ class ReadmeScreenshotTest {
             }
         }
         if (length != null) {
-            add(record(mac, end, STATE_DISCONNECTED, RecordEventType.DISCONNECTED, DEVICE_BATTERY_LEVEL_UNKNOWN, codec, playing = false))
+            // 与前台服务一致：断开记录带着断开前最后一次上报的耳机电量
+            add(record(mac, end, STATE_DISCONNECTED, RecordEventType.DISCONNECTED, level, codec, playing = false))
         }
     }
 

@@ -41,6 +41,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -50,6 +51,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
@@ -178,13 +180,26 @@ class MainViewModel(
     val batteryRange: StateFlow<BatteryRange> = _batteryRange.asStateFlow()
 
     /**
-     * 详情页耳机电量曲线与掉电统计；记录或范围变化时在后台线程重算
+     * 每分钟推进一次的当前时间。
+     *
+     * Why: 耳机电量只在变化时记录，连接中可能很久都没有新记录；曲线末端的保持段与“预计剩余”
+     * 要随时间推进，不能停在最后一条记录写入的那一刻。
      */
-    val batteryOverview: StateFlow<BatteryOverview> = combine(records, _batteryRange) { list, range ->
+    private val batteryClock: Flow<Long> = flow {
+        while (true) {
+            emit(System.currentTimeMillis())
+            delay(BATTERY_CLOCK_INTERVAL_MILLIS)
+        }
+    }
+
+    /**
+     * 详情页耳机电量曲线与掉电统计；记录、范围变化或每分钟在后台线程重算
+     */
+    val batteryOverview: StateFlow<BatteryOverview> = combine(records, _batteryRange, batteryClock) { list, range, now ->
         buildBatteryOverview(
             readings = list.asReversed().map { it.toBatteryReading() },
             range = range,
-            now = System.currentTimeMillis()
+            now = now
         )
     }
         .flowOn(Dispatchers.Default)
@@ -203,9 +218,9 @@ class MainViewModel(
             if (!open) {
                 flowOf(null)
             } else {
-                recordDao.getBatteryRecordRows()
-                    .map { rows -> buildComparisonCandidates(rows.toDeviceHistories()) }
-                    .flowOn(Dispatchers.Default)
+                combine(recordDao.getBatteryRecordRows().map { it.toDeviceHistories() }, batteryClock) { histories, now ->
+                    buildComparisonCandidates(histories, now)
+                }.flowOn(Dispatchers.Default)
             }
         }
 
@@ -511,6 +526,8 @@ class MainViewModel(
     }
 
     companion object {
+        private const val BATTERY_CLOCK_INTERVAL_MILLIS = 60_000L
+
         private fun appVersionName(context: Context): String = runCatching {
             context.packageManager.getPackageInfo(context.packageName, 0).versionName
         }.getOrNull().orEmpty()

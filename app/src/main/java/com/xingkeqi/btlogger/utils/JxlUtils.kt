@@ -98,7 +98,7 @@ fun saveDataToSheet(
         }
         workbook.writeTable(RECORD_SHEET_NAME, EXPORT_HEADERS, recordRows, maxRowsPerSheet)
 
-        val battery = buildBatteryExport(records)
+        val battery = buildBatteryExport(records, now = System.currentTimeMillis())
         if (battery.sessions.isNotEmpty()) {
             val sessionRows = battery.sessions.map { row ->
                 listOf(

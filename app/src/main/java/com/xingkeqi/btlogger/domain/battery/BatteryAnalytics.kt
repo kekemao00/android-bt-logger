@@ -29,7 +29,10 @@ data class LevelPoint(val timestamp: Long, val level: Int)
 /**
  * 一次连接：最近一次断开后的首条记录到对应的断开记录。
  *
- * @param ended 是否已断开；仍在连接中时 [endTime] 为最后一条记录的时间
+ * 耳机电量只在变化时记录，最后一个电量一直有效到 [endTime]：已断开时是断开时间，
+ * 仍在连接中时是计算时的当前时间（未提供当前时间则为最后一条记录的时间）。
+ *
+ * @param ended 是否已断开
  * @param connectedAt 实际连接时间；按时间范围裁剪后 [startTime] 是范围起点，这里仍保留原值
  */
 data class BatterySession(
@@ -97,6 +100,20 @@ data class BatteryOverview(
 ) {
     val hasData: Boolean get() = sessions.any { it.headset.isNotEmpty() }
 
+    /**
+     * 仍在连接中时的预计剩余：按平均速率从最后一次掉电算起，再扣掉此后已经过去的时间。
+     *
+     * Why: 只在电量变化时记录，最后一次掉电之后可能已过去很久；直接用“结束电量 ÷ 速率”会把这段时间重复算进剩余。
+     * 已超出估算（耳机长时间停在同一档）时为 null，界面显示“数据不足”而不是 0。
+     */
+    val estimatedRemainingMillis: Long?
+        get() {
+            if (!ongoing) return null
+            val stats = stats ?: return null
+            val remaining = stats.estimatedRemainingMillis ?: return null
+            return (remaining - (windowEnd - stats.endTime).coerceAtLeast(0L)).takeIf { it > 0L }
+        }
+
     companion object {
         fun empty(range: BatteryRange) = BatteryOverview(
             range = range,
@@ -117,8 +134,9 @@ data class BatteryOverview(
  * - 连接与断开之间的任意事件都是采样点，断开记录本身带有断开时的电量，作为这一段的终点。
  *
  * @param readings 任意顺序；时间相同的记录保持传入顺序
+ * @param now 当前时间；最后一段仍在连接中时以它为结束时间（电量没变化就不会有新记录，但连接仍在继续）
  */
-fun splitBatterySessions(readings: List<BatteryReading>): List<BatterySession> {
+fun splitBatterySessions(readings: List<BatteryReading>, now: Long? = null): List<BatterySession> {
     val sessions = mutableListOf<BatterySession>()
     var current: MutableList<BatteryReading>? = null
     readings.sortedBy { it.timestamp }.forEach { reading ->
@@ -144,7 +162,7 @@ fun splitBatterySessions(readings: List<BatteryReading>): List<BatterySession> {
     current?.let { open ->
         sessions += BatterySession(
             startTime = open.first().timestamp,
-            endTime = open.last().timestamp,
+            endTime = maxOf(open.last().timestamp, now ?: Long.MIN_VALUE),
             ended = false,
             readings = open.toList()
         )
@@ -206,10 +224,10 @@ fun BatterySession.clippedFrom(since: Long): BatterySession? {
 /**
  * 详情页曲线与统计。
  *
- * @param now 用于“最近 24 小时”的窗口起点
+ * @param now 用于“最近 24 小时”的窗口起点，也是仍在连接中那一段的结束时间
  */
 fun buildBatteryOverview(readings: List<BatteryReading>, range: BatteryRange, now: Long): BatteryOverview {
-    val sessions = splitBatterySessions(readings)
+    val sessions = splitBatterySessions(readings, now)
     val selected = when (range) {
         BatteryRange.LATEST_SESSION -> listOfNotNull(sessions.lastOrNull())
         BatteryRange.LAST_24_HOURS -> sessions.mapNotNull { it.clippedFrom(now - DAY_MILLIS) }
@@ -248,6 +266,9 @@ data class ComparisonCandidate(
 
     /** 以 [origin] 为 0 的相对时间曲线，用于“按开始时间对齐” */
     val relativeHeadset: List<LevelPoint> = session.headset.map { LevelPoint(it.timestamp - origin, it.level) }
+
+    /** 这一段的结束时间（相对 [origin]），最后一个电量保持到这里 */
+    val relativeEnd: Long = session.endTime - origin
 }
 
 /**
@@ -265,10 +286,12 @@ fun pickComparisonSession(sessions: List<BatterySession>): BatterySession? =
 /**
  * 多设备对比候选，按最近一次对比连接的开始时间倒序（最近测试的在前）。
  * 没有任何耳机电量的设备（如车机）不参与。
+ *
+ * @param now 仍在连接中的那一段以它为结束时间
  */
-fun buildComparisonCandidates(devices: List<DeviceBatteryHistory>): List<ComparisonCandidate> =
+fun buildComparisonCandidates(devices: List<DeviceBatteryHistory>, now: Long? = null): List<ComparisonCandidate> =
     devices.mapNotNull { device ->
-        val session = pickComparisonSession(splitBatterySessions(device.readings)) ?: return@mapNotNull null
+        val session = pickComparisonSession(splitBatterySessions(device.readings, now)) ?: return@mapNotNull null
         ComparisonCandidate(
             key = device.key,
             name = device.name,

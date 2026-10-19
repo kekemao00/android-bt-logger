@@ -60,6 +60,7 @@ import com.xingkeqi.btlogger.ui.components.StatItem
 import com.xingkeqi.btlogger.ui.components.StatValue
 import com.xingkeqi.btlogger.ui.components.WmCard
 import com.xingkeqi.btlogger.ui.components.WmSegmentedTabs
+import com.xingkeqi.btlogger.ui.components.lastTimestamp
 import com.xingkeqi.btlogger.ui.components.rememberBatteryChartState
 import com.xingkeqi.btlogger.ui.components.valueAt
 import com.xingkeqi.btlogger.ui.theme.BtTheme
@@ -115,7 +116,8 @@ fun BatteryCompareScreen(
                 key = candidate.key,
                 label = candidate.name,
                 color = colors.chartSeries(state.slots[candidate.key] ?: 0),
-                segments = listOf(compressPlateaus(if (relative) candidate.relativeHeadset else candidate.session.headset))
+                segments = listOf(compressPlateaus(if (relative) candidate.relativeHeadset else candidate.session.headset)),
+                holdUntil = listOf(if (relative) candidate.relativeEnd else candidate.session.endTime)
             )
         }
     }
@@ -419,7 +421,10 @@ private fun CompareTable(
                             stringResource(id = R.string.battery_stat_full_runtime),
                             stats?.estimatedFullRuntimeMillis?.let(::getCompactDurationString) ?: insufficient
                         )
-                    ).forEach { item -> StatValue(item = item, modifier = Modifier.weight(1f)) }
+                    ).forEachIndexed { column, item ->
+                        // “100% → 60%”比其余三项长，多分一些宽度，避免被截断
+                        StatValue(item = item, modifier = Modifier.weight(if (column == 0) LEVELS_COLUMN_WEIGHT else 1f))
+                    }
                 }
             }
         }
@@ -428,12 +433,14 @@ private fun CompareTable(
 }
 
 /**
- * 横轴范围：按开始对齐时从 0 到最长的一段；按实际时间时从最早的开始到最晚的结束
+ * 横轴范围：按开始对齐时从 0 到最长的一段；按实际时间时从最早的开始到最晚的结束（含最后一个电量的保持段）
  */
 private fun compareDomain(series: List<ChartSeries>, relative: Boolean): Pair<Long, Long> {
     val points = series.flatMap { it.points }
     if (points.isEmpty()) return 0L to MIN_DOMAIN_MILLIS
     val start = if (relative) 0L else points.minOf { it.timestamp }
-    val end = points.maxOf { it.timestamp }
+    val end = series.mapNotNull { it.lastTimestamp() }.maxOrNull() ?: points.maxOf { it.timestamp }
     return start to maxOf(end, start + MIN_DOMAIN_MILLIS)
 }
+
+private const val LEVELS_COLUMN_WEIGHT = 1.3f
