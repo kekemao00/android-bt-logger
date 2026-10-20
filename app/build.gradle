@@ -73,6 +73,10 @@ android {
             excludes += '/META-INF/{AL2.0,LGPL2.1}'
         }
     }
+    // Why: 私有协议读取等逻辑会打 android.util.Log，本地单测里 android.jar 只有桩方法，默认调用即抛异常
+    testOptions {
+        unitTests.returnDefaultValues = true
+    }
 }
 
 dependencies {

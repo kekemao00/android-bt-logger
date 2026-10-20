@@ -35,6 +35,10 @@ import com.xingkeqi.btlogger.data.DeviceDao
 import com.xingkeqi.btlogger.data.MessageEvent
 import com.xingkeqi.btlogger.data.RecordEventType
 import com.xingkeqi.btlogger.data.RecordDao
+import com.xingkeqi.btlogger.service.earbud.EarbudLevels
+import com.xingkeqi.btlogger.service.earbud.RfcommEarbudLink
+import com.xingkeqi.btlogger.service.earbud.SoundpeatsBatteryReader
+import com.xingkeqi.btlogger.service.earbud.SoundpeatsProtocol
 import com.xingkeqi.btlogger.utils.ACTION_BLUETOOTH_DEVICE_BATTERY_LEVEL_CHANGED
 import com.xingkeqi.btlogger.utils.BluetoothBatteryUtils
 import com.xingkeqi.btlogger.utils.BluetoothVersionProbeResult
@@ -73,6 +77,9 @@ class BtLoggerForegroundService : Service() {
     private val latestHeadsetBatteryLevels = ConcurrentHashMap<String, Int>()
     /** 最近一次落库的耳机电量，只有与它不同才写入“电量更新” */
     private val latestPersistedHeadsetLevels = ConcurrentHashMap<String, Int>()
+    /** SOUNDPEATS 私有协议读到的最新左右耳电量，及最近一次落库的值；只有与落库值不同才写入“电量更新” */
+    private val latestEarbudLevels = ConcurrentHashMap<String, EarbudLevels>()
+    private val latestPersistedEarbudLevels = ConcurrentHashMap<String, EarbudLevels>()
     private val fixedVolumeJobs = ConcurrentHashMap<String, Job>()
     private val appSettings by lazy { AppSettings.get(applicationContext) }
     private val codecSnapshotMutex = Mutex()
@@ -86,6 +93,11 @@ class BtLoggerForegroundService : Service() {
             launchSafely("batteryProbeResult") {
                 handleHeadsetBatteryChanged(device, snapshot, observedAt)
             }
+        }
+    }
+    private val earbudBatteryReader by lazy {
+        SoundpeatsBatteryReader(scope = serviceScope) { address, levels, observedAt ->
+            handleEarbudBatteryChanged(address, levels, observedAt)
         }
     }
     private val versionProbeManager by lazy {
@@ -197,6 +209,7 @@ class BtLoggerForegroundService : Service() {
         registerReceiver(btReceiver, intentFilter)
         Log.i(tag, "[BtLoggerForegroundService] onCreate -> receiver registered: vendorCategories=APPLE,PLANTRONICS")
         syncAlreadyConnectedDevices()
+        observeDualEarSetting()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -211,6 +224,7 @@ class BtLoggerForegroundService : Service() {
             batteryProbeManager.stopAll()
             versionProbeManager.stopAll()
             versionAdvertisementProbeManager.stopAll()
+            earbudBatteryReader.stopAll()
         }
         fixedVolumeJobs.values.forEach { it.cancel() }
         fixedVolumeJobs.clear()
@@ -252,8 +266,14 @@ class BtLoggerForegroundService : Service() {
             if (isConnected) {
                 connectedDevices[address] = deviceState
             }
+            if (!isConnected) {
+                // 先停读取，避免断开记录落库后又收到一条迟到的左右耳电量
+                runSafely("stopEarbudReader[$address]") { earbudBatteryReader.stop(address) }
+            }
             val codecSnapshot = resolveCodecSnapshot(address)
             val headsetBatteryLevel = resolveHeadsetBatteryLevel(address)
+            // 断开记录带上最后读到的左右耳电量，作为这一段曲线的终点
+            val earbudLevels = resolveEarbudLevels(address)
             val volumeSnapshot = readMediaVolumeSnapshotSafely()
             val record = DeviceConnectionRecord(
                 deviceMac = address,
@@ -266,7 +286,10 @@ class BtLoggerForegroundService : Service() {
                 eventType = if (isConnected) RecordEventType.CONNECTED else RecordEventType.DISCONNECTED,
                 phoneSupportedCodecs = codecSnapshot.phoneSupportedCodecs,
                 negotiableCodecs = codecSnapshot.negotiableCodecs,
-                activeCodec = codecSnapshot.activeCodec
+                activeCodec = codecSnapshot.activeCodec,
+                leftBatteryLevel = earbudLevels.left.orUnknown(),
+                rightBatteryLevel = earbudLevels.right.orUnknown(),
+                caseBatteryLevel = earbudLevels.case.orUnknown()
             )
             val device = buildDevice(deviceState, codecSnapshot)
 
@@ -276,6 +299,7 @@ class BtLoggerForegroundService : Service() {
             )
             if (persistDeviceAndRecord(device, record)) {
                 latestPersistedHeadsetLevels[address] = headsetBatteryLevel
+                latestPersistedEarbudLevels[address] = earbudLevels
             }
             showConnectionToastSafely(device.name, isConnected)
 
@@ -292,6 +316,8 @@ class BtLoggerForegroundService : Service() {
                 // Why: 断开期间耳机可能已放回充电盒充电，下次连接沿用旧值会让新一段曲线从错误的电量起步；
                 // 清掉后新连接记录先记为未上报，等首个真实电量到达再回填
                 latestHeadsetBatteryLevels.remove(address)
+                latestEarbudLevels.remove(address)
+                latestPersistedEarbudLevels.remove(address)
             }
             refreshNotificationSafely()
         }
@@ -366,12 +392,15 @@ class BtLoggerForegroundService : Service() {
                 val deviceState = buildConnectedDeviceState(bluetoothDevice, existingDevice)
                 connectedDevices[address] = deviceState
                 // 服务重建期间耳机电量可能已经变化：以库里最后一次记录的电量为基准，不同则立即补记一条
-                recordDao.getLatestRecordSnapshotByConnectState(address, BluetoothA2dp.STATE_CONNECTED)
-                    ?.headsetBatteryLevel
-                    ?.let { latestPersistedHeadsetLevels[address] = it }
+                recordDao.getLatestRecordSnapshotByConnectState(address, BluetoothA2dp.STATE_CONNECTED)?.let { latest ->
+                    latestPersistedHeadsetLevels[address] = latest.headsetBatteryLevel
+                    // 左右耳电量要等读取通道重新建立后才有：只把库里的值当作比较基准，读到相同的值不再重复记录；
+                    // 不当作当前值，否则读到之前写入的记录会带上服务重建前的旧电量
+                    latestPersistedEarbudLevels[address] = latest.toEarbudLevels()
+                }
                 preloadHeadsetBatterySafely(bluetoothDevice, address)
                 batterySnapshotMutex.withLock {
-                    persistHeadsetBatteryChange(address = address, reason = "restore", observedAt = System.currentTimeMillis())
+                    persistBatteryChange(address = address, reason = "restore", observedAt = System.currentTimeMillis())
                 }
                 startConnectedDeviceProbes(bluetoothDevice, deviceState)
                 refreshNotificationSafely()
@@ -455,6 +484,7 @@ class BtLoggerForegroundService : Service() {
 
                 val volumeSnapshot = readMediaVolumeSnapshotSafely()
                 val headsetBatteryLevel = resolveHeadsetBatteryLevel(address)
+                val earbudLevels = resolveEarbudLevels(address)
                 val record = DeviceConnectionRecord(
                     deviceMac = address,
                     timestamp = resolvedSnapshot.updatedAt,
@@ -466,7 +496,10 @@ class BtLoggerForegroundService : Service() {
                     eventType = RecordEventType.CODEC_CHANGED,
                     phoneSupportedCodecs = resolvedSnapshot.phoneSupportedCodecs,
                     negotiableCodecs = resolvedSnapshot.negotiableCodecs,
-                    activeCodec = resolvedSnapshot.activeCodec
+                    activeCodec = resolvedSnapshot.activeCodec,
+                    leftBatteryLevel = earbudLevels.left.orUnknown(),
+                    rightBatteryLevel = earbudLevels.right.orUnknown(),
+                    caseBatteryLevel = earbudLevels.case.orUnknown()
                 )
 
                 Log.i(
@@ -476,6 +509,7 @@ class BtLoggerForegroundService : Service() {
                 if (persistDeviceAndRecord(device, record)) {
                     latestCodecSnapshots[address] = resolvedSnapshot
                     latestPersistedHeadsetLevels[address] = headsetBatteryLevel
+                    latestPersistedEarbudLevels[address] = earbudLevels
                 }
                 startConnectedDeviceProbes(bluetoothDevice, deviceState)
             }
@@ -563,30 +597,57 @@ class BtLoggerForegroundService : Service() {
                 latestPersistedHeadsetLevels[address] = snapshot.level
                 return@withLock
             }
-            persistHeadsetBatteryChange(address = address, reason = snapshot.source, observedAt = observedAt)
+            persistBatteryChange(address = address, reason = snapshot.source, observedAt = observedAt)
         }
     }
 
     /**
-     * 写入一条“电量更新”；耳机电量与上一次落库相同（或仍未上报）时跳过。
+     * SOUNDPEATS 私有协议读到的左右耳、充电仓电量变化：与系统电量一样“变化即记录”，记录时间取回复到达的时刻。
+     *
+     * 读取协程在关闭开关或断开时才会停下，期间到达的结果直接丢弃，不写入已关闭读取的设备。
      */
-    private suspend fun persistHeadsetBatteryChange(address: String, reason: String, observedAt: Long) {
+    private suspend fun handleEarbudBatteryChanged(address: String, levels: EarbudLevels, observedAt: Long) {
+        if (!connectedDevices.containsKey(address) || address !in appSettings.dualEarDevices.value) {
+            Log.d(tag, "[BtLoggerForegroundService] handleEarbudBatteryChanged -> ignore: device=$address, levels=$levels")
+            return
+        }
+        val previous = latestEarbudLevels.put(address, levels)
+        if (previous == levels) return
+        Log.i(
+            tag,
+            "[BtLoggerForegroundService] handleEarbudBatteryChanged -> device=$address, earbuds=${previous ?: EarbudLevels.UNKNOWN} -> $levels"
+        )
+        batterySnapshotMutex.withLock {
+            persistBatteryChange(address = address, reason = "soundpeats-spp", observedAt = observedAt)
+        }
+    }
+
+    /**
+     * 写入一条“电量更新”，带上当前已知的系统电量与左右耳电量。
+     *
+     * 系统电量（已上报且与上次落库不同）或左右耳电量（已读到且与上次落库不同）任一变化才写入，否则跳过。
+     */
+    private suspend fun persistBatteryChange(address: String, reason: String, observedAt: Long) {
         val deviceState = connectedDevices[address]
         if (deviceState == null) {
             Log.d(
                 tag,
-                "[BtLoggerForegroundService] persistHeadsetBatteryChange -> skip because device is no longer connected: device=$address, reason=$reason"
+                "[BtLoggerForegroundService] persistBatteryChange -> skip because device is no longer connected: device=$address, reason=$reason"
             )
             return
         }
 
         val headsetBatteryLevel = resolveHeadsetBatteryLevel(address)
-        if (headsetBatteryLevel == DEVICE_BATTERY_LEVEL_UNKNOWN ||
-            latestPersistedHeadsetLevels[address] == headsetBatteryLevel
-        ) {
+        val earbudLevels = resolveEarbudLevels(address)
+        val headsetChanged = headsetBatteryLevel != DEVICE_BATTERY_LEVEL_UNKNOWN &&
+            latestPersistedHeadsetLevels[address] != headsetBatteryLevel
+        // 左右耳全部未知（未开启读取、还没读到或都放回了充电仓）不算变化，不为它单独写一条
+        val earbudsChanged = !earbudLevels.isEmpty &&
+            earbudLevels != (latestPersistedEarbudLevels[address] ?: EarbudLevels.UNKNOWN)
+        if (!headsetChanged && !earbudsChanged) {
             Log.d(
                 tag,
-                "[BtLoggerForegroundService] persistHeadsetBatteryChange -> skip unchanged headset battery: device=$address, reason=$reason, headsetBattery=$headsetBatteryLevel"
+                "[BtLoggerForegroundService] persistBatteryChange -> skip unchanged battery: device=$address, reason=$reason, headsetBattery=$headsetBatteryLevel, earbuds=$earbudLevels"
             )
             return
         }
@@ -605,15 +666,19 @@ class BtLoggerForegroundService : Service() {
             eventType = RecordEventType.BATTERY_CHANGED,
             phoneSupportedCodecs = codecSnapshot.phoneSupportedCodecs,
             negotiableCodecs = codecSnapshot.negotiableCodecs,
-            activeCodec = codecSnapshot.activeCodec
+            activeCodec = codecSnapshot.activeCodec,
+            leftBatteryLevel = earbudLevels.left.orUnknown(),
+            rightBatteryLevel = earbudLevels.right.orUnknown(),
+            caseBatteryLevel = earbudLevels.case.orUnknown()
         )
 
         Log.i(
             tag,
-            "[BtLoggerForegroundService] persistHeadsetBatteryChange -> persist: device=${device.name}[${device.mac}], reason=$reason, headsetBattery=${latestPersistedHeadsetLevels[address] ?: DEVICE_BATTERY_LEVEL_UNKNOWN} -> $headsetBatteryLevel, delayMs=${System.currentTimeMillis() - observedAt}, volume=${volumeSnapshot.percent}(${volumeSnapshot.currentLevel}/${volumeSnapshot.maxLevel})"
+            "[BtLoggerForegroundService] persistBatteryChange -> persist: device=${device.name}[${device.mac}], reason=$reason, headsetBattery=${latestPersistedHeadsetLevels[address] ?: DEVICE_BATTERY_LEVEL_UNKNOWN} -> $headsetBatteryLevel, earbuds=${latestPersistedEarbudLevels[address] ?: EarbudLevels.UNKNOWN} -> $earbudLevels, delayMs=${System.currentTimeMillis() - observedAt}, volume=${volumeSnapshot.percent}(${volumeSnapshot.currentLevel}/${volumeSnapshot.maxLevel})"
         )
         if (persistDeviceAndRecord(device, record)) {
             latestPersistedHeadsetLevels[address] = headsetBatteryLevel
+            latestPersistedEarbudLevels[address] = earbudLevels
         }
     }
 
@@ -634,6 +699,43 @@ class BtLoggerForegroundService : Service() {
 
     private fun resolveHeadsetBatteryLevel(address: String): Int {
         return latestHeadsetBatteryLevels[address] ?: DEVICE_BATTERY_LEVEL_UNKNOWN
+    }
+
+    private fun resolveEarbudLevels(address: String): EarbudLevels =
+        latestEarbudLevels[address] ?: EarbudLevels.UNKNOWN
+
+    /**
+     * 订阅“读取左右耳电量”开关：打开后对已连接的支持设备立即开始读取，关闭后立即停止。
+     */
+    private fun observeDualEarSetting() {
+        serviceScope.launch {
+            appSettings.dualEarDevices.collect { enabled ->
+                Log.i(tag, "[BtLoggerForegroundService] observeDualEarSetting -> enabledDevices=${enabled.size}")
+                connectedDevices.values.forEach { state -> runSafely("syncEarbudReader[${state.mac}]") { syncEarbudReader(state) } }
+            }
+        }
+    }
+
+    /**
+     * 按开关与机型启动或停止某台设备的左右耳电量读取。
+     *
+     * @param bluetoothDevice 已有的设备对象；为 null 时按 MAC 向系统获取
+     */
+    @SuppressLint("MissingPermission")
+    private fun syncEarbudReader(state: ConnectedDeviceState, bluetoothDevice: BluetoothDevice? = null) {
+        val address = state.mac
+        val wanted = address in appSettings.dualEarDevices.value && SoundpeatsProtocol.isSupported(state.name, state.uuids)
+        if (!wanted) {
+            if (earbudBatteryReader.isRunning(address)) earbudBatteryReader.stop(address)
+            // 关闭后不再有左右耳电量：清掉缓存，之后的记录写未知，不沿用关闭前的值
+            latestEarbudLevels.remove(address)
+            latestPersistedEarbudLevels.remove(address)
+            return
+        }
+        if (earbudBatteryReader.isRunning(address)) return
+        @Suppress("DEPRECATION")
+        val device = bluetoothDevice ?: BluetoothAdapter.getDefaultAdapter()?.getRemoteDevice(address) ?: return
+        earbudBatteryReader.start(address) { RfcommEarbudLink.open(device, address) }
     }
 
     @SuppressLint("MissingPermission")
@@ -948,6 +1050,9 @@ class BtLoggerForegroundService : Service() {
                 persistedVersion = deviceState.bluetoothVersion
             )
         }
+        runSafely("startEarbudReader[${deviceState.mac}]") {
+            syncEarbudReader(deviceState, bluetoothDevice)
+        }
     }
 
     private fun stopConnectedDeviceProbes(address: String) {
@@ -959,6 +1064,9 @@ class BtLoggerForegroundService : Service() {
         }
         runSafely("stopVersionAdvertisementProbe[$address]") {
             versionAdvertisementProbeManager.stopMonitoring(address)
+        }
+        runSafely("stopEarbudReader[$address]") {
+            earbudBatteryReader.stop(address)
         }
     }
 
@@ -1212,6 +1320,14 @@ private data class ConnectedDeviceState(
     val deviceType: Int,
     val bluetoothVersion: String,
     val uuids: String
+)
+
+private fun Int?.orUnknown(): Int = this ?: DEVICE_BATTERY_LEVEL_UNKNOWN
+
+private fun DeviceConnectionRecord.toEarbudLevels(): EarbudLevels = EarbudLevels(
+    left = leftBatteryLevel.takeIf { it in 1..100 },
+    right = rightBatteryLevel.takeIf { it in 1..100 },
+    case = caseBatteryLevel.takeIf { it in 1..100 }
 )
 
 /** 系统转发 HFP 厂商事件时附带的类别，见 `HeadsetStateMachine.broadcastVendorSpecificEventIntent` */

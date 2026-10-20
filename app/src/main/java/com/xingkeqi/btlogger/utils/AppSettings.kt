@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 
 /**
  * 应用级用户设置。
@@ -38,6 +39,20 @@ class AppSettings private constructor(context: Context) {
         prefs.edit().putInt(KEY_FIXED_VOLUME_PERCENT, resolved).apply()
     }
 
+    private val _dualEarDevices = MutableStateFlow(prefs.getStringSet(KEY_DUAL_EAR_DEVICES, null).orEmpty().toSet())
+
+    /**
+     * 开启 SOUNDPEATS 私有协议读取左右耳电量的设备（MAC）。
+     *
+     * Why: 读取通道与 SOUNDPEATS App 互斥，只在测试需要时按设备打开；前台服务订阅它，开关后立即开始或停止读取。
+     */
+    val dualEarDevices: StateFlow<Set<String>> = _dualEarDevices.asStateFlow()
+
+    fun setDualEarEnabled(mac: String, enabled: Boolean) {
+        _dualEarDevices.update { current -> if (enabled) current + mac else current - mac }
+        prefs.edit().putStringSet(KEY_DUAL_EAR_DEVICES, _dualEarDevices.value).apply()
+    }
+
     /**
      * 用户选择“跳过此版本”的 tag；启动时的自动检查不再提示该版本，手动检查仍会提示
      */
@@ -52,6 +67,7 @@ class AppSettings private constructor(context: Context) {
         private const val KEY_FIXED_VOLUME_ENABLED = "fixed_volume_enabled"
         private const val KEY_FIXED_VOLUME_PERCENT = "fixed_volume_percent"
         private const val KEY_SKIPPED_UPDATE_TAG = "skipped_update_tag"
+        private const val KEY_DUAL_EAR_DEVICES = "dual_ear_devices"
         const val DEFAULT_FIXED_VOLUME_PERCENT = 60
 
         @Volatile
