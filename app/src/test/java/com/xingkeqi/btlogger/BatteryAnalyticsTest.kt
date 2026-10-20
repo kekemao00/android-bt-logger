@@ -1,10 +1,13 @@
 package com.xingkeqi.btlogger
 
+import com.xingkeqi.btlogger.domain.battery.BatteryChannel
 import com.xingkeqi.btlogger.domain.battery.BatteryRange
 import com.xingkeqi.btlogger.domain.battery.BatteryReading
 import com.xingkeqi.btlogger.domain.battery.DeviceBatteryHistory
 import com.xingkeqi.btlogger.domain.battery.LevelPoint
 import com.xingkeqi.btlogger.domain.battery.ReadingKind
+import com.xingkeqi.btlogger.domain.battery.availableChannels
+import com.xingkeqi.btlogger.domain.battery.buildBatteryChannelOverview
 import com.xingkeqi.btlogger.domain.battery.buildBatteryOverview
 import com.xingkeqi.btlogger.domain.battery.buildComparisonCandidates
 import com.xingkeqi.btlogger.domain.battery.clippedFrom
@@ -341,5 +344,124 @@ class BatteryAnalyticsTest {
         assertEquals(LevelStep(delta = 0, millis = 26 * minute), levelStepAt(points, 3))
         assertEquals(LevelStep(delta = -10, millis = 28 * minute), levelStepAt(points, 4))
         assertNull(levelStepAt(points, 5))
+    }
+
+    /** 左右耳电量由私有协议读取：系统上报跟着左耳，右耳掉得更慢 */
+    private fun earbuds(at: Long, kind: ReadingKind, headset: Int?, left: Int?, right: Int?) =
+        BatteryReading(t0 + at * minute, kind, headset, leftLevel = left, rightLevel = right)
+
+    private val earbudReadings = listOf(
+        earbuds(0, ReadingKind.SESSION_START, null, null, null),
+        earbuds(1, ReadingKind.SAMPLE, 100, 100, 100),
+        earbuds(20, ReadingKind.SAMPLE, 95, 95, 100),
+        earbuds(30, ReadingKind.SAMPLE, 95, 95, 95),
+        earbuds(40, ReadingKind.SAMPLE, 90, 90, 95),
+        earbuds(60, ReadingKind.SAMPLE, 90, 90, 90),
+        earbuds(70, ReadingKind.SESSION_END, 90, 90, 90)
+    )
+
+    @Test
+    fun availableChannels_listsEarsBeforeSystemLevel() {
+        assertEquals(listOf(BatteryChannel.LEFT, BatteryChannel.RIGHT, BatteryChannel.HEADSET), availableChannels(earbudReadings))
+        assertEquals(listOf(BatteryChannel.HEADSET), availableChannels(listOf(connect(t0, 80), sample(t0 + minute, 70))))
+        // 一个电量都没有时仍给出系统上报，界面显示“没有上报电量”
+        assertEquals(listOf(BatteryChannel.HEADSET), availableChannels(listOf(connect(t0), disconnect(t0 + minute))))
+    }
+
+    @Test
+    fun buildBatteryChannelOverview_defaultsToLeftAndOverlaysBothEars() {
+        val overview = buildBatteryChannelOverview(earbudReadings, BatteryRange.ALL, now = t0 + 2 * hour)
+
+        assertEquals(BatteryChannel.LEFT, overview.selected)
+        assertEquals(listOf(BatteryChannel.LEFT, BatteryChannel.RIGHT), overview.plotted)
+        // 左耳：95%（20 分）→ 90%（40 分），右耳：95%（30 分）→ 90%（60 分）
+        assertEquals(15.0, overview.overview.stats!!.ratePerHour!!, 1e-9)
+        assertEquals(10.0, overview.overviews.getValue(BatteryChannel.RIGHT).stats!!.ratePerHour!!, 1e-9)
+        assertEquals(listOf(100, 95, 95, 90, 90, 90), overview.overview.sessions.single().headset.map { it.level })
+    }
+
+    @Test
+    fun buildBatteryChannelOverview_fallsBackWhenRequestedChannelHasNoData() {
+        val systemOnly = listOf(connect(t0, 80), sample(t0 + 30 * minute, 70), disconnect(t0 + hour, 70))
+
+        val fallback = buildBatteryChannelOverview(systemOnly, BatteryRange.ALL, now = t0 + 2 * hour, requested = BatteryChannel.RIGHT)
+        assertEquals(BatteryChannel.HEADSET, fallback.selected)
+        assertEquals(listOf(BatteryChannel.HEADSET), fallback.channels)
+        assertEquals(listOf(BatteryChannel.HEADSET), fallback.plotted)
+
+        val system = buildBatteryChannelOverview(earbudReadings, BatteryRange.ALL, now = t0 + 2 * hour, requested = BatteryChannel.HEADSET)
+        assertEquals(BatteryChannel.HEADSET, system.selected)
+        // 选中系统上报时只画它，不与左右耳叠加
+        assertEquals(listOf(BatteryChannel.HEADSET), system.plotted)
+        assertEquals(15.0, system.overview.stats!!.ratePerHour!!, 1e-9)
+    }
+
+    @Test
+    fun buildBatteryChannelOverview_defaultsToChannelWithDataInRange() {
+        // 第一次连接开过左右耳读取，最近一次没有开：“本次连接”默认显示系统上报，而不是空的左耳
+        val readings = earbudReadings + listOf(
+            connect(t0 + 3 * hour, 60),
+            sample(t0 + 3 * hour + 30 * minute, 50),
+            disconnect(t0 + 4 * hour, 50)
+        )
+
+        val latest = buildBatteryChannelOverview(readings, BatteryRange.LATEST_SESSION, now = t0 + 5 * hour)
+        assertEquals(BatteryChannel.HEADSET, latest.selected)
+        assertEquals(listOf(BatteryChannel.LEFT, BatteryChannel.RIGHT, BatteryChannel.HEADSET), latest.channels)
+        assertTrue(latest.overview.hasData)
+
+        // 用户明确选了左耳就保持左耳，即使这次连接没有数据
+        val requested = buildBatteryChannelOverview(readings, BatteryRange.LATEST_SESSION, now = t0 + 5 * hour, requested = BatteryChannel.LEFT)
+        assertEquals(BatteryChannel.LEFT, requested.selected)
+        assertFalse(requested.overview.hasData)
+        assertEquals(emptyList<BatteryChannel>(), requested.plotted)
+    }
+
+    @Test
+    fun earbudHoldStopsWhenEarbudGoesOffline() {
+        // 左耳 10 分时放回充电仓（记为未知），右耳继续用到当前
+        val readings = listOf(
+            earbuds(0, ReadingKind.SESSION_START, 90, null, null),
+            earbuds(1, ReadingKind.SAMPLE, 90, 80, 80),
+            earbuds(10, ReadingKind.SAMPLE, 90, null, 80),
+            earbuds(30, ReadingKind.SAMPLE, 80, null, 70)
+        )
+        val now = t0 + hour
+
+        val overview = buildBatteryChannelOverview(readings, BatteryRange.LATEST_SESSION, now = now, requested = BatteryChannel.LEFT)
+        val left = overview.overviews.getValue(BatteryChannel.LEFT)
+        val right = overview.overviews.getValue(BatteryChannel.RIGHT)
+
+        assertEquals(t0 + 10 * minute, left.holdEndOf(left.sessions.single()))
+        assertFalse(left.ongoing)
+        assertNull(left.estimatedRemainingMillis)
+        assertEquals(now, right.holdEndOf(right.sessions.single()))
+        assertTrue(right.ongoing)
+
+        // 系统上报的未知只是还没上报，保持段照旧画到当前
+        val system = buildBatteryChannelOverview(readings, BatteryRange.LATEST_SESSION, now = now, requested = BatteryChannel.HEADSET).overview
+        assertEquals(now, system.holdEndOf(system.sessions.single()))
+        assertTrue(system.ongoing)
+    }
+
+    @Test
+    fun earbudInCaseBeforeWindowIsNotCarriedIntoLast24Hours() {
+        // 左耳在 24 小时窗口开始前放回充电仓，之后一直读不到；右耳一直在用
+        val readings = listOf(
+            earbuds(0, ReadingKind.SESSION_START, 90, 80, 80),
+            earbuds(10, ReadingKind.SAMPLE, 90, null, 80),
+            earbuds(25 * 60, ReadingKind.SAMPLE, 80, null, 70)
+        )
+        val now = t0 + 26 * hour
+
+        val overview = buildBatteryChannelOverview(readings, BatteryRange.LAST_24_HOURS, now = now, requested = BatteryChannel.LEFT)
+        val left = overview.overviews.getValue(BatteryChannel.LEFT)
+        val right = overview.overviews.getValue(BatteryChannel.RIGHT)
+
+        assertTrue(left.sessions.all { it.headset.isEmpty() })
+        assertFalse(left.hasData)
+        assertFalse(left.ongoing)
+        assertEquals(listOf(LevelPoint(now - 24 * hour, 80), LevelPoint(t0 + 25 * hour, 70)), right.sessions.single().headset)
+        assertTrue(right.ongoing)
     }
 }

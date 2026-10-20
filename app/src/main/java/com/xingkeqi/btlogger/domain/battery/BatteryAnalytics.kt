@@ -14,14 +14,51 @@ enum class ReadingKind { SESSION_START, SESSION_END, SAMPLE }
 
 /**
  * 记录中与耳机电量相关的字段；电量为 null 表示该条记录没有拿到有效值（如耳机未上报）。
+ *
+ * 分析与曲线只看 [headsetLevel]：按左耳或右耳分析时先用 [forChannel] 把对应电量放到这个字段上。
+ *
+ * @param headsetLevel 系统蓝牙上报的耳机电量（多为主耳）
+ * @param leftLevel SOUNDPEATS 私有协议读到的左耳电量；未开启读取或左耳不在线时为 null
+ * @param rightLevel 同上，右耳
+ * @param caseLevel 同上，充电仓；只用于导出，不参与曲线
  */
 data class BatteryReading(
     val timestamp: Long,
     val kind: ReadingKind,
     val headsetLevel: Int?,
     val volume: Int = 0,
-    val isPlaying: Boolean = false
+    val isPlaying: Boolean = false,
+    val leftLevel: Int? = null,
+    val rightLevel: Int? = null,
+    val caseLevel: Int? = null
 )
+
+/**
+ * 电量来源，声明顺序即界面上的排列顺序。
+ *
+ * Why: 系统蓝牙只上报一个电量（SOUNDPEATS 耳机报的是主耳）；开启私有协议读取后还有左耳、右耳各自的电量，
+ * 两只耳机掉电快慢不同，续航测试要分开统计。三种来源共用同一套切分、测速与曲线代码，只是取值字段不同。
+ */
+enum class BatteryChannel { LEFT, RIGHT, HEADSET }
+
+/** 这条记录在 [channel] 上的有效电量 */
+fun BatteryReading.levelOf(channel: BatteryChannel): Int? = when (channel) {
+    BatteryChannel.HEADSET -> headsetLevel
+    BatteryChannel.LEFT -> leftLevel
+    BatteryChannel.RIGHT -> rightLevel
+}?.takeIf(::isValidLevel)
+
+/** 把 [channel] 的电量放到 [BatteryReading.headsetLevel] 上，供只认这个字段的分析代码使用 */
+fun BatteryReading.forChannel(channel: BatteryChannel): BatteryReading =
+    if (channel == BatteryChannel.HEADSET) this else copy(headsetLevel = levelOf(channel))
+
+/**
+ * 记录里出现过有效电量的来源，按 [BatteryChannel] 的顺序；一个都没有时只有系统上报（界面显示“没有上报电量”）。
+ */
+fun availableChannels(readings: List<BatteryReading>): List<BatteryChannel> =
+    BatteryChannel.entries
+        .filter { channel -> readings.any { it.levelOf(channel) != null } }
+        .ifEmpty { listOf(BatteryChannel.HEADSET) }
 
 /** 曲线上的一个实测点 */
 data class LevelPoint(val timestamp: Long, val level: Int)
@@ -47,6 +84,19 @@ data class BatterySession(
     /** 耳机电量实测点，按时间升序 */
     val headset: List<LevelPoint> = readings.mapNotNull { reading ->
         reading.headsetLevel?.takeIf(::isValidLevel)?.let { LevelPoint(reading.timestamp, it) }
+    }
+
+    /**
+     * 最后一个电量保持到何时。
+     *
+     * @param stopAtUnknown 为 true 时保持到其后第一条明确未知的记录（左右耳放回充电仓或读取通道断开），
+     *   之后不再知道该耳机电量；为 false 时一直保持到 [endTime]（系统上报的未知只是还没上报）
+     */
+    fun holdEnd(stopAtUnknown: Boolean): Long {
+        if (!stopAtUnknown) return endTime
+        // 整段都不知道左右耳电量：没有可保持的电量，也不算“仍在记录”
+        val last = headset.lastOrNull() ?: return startTime
+        return readings.firstOrNull { it.timestamp > last.timestamp && it.headsetLevel == null }?.timestamp ?: endTime
     }
 }
 
@@ -94,7 +144,8 @@ enum class BatteryRange { LATEST_SESSION, LAST_24_HOURS, ALL }
 /**
  * 详情页耳机电量概览：所选范围内的连接（已按范围裁剪）与掉电统计。
  *
- * @param ongoing 最后一段仍在连接中，此时展示“预计剩余”，否则展示“满电续航”
+ * @param ongoing 最后一段仍在连接中且电量仍然已知，此时展示“预计剩余”，否则展示“满电续航”
+ * @param holdStopsAtUnknown 曲线末端的保持段是否在明确未知处结束，见 [BatterySession.holdEnd]
  */
 data class BatteryOverview(
     val range: BatteryRange,
@@ -102,9 +153,12 @@ data class BatteryOverview(
     val stats: DrainStats?,
     val windowStart: Long,
     val windowEnd: Long,
-    val ongoing: Boolean
+    val ongoing: Boolean,
+    val holdStopsAtUnknown: Boolean = false
 ) {
     val hasData: Boolean get() = sessions.any { it.headset.isNotEmpty() }
+
+    fun holdEndOf(session: BatterySession): Long = session.holdEnd(holdStopsAtUnknown)
 
     /**
      * 仍在连接中时的预计剩余：按平均速率从最后一次掉电算起，再扣掉此后已经过去的时间。
@@ -251,15 +305,18 @@ fun computeDrainStats(segments: List<List<LevelPoint>>): DrainStats? {
  * 只保留 [since] 之后的部分。范围起点落在连接中间时，用起点之前最后一个电量补一个起点，
  * 曲线从窗口左边缘开始而不是凭空缺一截（电量在两次上报之间保持不变）。
  *
+ * @param stopAtUnknown 与 [BatterySession.holdEnd] 一致：左右耳在起点之前已明确未知（放回充电仓）时不补起点
  * @return 整段都在 [since] 之前时为 null
  */
-fun BatterySession.clippedFrom(since: Long): BatterySession? {
+fun BatterySession.clippedFrom(since: Long, stopAtUnknown: Boolean = false): BatterySession? {
     if (endTime < since) return null
     if (startTime >= since) return this
     val before = readings.filter { it.timestamp < since }
     val after = readings.filter { it.timestamp >= since }
     val beforeLevels = before.filter { it.headsetLevel?.let(::isValidLevel) == true }
-    val carriedHeadset = beforeLevels.lastOrNull()?.headsetLevel
+    val carriedHeadset = beforeLevels.lastOrNull()
+        ?.takeIf { last -> !stopAtUnknown || before.none { it.timestamp > last.timestamp && it.headsetLevel == null } }
+        ?.headsetLevel
     // 沿用的电量从哪一刻开始：往前找到同一档连续记录的第一条，游标读数“上一档持续”据此计算
     val carriedSince = carriedHeadset?.let { level ->
         beforeLevels.asReversed().takeWhile { it.headsetLevel == level }.lastOrNull()?.timestamp
@@ -278,12 +335,18 @@ fun BatterySession.clippedFrom(since: Long): BatterySession? {
  * 详情页曲线与统计。
  *
  * @param now 用于“最近 24 小时”的窗口起点，也是仍在连接中那一段的结束时间
+ * @param holdStopsAtUnknown 左右耳传 true：放回充电仓后不再画保持段，也不再估算剩余
  */
-fun buildBatteryOverview(readings: List<BatteryReading>, range: BatteryRange, now: Long): BatteryOverview {
+fun buildBatteryOverview(
+    readings: List<BatteryReading>,
+    range: BatteryRange,
+    now: Long,
+    holdStopsAtUnknown: Boolean = false
+): BatteryOverview {
     val sessions = splitBatterySessions(readings, now)
     val selected = when (range) {
         BatteryRange.LATEST_SESSION -> listOfNotNull(sessions.lastOrNull())
-        BatteryRange.LAST_24_HOURS -> sessions.mapNotNull { it.clippedFrom(now - DAY_MILLIS) }
+        BatteryRange.LAST_24_HOURS -> sessions.mapNotNull { it.clippedFrom(now - DAY_MILLIS, holdStopsAtUnknown) }
         BatteryRange.ALL -> sessions
     }
     if (selected.isEmpty()) return BatteryOverview.empty(range)
@@ -295,7 +358,82 @@ fun buildBatteryOverview(readings: List<BatteryReading>, range: BatteryRange, no
         stats = computeDrainStats(selected.map { it.headset }),
         windowStart = withData.first().startTime,
         windowEnd = withData.last().endTime,
-        ongoing = !selected.last().ended
+        ongoing = selected.last().let { !it.ended && it.holdEnd(holdStopsAtUnknown) == it.endTime },
+        holdStopsAtUnknown = holdStopsAtUnknown
+    )
+}
+
+/**
+ * 详情页电量卡片：当前来源的概览，以及曲线上要叠加的其他来源。
+ *
+ * @param channels 有数据的来源；只有一个时界面不显示切换
+ * @param overviews 至少包含 [selected] 与 [plotted] 中的来源
+ */
+data class BatteryChannelOverview(
+    val selected: BatteryChannel,
+    val channels: List<BatteryChannel>,
+    val overviews: Map<BatteryChannel, BatteryOverview>
+) {
+    val overview: BatteryOverview
+        get() = overviews[selected] ?: BatteryOverview.empty(overviews.values.firstOrNull()?.range ?: BatteryRange.LATEST_SESSION)
+
+    /**
+     * 曲线上画哪些来源：选中左耳或右耳时左右耳叠加，两只耳机的掉电差异一眼可见；
+     * 选中系统上报时只画它（它通常与主耳重合，叠在一起反而难分辨）。所选范围内没有数据的来源不画。
+     */
+    val plotted: List<BatteryChannel>
+        get() {
+            val candidates = if (selected == BatteryChannel.HEADSET) {
+                listOf(BatteryChannel.HEADSET)
+            } else {
+                channels.filter { it != BatteryChannel.HEADSET }
+            }
+            return candidates.filter { overviews[it]?.hasData == true }
+        }
+
+    companion object {
+        fun empty(range: BatteryRange) = BatteryChannelOverview(
+            selected = BatteryChannel.HEADSET,
+            channels = listOf(BatteryChannel.HEADSET),
+            overviews = mapOf(BatteryChannel.HEADSET to BatteryOverview.empty(range))
+        )
+    }
+}
+
+/**
+ * 按来源分别计算详情页概览。
+ *
+ * @param requested 用户选择的来源；为 null 或记录里没有该来源时，取所选范围内第一个有数据的来源
+ *   （有左右耳数据时默认左耳）。Why: 只有早先几次连接开过左右耳读取时，默认选左耳会让“本次连接”显示为空。
+ */
+fun buildBatteryChannelOverview(
+    readings: List<BatteryReading>,
+    range: BatteryRange,
+    now: Long,
+    requested: BatteryChannel? = null
+): BatteryChannelOverview {
+    val channels = availableChannels(readings)
+    val overviews = HashMap<BatteryChannel, BatteryOverview>()
+    fun overviewOf(channel: BatteryChannel) = overviews.getOrPut(channel) {
+        buildBatteryOverview(
+            readings = readings.map { it.forChannel(channel) },
+            range = range,
+            now = now,
+            holdStopsAtUnknown = channel != BatteryChannel.HEADSET
+        )
+    }
+    val selected = requested?.takeIf { it in channels }
+        ?: channels.firstOrNull { overviewOf(it).hasData }
+        ?: channels.first()
+    val needed = if (selected == BatteryChannel.HEADSET) {
+        listOf(BatteryChannel.HEADSET)
+    } else {
+        channels.filter { it != BatteryChannel.HEADSET }
+    }
+    return BatteryChannelOverview(
+        selected = selected,
+        channels = channels,
+        overviews = needed.associateWith(::overviewOf)
     )
 }
 

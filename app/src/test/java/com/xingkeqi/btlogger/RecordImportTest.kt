@@ -75,4 +75,20 @@ class RecordImportTest {
         assertFalse(record.isPlaying)
         assertEquals(CODEC_LIST_UNAVAILABLE, record.phoneSupportedCodecs)
     }
+
+    @Test
+    fun parseExportedRows_readsEarbudLevelsAndTreatsBlankAsUnknown() {
+        val earbudHeader = listOf("设备名称", "蓝牙地址", "记录时间", "事件", "耳机电量", "左耳电量", "右耳电量", "充电仓电量")
+        val rows = listOf(
+            listOf("SOUNDPEATS", "11:22:33:44:55:66", "2026-10-19 19:25:26", "电量更新", "95", "95", "100", "60"),
+            listOf("SOUNDPEATS", "11:22:33:44:55:66", "2026-10-19 19:15:52", "已连接", "未上报", "", "", "")
+        )
+        val (update, connect) = parseExportedRows(earbudHeader, rows, utc).map { it.record }
+
+        assertEquals(listOf(95, 95, 100, 60), listOf(update.headsetBatteryLevel, update.leftBatteryLevel, update.rightBatteryLevel, update.caseBatteryLevel))
+        assertEquals(
+            List(4) { DEVICE_BATTERY_LEVEL_UNKNOWN },
+            listOf(connect.headsetBatteryLevel, connect.leftBatteryLevel, connect.rightBatteryLevel, connect.caseBatteryLevel)
+        )
+    }
 }

@@ -2,6 +2,7 @@ package com.xingkeqi.btlogger
 
 import com.xingkeqi.btlogger.data.DEVICE_BATTERY_LEVEL_UNKNOWN
 import com.xingkeqi.btlogger.data.DeviceInfo
+import com.xingkeqi.btlogger.domain.battery.BatteryChannel
 import com.xingkeqi.btlogger.data.RecordEventType
 import com.xingkeqi.btlogger.data.RecordInfo
 import com.xingkeqi.btlogger.data.buildBatteryExport
@@ -10,6 +11,7 @@ import com.xingkeqi.btlogger.utils.readExportSheet
 import com.xingkeqi.btlogger.utils.saveDataToSheet
 import jxl.Workbook
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.nio.file.Files
@@ -75,7 +77,8 @@ class BatteryExportTest {
                 workbook.sheetNames.toList()
             )
             val stats = workbook.getSheet("电量统计")
-            assertEquals("20", stats.getCell(9, 1).contents)
+            assertEquals("系统上报", stats.getCell(2, 1).contents)
+            assertEquals("20", stats.getCell(10, 1).contents)
         } finally {
             workbook.close()
         }
@@ -88,6 +91,63 @@ class BatteryExportTest {
             records.filter { it.mac == BUDS }.map { it.headsetBatteryLevel }.sorted(),
             imported.filter { it.record.deviceMac == BUDS }.map { it.record.headsetBatteryLevel }.sorted()
         )
+        dir.deleteRecursively()
+    }
+
+    /** SOUNDPEATS 私有协议读到左右耳与充电仓电量；系统上报跟着左耳 */
+    private fun earbudRecord(id: Int, at: Long, event: String, headset: Int, left: Int, right: Int, case: Int = -1) =
+        record(id, BUDS, t0 + at * minute, event, headset).copy(
+            leftBatteryLevel = left,
+            rightBatteryLevel = right,
+            caseBatteryLevel = case
+        )
+
+    private val earbudRecords = listOf(
+        earbudRecord(11, 0, RecordEventType.CONNECTED, 100, -1, -1),
+        earbudRecord(12, 1, RecordEventType.BATTERY_CHANGED, 100, 100, 100, 60),
+        earbudRecord(13, 20, RecordEventType.BATTERY_CHANGED, 95, 95, 100, 60),
+        earbudRecord(14, 30, RecordEventType.BATTERY_CHANGED, 95, 95, 95, 60),
+        earbudRecord(15, 40, RecordEventType.BATTERY_CHANGED, 90, 90, 95, 60),
+        earbudRecord(16, 60, RecordEventType.BATTERY_CHANGED, 90, 90, 90, 60),
+        earbudRecord(17, 70, RecordEventType.DISCONNECTED, 90, 90, 90, 60)
+    ).shuffled(java.util.Random(5))
+
+    @Test
+    fun buildBatteryExport_splitsStatsByChannel() {
+        val export = buildBatteryExport(earbudRecords)
+
+        assertEquals(listOf(BatteryChannel.HEADSET, BatteryChannel.LEFT, BatteryChannel.RIGHT), export.sessions.map { it.channel })
+        assertEquals(listOf(15.0, 15.0, 10.0), export.sessions.map { it.ratePerHour })
+        assertEquals(listOf(7, 6, 6), export.sessions.map { it.sampleCount })
+
+        val first = export.samples.first()
+        assertEquals(100, first.level)
+        assertNull(first.leftLevel)
+        assertNull(first.caseLevel)
+        assertEquals(listOf(100, 95, 95, 90, 90, 90), export.samples.mapNotNull { it.leftLevel })
+        assertEquals(listOf(100, 100, 95, 95, 90, 90), export.samples.mapNotNull { it.rightLevel })
+        assertEquals(60, export.samples.last().caseLevel)
+    }
+
+    @Test
+    fun saveDataToSheet_roundTripsEarbudLevels() {
+        val dir = Files.createTempDirectory("export-earbuds").toFile()
+        val file = saveDataToSheet(dir, DeviceInfo(name = "Buds"), earbudRecords)
+
+        val workbook = Workbook.getWorkbook(file)
+        try {
+            val stats = workbook.getSheet("电量统计")
+            assertEquals(listOf("系统上报", "左耳", "右耳"), (1..3).map { stats.getCell(2, it).contents })
+        } finally {
+            workbook.close()
+        }
+
+        val (header, rows) = file.inputStream().use { readExportSheet(it) }
+        val imported = parseExportedRows(header, rows).map { it.record }.sortedBy { it.timestamp }
+        val expected = earbudRecords.sortedBy { it.timestamp }
+        assertEquals(expected.map { it.leftBatteryLevel }, imported.map { it.leftBatteryLevel })
+        assertEquals(expected.map { it.rightBatteryLevel }, imported.map { it.rightBatteryLevel })
+        assertEquals(expected.map { it.caseBatteryLevel }, imported.map { it.caseBatteryLevel })
         dir.deleteRecursively()
     }
 

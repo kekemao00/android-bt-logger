@@ -56,6 +56,10 @@ data class RecordInfo(
     val batteryLevel: Int = 0,
     // 耳机电量（0~100，-1 表示当前机型或链路未上报）
     val headsetBatteryLevel: Int = DEVICE_BATTERY_LEVEL_UNKNOWN,
+    // SOUNDPEATS 私有协议读到的左耳、右耳与充电仓电量（1~100，-1 表示未开启读取或该部分不在线）
+    val leftBatteryLevel: Int = DEVICE_BATTERY_LEVEL_UNKNOWN,
+    val rightBatteryLevel: Int = DEVICE_BATTERY_LEVEL_UNKNOWN,
+    val caseBatteryLevel: Int = DEVICE_BATTERY_LEVEL_UNKNOWN,
     val eventType: String = RecordEventType.CONNECTED,
     val phoneSupportedCodecs: String = CODEC_LIST_UNAVAILABLE,
     val negotiableCodecs: String = CODEC_LIST_UNAVAILABLE,
@@ -159,5 +163,17 @@ data class DeviceConnectionRecord(
     @ColumnInfo(name = "negotiable_codecs")
     val negotiableCodecs: String = CODEC_LIST_UNAVAILABLE,
     @ColumnInfo(name = "active_codec")
-    val activeCodec: String = CODEC_UNKNOWN
+    val activeCodec: String = CODEC_UNKNOWN,
+    /**
+     * SOUNDPEATS 私有协议读到的左耳、右耳与充电仓电量，-1 表示未知。
+     *
+     * Why: 系统蓝牙只上报一个电量（主耳），左右耳分开的电量只能通过厂商协议读取；
+     * 默认值写进表结构，7 → 8 迁移给旧记录补列时保持未知，不必重建表。
+     */
+    @ColumnInfo(name = "left_battery_level", defaultValue = "-1")
+    val leftBatteryLevel: Int = DEVICE_BATTERY_LEVEL_UNKNOWN,
+    @ColumnInfo(name = "right_battery_level", defaultValue = "-1")
+    val rightBatteryLevel: Int = DEVICE_BATTERY_LEVEL_UNKNOWN,
+    @ColumnInfo(name = "case_battery_level", defaultValue = "-1")
+    val caseBatteryLevel: Int = DEVICE_BATTERY_LEVEL_UNKNOWN
 )

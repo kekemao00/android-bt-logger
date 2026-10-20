@@ -41,18 +41,24 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.blankj.utilcode.util.TimeUtils
+import com.xingkeqi.btlogger.DualEarUiState
 import com.xingkeqi.btlogger.R
 import com.xingkeqi.btlogger.RecordFilter
 import com.xingkeqi.btlogger.data.BLUETOOTH_VERSION_UNKNOWN
 import com.xingkeqi.btlogger.data.CODEC_UNKNOWN
 import com.xingkeqi.btlogger.data.DeviceInfo
-import com.xingkeqi.btlogger.data.HeadsetLevelChange
+import com.xingkeqi.btlogger.data.LevelChange
 import com.xingkeqi.btlogger.data.RecordEventType
 import com.xingkeqi.btlogger.data.RecordInfo
+import com.xingkeqi.btlogger.data.RecordLevelChanges
 import com.xingkeqi.btlogger.data.RecordStats
-import com.xingkeqi.btlogger.data.headsetLevelChanges
-import com.xingkeqi.btlogger.domain.battery.BatteryOverview
+import com.xingkeqi.btlogger.data.recordLevelChanges
+import com.xingkeqi.btlogger.domain.battery.BatteryChannel
+import com.xingkeqi.btlogger.domain.battery.BatteryChannelOverview
 import com.xingkeqi.btlogger.domain.battery.BatteryRange
+import com.xingkeqi.btlogger.service.earbud.EarbudLevels
+import com.xingkeqi.btlogger.service.earbud.EarbudReaderFailure
+import com.xingkeqi.btlogger.service.earbud.EarbudReaderStatus
 import com.xingkeqi.btlogger.ui.components.BadgeType
 import com.xingkeqi.btlogger.ui.components.BatteryIndicator
 import com.xingkeqi.btlogger.ui.components.ConnectionStatusIndicator
@@ -68,6 +74,7 @@ import com.xingkeqi.btlogger.ui.components.StatusBadge
 import com.xingkeqi.btlogger.ui.components.WmCard
 import com.xingkeqi.btlogger.ui.components.WmChip
 import com.xingkeqi.btlogger.ui.components.WmSegmentedTabs
+import com.xingkeqi.btlogger.ui.components.WmSwitch
 import com.xingkeqi.btlogger.ui.components.cardSegment
 import com.xingkeqi.btlogger.ui.components.segmentPositionOf
 import com.xingkeqi.btlogger.ui.components.shape
@@ -98,10 +105,13 @@ fun DeviceDetailScreen(
     device: DeviceInfo,
     records: List<RecordInfo>,
     stats: RecordStats,
-    batteryOverview: BatteryOverview,
+    batteryOverview: BatteryChannelOverview,
+    dualEarState: DualEarUiState,
     filter: RecordFilter,
     onFilterChange: (RecordFilter) -> Unit,
     onBatteryRangeChange: (BatteryRange) -> Unit,
+    onBatteryChannelChange: (BatteryChannel) -> Unit,
+    onDualEarChange: (Boolean) -> Unit,
     onOpenCompare: () -> Unit,
     onRecordLongClick: (RecordInfo) -> Unit,
     modifier: Modifier = Modifier
@@ -128,7 +138,7 @@ fun DeviceDetailScreen(
         }
     }
     // 在全部记录上计算，按类型筛选后每条电量记录仍能显示它前一档的电量
-    val levelChanges = remember(records) { headsetLevelChanges(records) }
+    val levelChanges = remember(records) { recordLevelChanges(records) }
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = Dimens.pageGutter, end = Dimens.pageGutter, bottom = Dimens.spacingXl)
@@ -139,7 +149,10 @@ fun DeviceDetailScreen(
                 latestRecord = records.first(),
                 stats = stats,
                 batteryOverview = batteryOverview,
+                dualEarState = dualEarState,
                 onBatteryRangeChange = onBatteryRangeChange,
+                onBatteryChannelChange = onBatteryChannelChange,
+                onDualEarChange = onDualEarChange,
                 onOpenCompare = onOpenCompare
             )
         }
@@ -179,8 +192,11 @@ private fun DetailHeader(
     device: DeviceInfo,
     latestRecord: RecordInfo,
     stats: RecordStats,
-    batteryOverview: BatteryOverview,
+    batteryOverview: BatteryChannelOverview,
+    dualEarState: DualEarUiState,
     onBatteryRangeChange: (BatteryRange) -> Unit,
+    onBatteryChannelChange: (BatteryChannel) -> Unit,
+    onDualEarChange: (Boolean) -> Unit,
     onOpenCompare: () -> Unit
 ) {
     val colors = BtTheme.colors
@@ -234,12 +250,17 @@ private fun DetailHeader(
         }
 
         HeadsetBatteryCard(
-            overview = batteryOverview,
+            channelOverview = batteryOverview,
             deviceKey = device.mac,
             isConnected = isConnected,
             onRangeChange = onBatteryRangeChange,
+            onChannelChange = onBatteryChannelChange,
             onOpenCompare = onOpenCompare
         )
+
+        if (dualEarState.supported) {
+            DualEarCard(state = dualEarState, isConnected = isConnected, onEnabledChange = onDualEarChange)
+        }
 
         StatCard(
             items = listOf(
@@ -327,6 +348,13 @@ private fun RecordMetricsRow(record: RecordInfo, recordedLabels: Boolean) {
         record.headsetBatteryLevel.takeIf { it in 0..100 }?.let { level ->
             BatteryIndicator(level = level, label = stringResource(id = R.string.headset_battery_label))
         }
+        listOf(
+            R.string.battery_channel_left to record.leftBatteryLevel,
+            R.string.battery_channel_right to record.rightBatteryLevel,
+            R.string.battery_part_case to record.caseBatteryLevel
+        ).forEach { (labelRes, value) ->
+            value.takeIf { it in 0..100 }?.let { level -> BatteryIndicator(level = level, label = stringResource(id = labelRes)) }
+        }
         WmChip(
             text = "${record.volume}%",
             icon = LineIcons.Volume,
@@ -351,7 +379,7 @@ private fun RecordMetricsRow(record: RecordInfo, recordedLabels: Boolean) {
 @Composable
 private fun RecordItem(
     record: RecordInfo,
-    levelChange: HeadsetLevelChange?,
+    levelChange: RecordLevelChanges?,
     position: SegmentPosition,
     onLongClick: () -> Unit
 ) {
@@ -480,13 +508,104 @@ private fun EventIcon(icon: ImageVector, emphasized: Boolean) {
     }
 }
 
+/**
+ * 电量记录的摘要：写出这条记录里变化的来源（左耳、右耳、系统上报）及上一档持续多久；
+ * 没有左右耳数据的记录保持原来的“耳机电量”写法。
+ */
 @Composable
-private fun batterySummary(record: RecordInfo, levelChange: HeadsetLevelChange?): String {
-    val level = record.headsetBatteryLevel.takeIf { it in 0..100 }
-        ?: return stringResource(id = R.string.record_battery_headset_unknown)
-    return levelChange?.let {
-        stringResource(id = R.string.record_battery_step, it.previousLevel, level, getDurationString(it.heldMillis))
-    } ?: stringResource(id = R.string.record_battery_headset, level)
+private fun batterySummary(record: RecordInfo, changes: RecordLevelChanges?): String {
+    val headset = record.headsetBatteryLevel.takeIf { it in 0..100 }
+    val left = record.leftBatteryLevel.takeIf { it in 0..100 }
+    val right = record.rightBatteryLevel.takeIf { it in 0..100 }
+    if (left == null && right == null) {
+        headset ?: return stringResource(id = R.string.record_battery_headset_unknown)
+        return changes?.headset?.let {
+            stringResource(id = R.string.record_battery_step, it.previousLevel, headset, getDurationString(it.heldMillis))
+        } ?: stringResource(id = R.string.record_battery_headset, headset)
+    }
+    val parts = listOf(
+        Triple(R.string.battery_channel_left, left, changes?.left),
+        Triple(R.string.battery_channel_right, right, changes?.right),
+        Triple(R.string.battery_channel_headset, headset, changes?.headset)
+    )
+    val steps = parts.mapNotNull { (labelRes, level, change) ->
+        if (level == null || change == null) null else partStep(stringResource(id = labelRes), level, change)
+    }
+    if (steps.isNotEmpty()) return steps.joinToString("；")
+    // 本次连接首个左右耳电量，或只有充电仓变化：列出左右耳当前电量
+    return parts.take(2).mapNotNull { (labelRes, level, _) ->
+        level?.let { stringResource(id = R.string.record_battery_part, stringResource(id = labelRes), it) }
+    }.joinToString(" · ")
+}
+
+@Composable
+private fun partStep(label: String, level: Int, change: LevelChange): String =
+    stringResource(id = R.string.record_battery_part_step, label, change.previousLevel, level, getDurationString(change.heldMillis))
+
+/**
+ * 左右耳电量读取开关与读取状态。
+ *
+ * Why: 读取通道与 SOUNDPEATS App 互斥，默认关闭，测试同事按需对单台耳机打开；状态写清楚连不上的原因，
+ * 开了开关却没有左右耳曲线时可以自己排查。
+ */
+@Composable
+private fun DualEarCard(state: DualEarUiState, isConnected: Boolean, onEnabledChange: (Boolean) -> Unit) {
+    val colors = BtTheme.colors
+    WmCard {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = stringResource(id = R.string.dual_ear_title),
+                style = MaterialTheme.typography.titleSmall,
+                color = colors.ink,
+                modifier = Modifier.weight(1f)
+            )
+            Spacer(modifier = Modifier.width(Dimens.spacingMd))
+            WmSwitch(checked = state.enabled, onCheckedChange = onEnabledChange)
+        }
+        Spacer(modifier = Modifier.height(Dimens.spacingXs))
+        Text(
+            text = stringResource(id = R.string.dual_ear_hint),
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.ink3
+        )
+        if (state.enabled) {
+            val status = state.status
+            Spacer(modifier = Modifier.height(Dimens.spacingSm))
+            Text(
+                text = dualEarStatusText(status, isConnected),
+                style = MaterialTheme.typography.bodySmall,
+                color = if (status is EarbudReaderStatus.Retrying) colors.danger else colors.ink2
+            )
+        }
+    }
+}
+
+@Composable
+private fun dualEarStatusText(status: EarbudReaderStatus?, isConnected: Boolean): String = when (status) {
+    null -> stringResource(id = if (isConnected) R.string.dual_ear_connecting else R.string.dual_ear_waiting_connection)
+    EarbudReaderStatus.Connecting -> stringResource(id = R.string.dual_ear_connecting)
+    is EarbudReaderStatus.Reading -> if (status.updatedAt <= 0L) {
+        stringResource(id = R.string.dual_ear_waiting_reply)
+    } else {
+        earbudLevelsText(status.levels, status.updatedAt)
+    }
+    is EarbudReaderStatus.Retrying -> stringResource(
+        id = when (status.failure) {
+            EarbudReaderFailure.CONNECT_FAILED -> R.string.dual_ear_retry_connect
+            EarbudReaderFailure.NO_RESPONSE -> R.string.dual_ear_retry_no_response
+            EarbudReaderFailure.CONNECTION_LOST -> R.string.dual_ear_retry_lost
+        },
+        TimeUtils.millis2String(status.retryAt, "HH:mm:ss")
+    )
+}
+
+@Composable
+private fun earbudLevelsText(levels: EarbudLevels, updatedAt: Long): String {
+    val dash = stringResource(id = R.string.placeholder_dash)
+    val (left, right, case) = listOf(levels.left, levels.right, levels.case).map { level ->
+        level?.let { stringResource(id = R.string.battery_percent, it) } ?: dash
+    }
+    return stringResource(id = R.string.dual_ear_levels, left, right, case, TimeUtils.millis2String(updatedAt, "HH:mm:ss"))
 }
 
 /**
