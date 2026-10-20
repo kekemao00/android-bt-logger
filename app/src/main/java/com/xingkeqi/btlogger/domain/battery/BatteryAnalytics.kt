@@ -94,7 +94,8 @@ data class BatterySession(
      */
     fun holdEnd(stopAtUnknown: Boolean): Long {
         if (!stopAtUnknown) return endTime
-        val last = headset.lastOrNull() ?: return endTime
+        // 整段都不知道左右耳电量：没有可保持的电量，也不算“仍在记录”
+        val last = headset.lastOrNull() ?: return startTime
         return readings.firstOrNull { it.timestamp > last.timestamp && it.headsetLevel == null }?.timestamp ?: endTime
     }
 }
@@ -304,15 +305,18 @@ fun computeDrainStats(segments: List<List<LevelPoint>>): DrainStats? {
  * 只保留 [since] 之后的部分。范围起点落在连接中间时，用起点之前最后一个电量补一个起点，
  * 曲线从窗口左边缘开始而不是凭空缺一截（电量在两次上报之间保持不变）。
  *
+ * @param stopAtUnknown 与 [BatterySession.holdEnd] 一致：左右耳在起点之前已明确未知（放回充电仓）时不补起点
  * @return 整段都在 [since] 之前时为 null
  */
-fun BatterySession.clippedFrom(since: Long): BatterySession? {
+fun BatterySession.clippedFrom(since: Long, stopAtUnknown: Boolean = false): BatterySession? {
     if (endTime < since) return null
     if (startTime >= since) return this
     val before = readings.filter { it.timestamp < since }
     val after = readings.filter { it.timestamp >= since }
     val beforeLevels = before.filter { it.headsetLevel?.let(::isValidLevel) == true }
-    val carriedHeadset = beforeLevels.lastOrNull()?.headsetLevel
+    val carriedHeadset = beforeLevels.lastOrNull()
+        ?.takeIf { last -> !stopAtUnknown || before.none { it.timestamp > last.timestamp && it.headsetLevel == null } }
+        ?.headsetLevel
     // 沿用的电量从哪一刻开始：往前找到同一档连续记录的第一条，游标读数“上一档持续”据此计算
     val carriedSince = carriedHeadset?.let { level ->
         beforeLevels.asReversed().takeWhile { it.headsetLevel == level }.lastOrNull()?.timestamp
@@ -342,7 +346,7 @@ fun buildBatteryOverview(
     val sessions = splitBatterySessions(readings, now)
     val selected = when (range) {
         BatteryRange.LATEST_SESSION -> listOfNotNull(sessions.lastOrNull())
-        BatteryRange.LAST_24_HOURS -> sessions.mapNotNull { it.clippedFrom(now - DAY_MILLIS) }
+        BatteryRange.LAST_24_HOURS -> sessions.mapNotNull { it.clippedFrom(now - DAY_MILLIS, holdStopsAtUnknown) }
         BatteryRange.ALL -> sessions
     }
     if (selected.isEmpty()) return BatteryOverview.empty(range)

@@ -80,6 +80,13 @@ class BtLoggerForegroundService : Service() {
     /** SOUNDPEATS 私有协议读到的最新左右耳电量，及最近一次落库的值；只有与落库值不同才写入“电量更新” */
     private val latestEarbudLevels = ConcurrentHashMap<String, EarbudLevels>()
     private val latestPersistedEarbudLevels = ConcurrentHashMap<String, EarbudLevels>()
+    /**
+     * 读取通道结束时收回的左右耳电量与收回时刻。
+     *
+     * Why: 耳机放回充电仓时 SPP 与 A2DP 几乎同时断开，读取器收回电量往往早于断开广播处理完，
+     * 断开记录要靠它带上最后读到的电量，作为这一段曲线的终点。
+     */
+    private val retractedEarbudLevels = ConcurrentHashMap<String, RetractedEarbudLevels>()
     private val fixedVolumeJobs = ConcurrentHashMap<String, Job>()
     private val appSettings by lazy { AppSettings.get(applicationContext) }
     private val codecSnapshotMutex = Mutex()
@@ -273,7 +280,7 @@ class BtLoggerForegroundService : Service() {
             val codecSnapshot = resolveCodecSnapshot(address)
             val headsetBatteryLevel = resolveHeadsetBatteryLevel(address)
             // 断开记录带上最后读到的左右耳电量，作为这一段曲线的终点
-            val earbudLevels = resolveEarbudLevels(address)
+            val earbudLevels = if (isConnected) resolveEarbudLevels(address) else resolveDisconnectEarbudLevels(address)
             val volumeSnapshot = readMediaVolumeSnapshotSafely()
             val record = DeviceConnectionRecord(
                 deviceMac = address,
@@ -318,6 +325,7 @@ class BtLoggerForegroundService : Service() {
                 latestHeadsetBatteryLevels.remove(address)
                 latestEarbudLevels.remove(address)
                 latestPersistedEarbudLevels.remove(address)
+                retractedEarbudLevels.remove(address)
             }
             refreshNotificationSafely()
         }
@@ -613,10 +621,13 @@ class BtLoggerForegroundService : Service() {
             return
         }
         if (levels.isEmpty) {
-            latestEarbudLevels.remove(address)
+            latestEarbudLevels.remove(address)?.let { retracted ->
+                retractedEarbudLevels[address] = RetractedEarbudLevels(retracted, System.currentTimeMillis())
+            }
             Log.i(tag, "[BtLoggerForegroundService] handleEarbudBatteryChanged -> earbud levels unknown now: device=$address")
             return
         }
+        retractedEarbudLevels.remove(address)
         val previous = latestEarbudLevels.put(address, levels)
         if (previous == levels) return
         Log.i(
@@ -711,6 +722,22 @@ class BtLoggerForegroundService : Service() {
         latestEarbudLevels[address] ?: EarbudLevels.UNKNOWN
 
     /**
+     * 断开记录用的左右耳电量：当前值；读取通道刚在断开前收回时用收回前的值。
+     *
+     * 收回得早（例如被 SOUNDPEATS App 占用通道后很久才断开）说明这期间已经不知道电量，仍写未知。
+     */
+    private fun resolveDisconnectEarbudLevels(address: String): EarbudLevels {
+        latestEarbudLevels[address]?.let { return it }
+        val retracted = retractedEarbudLevels.remove(address) ?: return EarbudLevels.UNKNOWN
+        val sinceRetractMs = System.currentTimeMillis() - retracted.at
+        Log.i(
+            tag,
+            "[BtLoggerForegroundService] resolveDisconnectEarbudLevels -> device=$address, retracted=${retracted.levels}, sinceRetractMs=$sinceRetractMs"
+        )
+        return if (sinceRetractMs <= EARBUD_RETRACT_GRACE_MS) retracted.levels else EarbudLevels.UNKNOWN
+    }
+
+    /**
      * 订阅“读取左右耳电量”开关：打开后对已连接的支持设备立即开始读取，关闭后立即停止。
      */
     private fun observeDualEarSetting() {
@@ -736,6 +763,7 @@ class BtLoggerForegroundService : Service() {
             // 关闭后不再有左右耳电量：清掉缓存，之后的记录写未知，不沿用关闭前的值
             latestEarbudLevels.remove(address)
             latestPersistedEarbudLevels.remove(address)
+            retractedEarbudLevels.remove(address)
             return
         }
         if (earbudBatteryReader.isRunning(address)) return
@@ -1303,6 +1331,9 @@ class BtLoggerForegroundService : Service() {
         /** 连接后首个耳机电量在此时间内到达时，视为连接时的电量补到连接记录上 */
         private const val HEADSET_BACKFILL_WINDOW_MS = 2 * 60_000L
 
+        /** 读取通道收回电量后这么久内断开，断开记录仍带上收回前的左右耳电量 */
+        private const val EARBUD_RETRACT_GRACE_MS = 10_000L
+
         fun start(context: Context) {
             val intent = Intent(context, BtLoggerForegroundService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -1317,6 +1348,8 @@ class BtLoggerForegroundService : Service() {
         }
     }
 }
+
+private data class RetractedEarbudLevels(val levels: EarbudLevels, val at: Long)
 
 private data class ConnectedDeviceState(
     val mac: String,

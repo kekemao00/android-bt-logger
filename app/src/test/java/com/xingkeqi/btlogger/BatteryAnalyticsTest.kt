@@ -443,4 +443,25 @@ class BatteryAnalyticsTest {
         assertEquals(now, system.holdEndOf(system.sessions.single()))
         assertTrue(system.ongoing)
     }
+
+    @Test
+    fun earbudInCaseBeforeWindowIsNotCarriedIntoLast24Hours() {
+        // 左耳在 24 小时窗口开始前放回充电仓，之后一直读不到；右耳一直在用
+        val readings = listOf(
+            earbuds(0, ReadingKind.SESSION_START, 90, 80, 80),
+            earbuds(10, ReadingKind.SAMPLE, 90, null, 80),
+            earbuds(25 * 60, ReadingKind.SAMPLE, 80, null, 70)
+        )
+        val now = t0 + 26 * hour
+
+        val overview = buildBatteryChannelOverview(readings, BatteryRange.LAST_24_HOURS, now = now, requested = BatteryChannel.LEFT)
+        val left = overview.overviews.getValue(BatteryChannel.LEFT)
+        val right = overview.overviews.getValue(BatteryChannel.RIGHT)
+
+        assertTrue(left.sessions.all { it.headset.isEmpty() })
+        assertFalse(left.hasData)
+        assertFalse(left.ongoing)
+        assertEquals(listOf(LevelPoint(now - 24 * hour, 80), LevelPoint(t0 + 25 * hour, 70)), right.sessions.single().headset)
+        assertTrue(right.ongoing)
+    }
 }
