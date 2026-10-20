@@ -131,6 +131,7 @@
     <string name="battery_empty">这段时间耳机没有上报电量。部分设备（如车机、音箱）不提供电量。</string>
     <string name="battery_note">只在耳机电量变化时记录，曲线经过每个实测点；虚线表示最后一个电量一直保持到断开或当前。多数耳机按 10% 一档上报，掉电速率需记录满 10 分钟且有下降才计算。</string>
     <string name="battery_note_earbuds">左耳、右耳电量通过 SOUNDPEATS 私有协议每 10 秒读取一次，变化即记录；系统上报是耳机通过蓝牙上报的主耳电量。曲线经过每个实测点，虚线表示电量一直保持到断开或当前；掉电速率需记录满 10 分钟且有下降才计算。</string>
+    <string name="battery_empty_channel">所选来源这段时间没有电量记录，可切换到其他来源查看。</string>
     <string name="battery_channel_left">左耳</string>
     <string name="battery_channel_right">右耳</string>
     <string name="battery_channel_headset">系统上报</string>

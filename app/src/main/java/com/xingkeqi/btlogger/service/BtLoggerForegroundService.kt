@@ -605,10 +605,16 @@ class BtLoggerForegroundService : Service() {
      * SOUNDPEATS 私有协议读到的左右耳、充电仓电量变化：与系统电量一样“变化即记录”，记录时间取回复到达的时刻。
      *
      * 读取协程在关闭开关或断开时才会停下，期间到达的结果直接丢弃，不写入已关闭读取的设备。
+     * 通道结束时读取器会交来全部未知：只清掉当前值，之后的记录写未知，不为它单独写一条。
      */
     private suspend fun handleEarbudBatteryChanged(address: String, levels: EarbudLevels, observedAt: Long) {
         if (!connectedDevices.containsKey(address) || address !in appSettings.dualEarDevices.value) {
             Log.d(tag, "[BtLoggerForegroundService] handleEarbudBatteryChanged -> ignore: device=$address, levels=$levels")
+            return
+        }
+        if (levels.isEmpty) {
+            latestEarbudLevels.remove(address)
+            Log.i(tag, "[BtLoggerForegroundService] handleEarbudBatteryChanged -> earbud levels unknown now: device=$address")
             return
         }
         val previous = latestEarbudLevels.put(address, levels)
@@ -726,7 +732,7 @@ class BtLoggerForegroundService : Service() {
         val address = state.mac
         val wanted = address in appSettings.dualEarDevices.value && SoundpeatsProtocol.isSupported(state.name, state.uuids)
         if (!wanted) {
-            if (earbudBatteryReader.isRunning(address)) earbudBatteryReader.stop(address)
+            earbudBatteryReader.stop(address)
             // 关闭后不再有左右耳电量：清掉缓存，之后的记录写未知，不沿用关闭前的值
             latestEarbudLevels.remove(address)
             latestPersistedEarbudLevels.remove(address)

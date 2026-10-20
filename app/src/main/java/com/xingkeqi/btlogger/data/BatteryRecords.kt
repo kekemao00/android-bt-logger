@@ -83,9 +83,9 @@ data class RecordLevelChanges(
  */
 fun recordLevelChanges(records: List<RecordInfo>): Map<Int, RecordLevelChanges> {
     val sorted = records.sortedWith(compareBy<RecordInfo> { it.timestamp }.thenBy { it.id })
-    val headset = levelChanges(sorted) { it.headsetBatteryLevel }
-    val left = levelChanges(sorted) { it.leftBatteryLevel }
-    val right = levelChanges(sorted) { it.rightBatteryLevel }
+    val headset = levelChanges(sorted, resetOnUnknown = false) { it.headsetBatteryLevel }
+    val left = levelChanges(sorted, resetOnUnknown = true) { it.leftBatteryLevel }
+    val right = levelChanges(sorted, resetOnUnknown = true) { it.rightBatteryLevel }
     return (headset.keys + left.keys + right.keys).associateWith { id ->
         RecordLevelChanges(headset = headset[id], left = left[id], right = right[id])
     }
@@ -93,13 +93,20 @@ fun recordLevelChanges(records: List<RecordInfo>): Map<Int, RecordLevelChanges> 
 
 /**
  * @param sorted 按时间升序
+ * @param resetOnUnknown 读到未知即重新开始比较。Why: 左右耳未知表示放回了充电仓或读取通道断开，
+ *   取出后的电量与放回前比较、把仓里的时间算作上一档的持续时长都会误导；系统上报的未知只是还没上报，沿用上一档
  */
-private fun levelChanges(sorted: List<RecordInfo>, levelOf: (RecordInfo) -> Int): Map<Int, LevelChange> {
+private fun levelChanges(
+    sorted: List<RecordInfo>,
+    resetOnUnknown: Boolean,
+    levelOf: (RecordInfo) -> Int
+): Map<Int, LevelChange> {
     val changes = HashMap<Int, LevelChange>()
     var level: Int? = null
     var since = 0L
     sorted.forEach { record ->
         val current = levelOf(record).takeIf { it in 0..100 }
+        if (current == null && resetOnUnknown) level = null
         val previous = level
         if (current != null && current != previous) {
             if (previous != null && record.eventType == RecordEventType.BATTERY_CHANGED) {

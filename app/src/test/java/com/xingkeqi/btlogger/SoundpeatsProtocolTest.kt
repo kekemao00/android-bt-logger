@@ -136,4 +136,26 @@ class SoundpeatsProtocolTest {
         assertTrue(EarbudLevels.UNKNOWN.isEmpty)
         assertNull(EarbudLevels.UNKNOWN.left)
     }
+
+    @Test
+    fun parser_repairsZeroLengthRepliesLikeSoundpeatsApp() {
+        // CyberGear：长度写 0 但仍带 payload，按下一个帧头或数据末尾推算
+        val zeroLeft = bytes(0xFF, 0x04, 0x00, 0x00, 0x00, 0x0A, 0x83, 0x06, 0x01, 0x50)
+        val zeroRight = bytes(0xFF, 0x04, 0x00, 0x00, 0x00, 0x0A, 0x83, 0x07, 0x00, 0x46)
+
+        assertEquals(listOf(BatteryReply(EarbudPart.LEFT, 80), BatteryReply(EarbudPart.RIGHT, 70)), parseAll(zeroLeft + zeroRight))
+        assertEquals(listOf(BatteryReply(EarbudPart.LEFT, 80)), parseAll(zeroLeft))
+    }
+
+    @Test
+    fun parser_repairsMiniProHsLengthOneReplies() {
+        // Mini Pro HS：长度写 1，实际 payload 2 字节
+        assertEquals(listOf(BatteryReply(EarbudPart.LEFT, 80)), parseAll(bytes(0xFF, 0x04, 0x00, 0x01, 0x00, 0x0A, 0x83, 0x06, 0x01, 0x50)))
+        // 真正只回 1 字节时不修正：单独到达、或紧跟下一个帧头，都不能吞掉后面的回复
+        assertEquals(listOf(BatteryReply(EarbudPart.CASE, null)), parseAll(bytes(0xFF, 0x04, 0x00, 0x01, 0x00, 0x0A, 0x83, 0x23, 0x01)))
+        assertEquals(
+            listOf(BatteryReply(EarbudPart.CASE, null), BatteryReply(EarbudPart.LEFT, 60)),
+            parseAll(bytes(0xFF, 0x04, 0x00, 0x01, 0x00, 0x0A, 0x83, 0x23, 0x01) + reply(0x06, 60))
+        )
+    }
 }

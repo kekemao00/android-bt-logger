@@ -88,6 +88,7 @@ data class SoundpeatsFrame(val command: Int, val payload: List<Byte>)
 
 /**
  * 从 RFCOMM 字节流中切出完整帧，规则与 SOUNDPEATS App 一致：
+ * - 每次读到的数据先按 App 的做法修正已知型号的长度字段错误，见 [repairKnownLengthErrors]；
  * - 跳过非 0xFF 的字节，直到找到帧头；
  * - 按帧头里的长度切帧，数据不够时等待下一次读取；
  * - 数据不够、但后面已经出现下一个帧头（距离不小于帧头长度）时，按下一个帧头重新对齐，避免一帧长度字段写错卡住后面所有回复。
@@ -102,7 +103,7 @@ class SoundpeatsFrameParser(private val maxBufferBytes: Int = DEFAULT_MAX_BUFFER
 
     fun feed(chunk: ByteArray, length: Int = chunk.size): List<SoundpeatsFrame> {
         if (length <= 0) return emptyList()
-        buffer += chunk.copyOf(length)
+        buffer += repairKnownLengthErrors(chunk.copyOf(length))
         val frames = mutableListOf<SoundpeatsFrame>()
         var start = 0
         while (start < buffer.size) {
@@ -129,6 +130,55 @@ class SoundpeatsFrameParser(private val maxBufferBytes: Int = DEFAULT_MAX_BUFFER
         if (buffer.size > maxBufferBytes) buffer = ByteArray(0)
         return frames
     }
+
+    /**
+     * 修正个别型号回复里写错的长度字段，与 SOUNDPEATS App 的 `BluetoothDataSourceImpl` 对每次读到的数据所做的一致。
+     * 只移植影响电量回复的两条（另两条只涉及固件版本回复，后者不解析，错位也会由重新对齐处理）：
+     * - CyberGear（ATS3019DK12）：回复的长度写 0 但仍带 payload，按下一个帧头（或本次数据末尾）推算实际长度；
+     * - Mini Pro HS：本次数据以 `FF 04 00 01 00 0A 83` 开头时，实际 payload 是 2 字节。
+     *   App 无条件改为 2；这里额外要求第 10 字节存在且不是下一个帧头，真正只回 1 字节的型号（不支持充电仓电量）不会吞掉下一条回复。
+     *
+     * [data] 原地修改。
+     */
+    private fun repairKnownLengthErrors(data: ByteArray): ByteArray {
+        var index = 0
+        while (index <= data.size - SoundpeatsProtocol.HEADER_SIZE) {
+            if (!isHeaderAt(data, index)) {
+                index++
+                continue
+            }
+            val payloadLength = data[index + LENGTH_INDEX].toInt() and 0xFF
+            if (payloadLength == 0 && isVendorResponse(data, index) && index + SoundpeatsProtocol.HEADER_SIZE < data.size) {
+                val payloadStart = index + SoundpeatsProtocol.HEADER_SIZE
+                val nextHeader = (payloadStart until data.size).firstOrNull { isHeaderAt(data, it) } ?: data.size
+                val derived = nextHeader - payloadStart
+                if (derived in 1..0xFF) {
+                    data[index + LENGTH_INDEX] = derived.toByte()
+                    index = nextHeader
+                    continue
+                }
+            }
+            index += SoundpeatsProtocol.HEADER_SIZE + payloadLength
+        }
+        val miniProHs = data.size > SoundpeatsProtocol.HEADER_SIZE + 1 &&
+            isHeaderAt(data, 0) &&
+            (data[LENGTH_INDEX].toInt() and 0xFF) == 1 &&
+            isVendorResponse(data, 0) &&
+            !isHeaderAt(data, SoundpeatsProtocol.HEADER_SIZE + 1)
+        if (miniProHs) data[LENGTH_INDEX] = 2
+        return data
+    }
+
+    /** `FF 04 00` 帧头；不足 3 字节时不算 */
+    private fun isHeaderAt(data: ByteArray, index: Int): Boolean =
+        index + 2 < data.size &&
+            data[index] == SoundpeatsProtocol.START_BYTE &&
+            data[index + 1] == 0x04.toByte() &&
+            data[index + 2] == 0x00.toByte()
+
+    /** 厂商 ID `00 0A` 且指令高字节为 0x83（回复） */
+    private fun isVendorResponse(data: ByteArray, index: Int): Boolean =
+        data[index + 4] == 0x00.toByte() && data[index + 5] == 0x0A.toByte() && (data[index + 6].toInt() and 0xFF) == 0x83
 
     private fun frameOf(from: Int, to: Int): SoundpeatsFrame {
         val command = ((buffer[from + 6].toInt() and 0xFF) shl 8) or (buffer[from + 7].toInt() and 0xFF)

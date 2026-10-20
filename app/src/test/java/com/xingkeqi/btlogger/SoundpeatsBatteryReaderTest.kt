@@ -27,6 +27,7 @@ import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CyclicBarrier
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -244,5 +245,43 @@ class SoundpeatsBatteryReaderTest {
         const val ADDRESS_LOST = "00:00:00:00:00:04"
         const val ADDRESS_STOP = "00:00:00:00:00:05"
         const val ADDRESS_TWICE = "00:00:00:00:00:06"
+        const val ADDRESS_RETRACT = "00:00:00:00:00:07"
+    }
+
+    @Test
+    fun reader_retractsLevelsWhenLinkEnds() = runBlocking {
+        val links = CopyOnWriteArrayList<FakeLink>()
+        val reader = reader()
+
+        reader.start(ADDRESS_RETRACT) {
+            FakeLink { command -> reply(command, 40) }.also { links += it }
+        }
+        awaitUntil { delivered.size == 1 }
+        links.single().closeFromRemote()
+
+        // 通道断开后不再知道电量：撤回为未知，等待重连期间的其他记录不会带上旧值
+        awaitUntil { failureOf(ADDRESS_RETRACT) == EarbudReaderFailure.CONNECTION_LOST }
+        assertEquals(listOf(EarbudLevels(left = 40, right = 40, case = 40), EarbudLevels.UNKNOWN), delivered.toList())
+        reader.stop(ADDRESS_RETRACT)
+    }
+
+    @Test
+    fun start_fromTwoThreadsOpensOneSession() = runBlocking {
+        val reader = reader()
+        repeat(200) { index ->
+            val address = "AA:00:00:00:%02X:%02X".format(index / 256, index % 256)
+            val attempts = AtomicInteger()
+            val open: suspend () -> EarbudLink? = { attempts.incrementAndGet(); null }
+            val barrier = CyclicBarrier(2)
+            val threads = List(2) { Thread { barrier.await(); reader.start(address, open) } }
+            threads.forEach(Thread::start)
+            threads.forEach(Thread::join)
+
+            awaitUntil { failureOf(address) == EarbudReaderFailure.CONNECT_FAILED }
+            reader.stop(address)
+            delay(5)
+            assertEquals("duplicate session for $address", 1, attempts.get())
+            assertFalse(reader.isRunning(address))
+        }
     }
 }

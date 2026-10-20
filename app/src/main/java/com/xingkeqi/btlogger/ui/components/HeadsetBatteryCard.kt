@@ -63,11 +63,16 @@ private val BatteryRanges = listOf(BatteryRange.LATEST_SESSION, BatteryRange.LAS
 /** 横轴最短跨度：刚连接、只有一两个点时曲线不至于挤成一团 */
 private const val MIN_DOMAIN_MILLIS = 10 * 60_000L
 
-/** 曲线上的一个来源：所选范围内有电量的连接，以及去掉平台中段重复点后的各段 */
+/**
+ * 曲线上的一个来源：所选范围内有电量的连接，以及去掉平台中段重复点后的各段。
+ *
+ * @param holdUntil 与 [sessions] 一一对应，各段最后一个电量的虚线画到何时
+ */
 private class ChannelCurve(
     val channel: BatteryChannel,
     val sessions: List<BatterySession>,
-    val segments: List<List<LevelPoint>>
+    val segments: List<List<LevelPoint>>,
+    val holdUntil: List<Long>
 )
 
 /**
@@ -100,9 +105,15 @@ fun HeadsetBatteryCard(
     )
     val curves = remember(channelOverview) {
         channelOverview.plotted.map { channel ->
-            val sessions = channelOverview.overviews.getValue(channel).sessions.filter { it.headset.isNotEmpty() }
+            val channelData = channelOverview.overviews.getValue(channel)
+            val sessions = channelData.sessions.filter { it.headset.isNotEmpty() }
             // 平台中段的重复点不影响曲线形状，去掉后游标只停在电量变化处与各段首尾
-            ChannelCurve(channel = channel, sessions = sessions, segments = sessions.map { compressPlateaus(it.headset) })
+            ChannelCurve(
+                channel = channel,
+                sessions = sessions,
+                segments = sessions.map { compressPlateaus(it.headset) },
+                holdUntil = sessions.map(channelData::holdEndOf)
+            )
         }
     }
     val labels = BatteryChannel.entries.associateWith { channelLabel(it) }
@@ -113,7 +124,7 @@ fun HeadsetBatteryCard(
                 label = labels.getValue(curve.channel),
                 color = colors.channelColor(curve.channel),
                 segments = curve.segments,
-                holdUntil = curve.sessions.map { it.endTime },
+                holdUntil = curve.holdUntil,
                 emphasized = curve.channel == channelOverview.selected
             )
         }
@@ -171,7 +182,8 @@ fun HeadsetBatteryCard(
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = stringResource(id = R.string.battery_empty),
+                    // 有多个来源时空白只说明所选来源这段时间没有记录，其他来源可能有
+                    text = stringResource(id = if (showChannels) R.string.battery_empty_channel else R.string.battery_empty),
                     style = MaterialTheme.typography.bodySmall,
                     color = colors.ink3,
                     modifier = Modifier.padding(horizontal = Dimens.spacingLg)

@@ -416,4 +416,31 @@ class BatteryAnalyticsTest {
         assertFalse(requested.overview.hasData)
         assertEquals(emptyList<BatteryChannel>(), requested.plotted)
     }
+
+    @Test
+    fun earbudHoldStopsWhenEarbudGoesOffline() {
+        // 左耳 10 分时放回充电仓（记为未知），右耳继续用到当前
+        val readings = listOf(
+            earbuds(0, ReadingKind.SESSION_START, 90, null, null),
+            earbuds(1, ReadingKind.SAMPLE, 90, 80, 80),
+            earbuds(10, ReadingKind.SAMPLE, 90, null, 80),
+            earbuds(30, ReadingKind.SAMPLE, 80, null, 70)
+        )
+        val now = t0 + hour
+
+        val overview = buildBatteryChannelOverview(readings, BatteryRange.LATEST_SESSION, now = now, requested = BatteryChannel.LEFT)
+        val left = overview.overviews.getValue(BatteryChannel.LEFT)
+        val right = overview.overviews.getValue(BatteryChannel.RIGHT)
+
+        assertEquals(t0 + 10 * minute, left.holdEndOf(left.sessions.single()))
+        assertFalse(left.ongoing)
+        assertNull(left.estimatedRemainingMillis)
+        assertEquals(now, right.holdEndOf(right.sessions.single()))
+        assertTrue(right.ongoing)
+
+        // 系统上报的未知只是还没上报，保持段照旧画到当前
+        val system = buildBatteryChannelOverview(readings, BatteryRange.LATEST_SESSION, now = now, requested = BatteryChannel.HEADSET).overview
+        assertEquals(now, system.holdEndOf(system.sessions.single()))
+        assertTrue(system.ongoing)
+    }
 }

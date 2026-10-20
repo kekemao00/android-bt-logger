@@ -55,7 +55,8 @@ data class EarbudReaderTiming(
  * - 只把变化交给 [onLevels]，落库仍由前台服务按“变化即记录”处理；
  * - 通道如何建立由调用方传入（真机为 RFCOMM，见 [RfcommEarbudLink]），读取逻辑因此可以在 JVM 上单测。
  *
- * @param onLevels 某一部位的电量变化时调用；observedAt 为这一轮首个回复到达的时间
+ * @param onLevels 某一部位的电量变化时调用，observedAt 为这一轮首个回复到达的时间；
+ *   通道结束（断开、不回应）后以 [EarbudLevels.UNKNOWN] 再调用一次，表示不再知道当前电量
  */
 class SoundpeatsBatteryReader(
     private val scope: CoroutineScope,
@@ -68,14 +69,17 @@ class SoundpeatsBatteryReader(
     private val sessions = ConcurrentHashMap<String, Job>()
 
     /**
-     * 开始读取；已在读取时不重复启动（编解码切换等也会触发探测启动）。
+     * 开始读取；已在读取时不重复启动（连接、编解码切换与开关变化可能同时触发）。
+     *
+     * Why: 会话以 LAZY 方式创建，放入表后才启动；按“尚未结束”而不是“正在运行”判断，
+     * 否则两个调用同时落在创建与启动之间时会各开一个会话，被替换掉的那个再也停不下来。
      *
      * @param openLink 建立一次通道；连不上返回 null，每次重连都会再调用
      */
     fun start(address: String, openLink: suspend () -> EarbudLink?) {
         var created: Job? = null
         sessions.compute(address) { _, current ->
-            if (current != null && current.isActive) {
+            if (current != null && !current.isCompleted) {
                 current
             } else {
                 scope.launch(Dispatchers.IO, start = CoroutineStart.LAZY) { runSession(address, openLink) }
@@ -103,7 +107,7 @@ class SoundpeatsBatteryReader(
         sessions.keys.toList().forEach(::stop)
     }
 
-    fun isRunning(address: String): Boolean = sessions[address]?.isActive == true
+    fun isRunning(address: String): Boolean = sessions[address]?.isCompleted == false
 
     private suspend fun runSession(address: String, openLink: suspend () -> EarbudLink?) {
         val self = currentCoroutineContext().job
@@ -112,6 +116,12 @@ class SoundpeatsBatteryReader(
         }
 
         var failures = 0
+        // 这条通道上交出去的最新电量是否不为空；通道结束后要撤回，见下方
+        var reported = false
+        suspend fun report(levels: EarbudLevels, observedAt: Long) {
+            reported = !levels.isEmpty
+            deliver(address, levels, observedAt)
+        }
         while (true) {
             currentCoroutineContext().ensureActive()
             publish(EarbudReaderStatus.Connecting)
@@ -121,7 +131,7 @@ class SoundpeatsBatteryReader(
                     EarbudReaderFailure.CONNECT_FAILED to false
                 } else {
                     Log.i(tag, "[SoundpeatsBatteryReader] runSession -> channel open: device=$address")
-                    poll(link, address, ::publish)
+                    poll(link, address, ::publish) { levels, observedAt -> report(levels, observedAt) }
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -132,6 +142,9 @@ class SoundpeatsBatteryReader(
                 Log.e(tag, "[SoundpeatsBatteryReader] runSession -> permission denied: device=$address", e)
                 EarbudReaderFailure.CONNECT_FAILED to false
             }
+            // Why: 通道断了就不再知道左右耳电量（常见是耳机放回充电仓、或被 SOUNDPEATS App 抢走通道），
+            // 撤回为未知，等待重连期间系统电量等其他记录不会带上断开前的旧值
+            if (reported) report(EarbudLevels.UNKNOWN, System.currentTimeMillis())
             // 读到过数据说明通道本身可用，重新从最短的间隔开始重连
             failures = if (receivedAny) 1 else failures + 1
             val wait = timing.retryDelayMillis(failure, failures)
@@ -149,7 +162,8 @@ class SoundpeatsBatteryReader(
     private suspend fun poll(
         link: EarbudLink,
         address: String,
-        publish: (EarbudReaderStatus) -> Unit
+        publish: (EarbudReaderStatus) -> Unit,
+        report: suspend (EarbudLevels, Long) -> Unit
     ): Pair<EarbudReaderFailure, Boolean> = coroutineScope {
         val replies = Channel<Pair<BatteryReply, Long>>(Channel.UNLIMITED)
         val readerJob = launch(Dispatchers.IO) { readReplies(link, replies) }
@@ -188,7 +202,7 @@ class SoundpeatsBatteryReader(
                     if (next != levels) {
                         Log.i(tag, "[SoundpeatsBatteryReader] poll -> levels changed: device=$address, $levels -> $next")
                         levels = next
-                        deliver(address, levels, observedAt)
+                        report(levels, observedAt)
                     }
                     publish(EarbudReaderStatus.Reading(levels, lastReplyAt))
                 }

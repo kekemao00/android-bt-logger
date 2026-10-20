@@ -84,4 +84,21 @@ class BatteryRecordsTest {
             recordLevelChanges(records)
         )
     }
+
+    @Test
+    fun recordLevelChanges_doesNotCountTimeInCaseAsHoldTime() {
+        val records = listOf(
+            record(1, 0, RecordEventType.CONNECTED, 80),
+            record(2, 1, RecordEventType.BATTERY_CHANGED, 80, left = 60, right = 60),
+            // 左耳放回充电仓，充满后取出：不写“60% → 100% · 上一档持续 40 分”
+            record(3, 5, RecordEventType.BATTERY_CHANGED, 80, right = 60),
+            record(4, 40, RecordEventType.BATTERY_CHANGED, 80, left = 100, right = 60),
+            record(5, 50, RecordEventType.BATTERY_CHANGED, 80, left = 95, right = 60)
+        )
+
+        assertEquals(
+            mapOf(5 to RecordLevelChanges(left = LevelChange(previousLevel = 100, heldMillis = 10 * minute))),
+            recordLevelChanges(records)
+        )
+    }
 }

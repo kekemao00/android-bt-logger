@@ -85,6 +85,18 @@ data class BatterySession(
     val headset: List<LevelPoint> = readings.mapNotNull { reading ->
         reading.headsetLevel?.takeIf(::isValidLevel)?.let { LevelPoint(reading.timestamp, it) }
     }
+
+    /**
+     * 最后一个电量保持到何时。
+     *
+     * @param stopAtUnknown 为 true 时保持到其后第一条明确未知的记录（左右耳放回充电仓或读取通道断开），
+     *   之后不再知道该耳机电量；为 false 时一直保持到 [endTime]（系统上报的未知只是还没上报）
+     */
+    fun holdEnd(stopAtUnknown: Boolean): Long {
+        if (!stopAtUnknown) return endTime
+        val last = headset.lastOrNull() ?: return endTime
+        return readings.firstOrNull { it.timestamp > last.timestamp && it.headsetLevel == null }?.timestamp ?: endTime
+    }
 }
 
 /**
@@ -131,7 +143,8 @@ enum class BatteryRange { LATEST_SESSION, LAST_24_HOURS, ALL }
 /**
  * 详情页耳机电量概览：所选范围内的连接（已按范围裁剪）与掉电统计。
  *
- * @param ongoing 最后一段仍在连接中，此时展示“预计剩余”，否则展示“满电续航”
+ * @param ongoing 最后一段仍在连接中且电量仍然已知，此时展示“预计剩余”，否则展示“满电续航”
+ * @param holdStopsAtUnknown 曲线末端的保持段是否在明确未知处结束，见 [BatterySession.holdEnd]
  */
 data class BatteryOverview(
     val range: BatteryRange,
@@ -139,9 +152,12 @@ data class BatteryOverview(
     val stats: DrainStats?,
     val windowStart: Long,
     val windowEnd: Long,
-    val ongoing: Boolean
+    val ongoing: Boolean,
+    val holdStopsAtUnknown: Boolean = false
 ) {
     val hasData: Boolean get() = sessions.any { it.headset.isNotEmpty() }
+
+    fun holdEndOf(session: BatterySession): Long = session.holdEnd(holdStopsAtUnknown)
 
     /**
      * 仍在连接中时的预计剩余：按平均速率从最后一次掉电算起，再扣掉此后已经过去的时间。
@@ -315,8 +331,14 @@ fun BatterySession.clippedFrom(since: Long): BatterySession? {
  * 详情页曲线与统计。
  *
  * @param now 用于“最近 24 小时”的窗口起点，也是仍在连接中那一段的结束时间
+ * @param holdStopsAtUnknown 左右耳传 true：放回充电仓后不再画保持段，也不再估算剩余
  */
-fun buildBatteryOverview(readings: List<BatteryReading>, range: BatteryRange, now: Long): BatteryOverview {
+fun buildBatteryOverview(
+    readings: List<BatteryReading>,
+    range: BatteryRange,
+    now: Long,
+    holdStopsAtUnknown: Boolean = false
+): BatteryOverview {
     val sessions = splitBatterySessions(readings, now)
     val selected = when (range) {
         BatteryRange.LATEST_SESSION -> listOfNotNull(sessions.lastOrNull())
@@ -332,7 +354,8 @@ fun buildBatteryOverview(readings: List<BatteryReading>, range: BatteryRange, no
         stats = computeDrainStats(selected.map { it.headset }),
         windowStart = withData.first().startTime,
         windowEnd = withData.last().endTime,
-        ongoing = !selected.last().ended
+        ongoing = selected.last().let { !it.ended && it.holdEnd(holdStopsAtUnknown) == it.endTime },
+        holdStopsAtUnknown = holdStopsAtUnknown
     )
 }
 
@@ -388,7 +411,12 @@ fun buildBatteryChannelOverview(
     val channels = availableChannels(readings)
     val overviews = HashMap<BatteryChannel, BatteryOverview>()
     fun overviewOf(channel: BatteryChannel) = overviews.getOrPut(channel) {
-        buildBatteryOverview(readings.map { it.forChannel(channel) }, range, now)
+        buildBatteryOverview(
+            readings = readings.map { it.forChannel(channel) },
+            range = range,
+            now = now,
+            holdStopsAtUnknown = channel != BatteryChannel.HEADSET
+        )
     }
     val selected = requested?.takeIf { it in channels }
         ?: channels.firstOrNull { overviewOf(it).hasData }

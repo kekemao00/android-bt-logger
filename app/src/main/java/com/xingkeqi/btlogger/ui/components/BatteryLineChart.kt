@@ -507,7 +507,8 @@ private fun snapCursor(series: List<ChartSeries>, timestamp: Long, visible: Long
         if (first > last) return@forEach
         val point = points[nearestPointIndex(points, timestamp).coerceIn(first, last)]
         val distance = abs(point.timestamp - timestamp)
-        if (distance < bestDistance) {
+        // 左右耳曲线常在同一时刻都有点：距离相同时停在突出显示（所选来源）的曲线上，否则后面的曲线永远点不到
+        if (distance < bestDistance || (distance == bestDistance && line.emphasized)) {
             bestDistance = distance
             best = ChartCursor(line.key, point)
         }
