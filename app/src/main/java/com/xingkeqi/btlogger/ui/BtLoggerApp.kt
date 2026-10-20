@@ -138,6 +138,7 @@ fun BtLoggerApp(
     val mediaVolumeSnapshot by viewModel.mediaVolumeSnapshot.collectAsState()
     val updateState by viewModel.updateState.collectAsState()
     val batteryOverview by viewModel.batteryOverview.collectAsState()
+    val dualEarState by viewModel.dualEarState.collectAsState()
     val compareOpen by viewModel.compareOpen.collectAsState()
     val batteryComparison by viewModel.batteryComparison.collectAsState()
 
@@ -271,9 +272,12 @@ fun BtLoggerApp(
                         records = records,
                         stats = stats,
                         batteryOverview = batteryOverview,
+                        dualEarState = dualEarState,
                         filter = recordFilter,
                         onFilterChange = viewModel::setRecordFilter,
                         onBatteryRangeChange = viewModel::setBatteryRange,
+                        onBatteryChannelChange = viewModel::setBatteryChannel,
+                        onDualEarChange = viewModel::setDualEarEnabled,
                         onOpenCompare = viewModel::openCompare,
                         onRecordLongClick = { pendingConfirm = PendingConfirm.DeleteRecord(it) }
                     )

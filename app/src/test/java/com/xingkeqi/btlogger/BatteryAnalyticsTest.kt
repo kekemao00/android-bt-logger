@@ -395,4 +395,25 @@ class BatteryAnalyticsTest {
         assertEquals(listOf(BatteryChannel.HEADSET), system.plotted)
         assertEquals(15.0, system.overview.stats!!.ratePerHour!!, 1e-9)
     }
+
+    @Test
+    fun buildBatteryChannelOverview_defaultsToChannelWithDataInRange() {
+        // 第一次连接开过左右耳读取，最近一次没有开：“本次连接”默认显示系统上报，而不是空的左耳
+        val readings = earbudReadings + listOf(
+            connect(t0 + 3 * hour, 60),
+            sample(t0 + 3 * hour + 30 * minute, 50),
+            disconnect(t0 + 4 * hour, 50)
+        )
+
+        val latest = buildBatteryChannelOverview(readings, BatteryRange.LATEST_SESSION, now = t0 + 5 * hour)
+        assertEquals(BatteryChannel.HEADSET, latest.selected)
+        assertEquals(listOf(BatteryChannel.LEFT, BatteryChannel.RIGHT, BatteryChannel.HEADSET), latest.channels)
+        assertTrue(latest.overview.hasData)
+
+        // 用户明确选了左耳就保持左耳，即使这次连接没有数据
+        val requested = buildBatteryChannelOverview(readings, BatteryRange.LATEST_SESSION, now = t0 + 5 * hour, requested = BatteryChannel.LEFT)
+        assertEquals(BatteryChannel.LEFT, requested.selected)
+        assertFalse(requested.overview.hasData)
+        assertEquals(emptyList<BatteryChannel>(), requested.plotted)
+    }
 }

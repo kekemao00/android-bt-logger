@@ -20,11 +20,13 @@ import com.xingkeqi.btlogger.data.computeRecordStats
 import com.xingkeqi.btlogger.data.parseExportedRows
 import com.xingkeqi.btlogger.data.toBatteryReading
 import com.xingkeqi.btlogger.data.toDeviceHistories
-import com.xingkeqi.btlogger.domain.battery.BatteryOverview
+import com.xingkeqi.btlogger.domain.battery.BatteryChannel
+import com.xingkeqi.btlogger.domain.battery.BatteryChannelOverview
 import com.xingkeqi.btlogger.domain.battery.BatteryRange
 import com.xingkeqi.btlogger.domain.battery.ComparisonCandidate
-import com.xingkeqi.btlogger.domain.battery.buildBatteryOverview
+import com.xingkeqi.btlogger.domain.battery.buildBatteryChannelOverview
 import com.xingkeqi.btlogger.domain.battery.buildComparisonCandidates
+import com.xingkeqi.btlogger.service.earbud.EarbudReaderStatusStore
 import com.xingkeqi.btlogger.update.ApkInstaller
 import com.xingkeqi.btlogger.update.GitHubUpdateRepository
 import com.xingkeqi.btlogger.update.ReleaseAsset
@@ -181,6 +183,9 @@ class MainViewModel(
     private val _batteryRange = MutableStateFlow(BatteryRange.LATEST_SESSION)
     val batteryRange: StateFlow<BatteryRange> = _batteryRange.asStateFlow()
 
+    /** 用户选择的电量来源；null 表示按数据自动选择（有左右耳数据时默认左耳），切换设备时重置 */
+    private val _batteryChannel = MutableStateFlow<BatteryChannel?>(null)
+
     /**
      * 每分钟推进一次的当前时间。
      *
@@ -195,17 +200,28 @@ class MainViewModel(
     }
 
     /**
-     * 详情页耳机电量曲线与掉电统计；记录、范围变化或每分钟在后台线程重算
+     * 详情页耳机电量曲线与掉电统计（按来源）；记录、范围、来源变化或每分钟在后台线程重算
      */
-    val batteryOverview: StateFlow<BatteryOverview> = combine(records, _batteryRange, batteryClock) { list, range, now ->
-        buildBatteryOverview(
-            readings = list.asReversed().map { it.toBatteryReading() },
-            range = range,
-            now = now
-        )
-    }
-        .flowOn(Dispatchers.Default)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BatteryOverview.empty(BatteryRange.LATEST_SESSION))
+    val batteryOverview: StateFlow<BatteryChannelOverview> =
+        combine(records, _batteryRange, _batteryChannel, batteryClock) { list, range, channel, now ->
+            buildBatteryChannelOverview(
+                readings = list.asReversed().map { it.toBatteryReading() },
+                range = range,
+                now = now,
+                requested = channel
+            )
+        }
+            .flowOn(Dispatchers.Default)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BatteryChannelOverview.empty(BatteryRange.LATEST_SESSION))
+
+    /** 当前设备的“读取左右耳电量”开关与读取状态 */
+    val dualEarState: StateFlow<DualEarUiState> = combine(
+        selectedDevice,
+        settings.dualEarDevices,
+        EarbudReaderStatusStore.statuses
+    ) { device, enabled, statuses ->
+        dualEarUiStateOf(device, enabled, statuses)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DualEarUiState())
 
     private val _compareOpen = MutableStateFlow(false)
     val compareOpen: StateFlow<Boolean> = _compareOpen.asStateFlow()
@@ -270,6 +286,7 @@ class MainViewModel(
     fun selectDevice(device: DeviceInfo) {
         Log.i(tag, "[MainViewModel] selectDevice -> mac=${device.mac}")
         _recordFilter.value = RecordFilter.ALL
+        _batteryChannel.value = null
         _selectedDevice.value = device
     }
 
@@ -288,6 +305,20 @@ class MainViewModel(
     fun setBatteryRange(range: BatteryRange) {
         Log.i(tag, "[MainViewModel] setBatteryRange -> ${_batteryRange.value} -> $range")
         _batteryRange.value = range
+    }
+
+    fun setBatteryChannel(channel: BatteryChannel) {
+        Log.i(tag, "[MainViewModel] setBatteryChannel -> ${batteryOverview.value.selected} -> $channel")
+        _batteryChannel.value = channel
+    }
+
+    /**
+     * 打开或关闭当前设备的左右耳电量读取；前台服务订阅该设置，立即开始或停止
+     */
+    fun setDualEarEnabled(enabled: Boolean) {
+        val mac = selectedDevice.value?.mac ?: return
+        Log.i(tag, "[MainViewModel] setDualEarEnabled -> device=$mac, enabled=$enabled")
+        settings.setDualEarEnabled(mac, enabled)
     }
 
     fun openCompare() {

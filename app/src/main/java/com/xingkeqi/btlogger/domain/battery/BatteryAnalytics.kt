@@ -376,7 +376,8 @@ data class BatteryChannelOverview(
 /**
  * 按来源分别计算详情页概览。
  *
- * @param requested 用户选择的来源；为 null 或该来源没有数据时取第一个有数据的来源（有左右耳数据时默认左耳）
+ * @param requested 用户选择的来源；为 null 或记录里没有该来源时，取所选范围内第一个有数据的来源
+ *   （有左右耳数据时默认左耳）。Why: 只有早先几次连接开过左右耳读取时，默认选左耳会让“本次连接”显示为空。
  */
 fun buildBatteryChannelOverview(
     readings: List<BatteryReading>,
@@ -385,7 +386,13 @@ fun buildBatteryChannelOverview(
     requested: BatteryChannel? = null
 ): BatteryChannelOverview {
     val channels = availableChannels(readings)
-    val selected = requested?.takeIf { it in channels } ?: channels.first()
+    val overviews = HashMap<BatteryChannel, BatteryOverview>()
+    fun overviewOf(channel: BatteryChannel) = overviews.getOrPut(channel) {
+        buildBatteryOverview(readings.map { it.forChannel(channel) }, range, now)
+    }
+    val selected = requested?.takeIf { it in channels }
+        ?: channels.firstOrNull { overviewOf(it).hasData }
+        ?: channels.first()
     val needed = if (selected == BatteryChannel.HEADSET) {
         listOf(BatteryChannel.HEADSET)
     } else {
@@ -394,9 +401,7 @@ fun buildBatteryChannelOverview(
     return BatteryChannelOverview(
         selected = selected,
         channels = channels,
-        overviews = needed.associateWith { channel ->
-            buildBatteryOverview(readings.map { it.forChannel(channel) }, range, now)
-        }
+        overviews = needed.associateWith(::overviewOf)
     )
 }
 

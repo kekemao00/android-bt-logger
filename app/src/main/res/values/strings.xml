@@ -130,6 +130,22 @@
     <string name="battery_insufficient">数据不足</string>
     <string name="battery_empty">这段时间耳机没有上报电量。部分设备（如车机、音箱）不提供电量。</string>
     <string name="battery_note">只在耳机电量变化时记录，曲线经过每个实测点；虚线表示最后一个电量一直保持到断开或当前。多数耳机按 10% 一档上报，掉电速率需记录满 10 分钟且有下降才计算。</string>
+    <string name="battery_note_earbuds">左耳、右耳电量通过 SOUNDPEATS 私有协议每 10 秒读取一次，变化即记录；系统上报是耳机通过蓝牙上报的主耳电量。曲线经过每个实测点，虚线表示电量一直保持到断开或当前；掉电速率需记录满 10 分钟且有下降才计算。</string>
+    <string name="battery_channel_left">左耳</string>
+    <string name="battery_channel_right">右耳</string>
+    <string name="battery_channel_headset">系统上报</string>
+    <string name="battery_part_case">充电仓</string>
+    <string name="record_battery_part">%1$s %2$d%%</string>
+    <string name="record_battery_part_step">%1$s %2$d%% → %3$d%% · 上一档持续 %4$s</string>
+    <string name="dual_ear_title">读取左右耳电量</string>
+    <string name="dual_ear_hint">通过 SOUNDPEATS 私有协议每 10 秒读取一次左耳、右耳与充电仓电量，变化即记录。读取通道与 SOUNDPEATS App 互斥，测试时请先关闭 SOUNDPEATS App。</string>
+    <string name="dual_ear_waiting_connection">设备连接后开始读取</string>
+    <string name="dual_ear_connecting">正在连接读取通道…</string>
+    <string name="dual_ear_waiting_reply">已连接，等待耳机回复…</string>
+    <string name="dual_ear_levels">左耳 %1$s · 右耳 %2$s · 充电仓 %3$s · %4$s 更新</string>
+    <string name="dual_ear_retry_connect">连不上读取通道，可能被 SOUNDPEATS App 占用；%1$s 重试</string>
+    <string name="dual_ear_retry_no_response">耳机没有回复电量，可能不支持该协议；%1$s 重试</string>
+    <string name="dual_ear_retry_lost">读取通道断开；%1$s 重试</string>
 
     <!-- 电量对比 -->
     <string name="action_compare">电量对比</string>
