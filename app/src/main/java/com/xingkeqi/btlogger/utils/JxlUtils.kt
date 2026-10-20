@@ -7,6 +7,7 @@ import com.xingkeqi.btlogger.data.DeviceInfo
 import com.xingkeqi.btlogger.data.RecordEventType
 import com.xingkeqi.btlogger.data.RecordInfo
 import com.xingkeqi.btlogger.data.buildBatteryExport
+import com.xingkeqi.btlogger.domain.battery.BatteryChannel
 import jxl.Workbook
 import jxl.write.Label
 import jxl.write.WritableWorkbook
@@ -18,20 +19,24 @@ import java.util.Locale
 
 const val EXCEL_MIME_TYPE = "application/vnd.ms-excel"
 
-/** 只记录耳机电量后不再导出“手机电量”列；导入按表头名称读取，旧表格里的该列仍可导入 */
+/**
+ * 只记录耳机电量后不再导出“手机电量”列；导入按表头名称读取，旧表格里的该列仍可导入。
+ * 左耳、右耳、充电仓电量来自 SOUNDPEATS 私有协议，未开启读取时留空。
+ */
 private val EXPORT_HEADERS = listOf(
     "设备名称", "设备别名", "蓝牙地址", "记录时间", "绑定状态", "设备类型", "蓝牙版本",
-    "事件", "耳机电量", "媒体音量", "正在播放", "UUID",
+    "事件", "耳机电量", "左耳电量", "右耳电量", "充电仓电量", "媒体音量", "正在播放", "UUID",
     "手机支持编解码", "双方可用编解码", "当前使用编解码"
 )
 
 private val BATTERY_SESSION_HEADERS = listOf(
-    "设备名称", "蓝牙地址", "连接时间", "结束时间", "状态", "时长(分钟)",
+    "设备名称", "蓝牙地址", "电量来源", "连接时间", "结束时间", "状态", "时长(分钟)",
     "起始电量(%)", "结束电量(%)", "累计消耗(%)", "平均掉电(%/小时)", "满电续航(小时)", "电量记录数"
 )
 
 private val HEADSET_SAMPLE_HEADERS = listOf(
-    "设备名称", "蓝牙地址", "连接时间", "记录时间", "连接后(分钟)", "耳机电量(%)", "媒体音量(%)", "正在播放"
+    "设备名称", "蓝牙地址", "连接时间", "记录时间", "连接后(分钟)",
+    "耳机电量(%)", "左耳电量(%)", "右耳电量(%)", "充电仓电量(%)", "媒体音量(%)", "正在播放"
 )
 
 private const val RECORD_SHEET_NAME = "连接记录"
@@ -88,6 +93,9 @@ fun saveDataToSheet(
                 bluetoothVersion,
                 getRecordEventLabel(item),
                 item.headsetBatteryLevel.takeIf { it in 0..100 }?.toString() ?: "未上报",
+                item.leftBatteryLevel.toLevelCell(),
+                item.rightBatteryLevel.toLevelCell(),
+                item.caseBatteryLevel.toLevelCell(),
                 "${item.volume}%",
                 if (item.isPlaying == 1) "是" else "否",
                 item.uuids,
@@ -104,6 +112,7 @@ fun saveDataToSheet(
                 listOf(
                     text(row.name),
                     text(row.mac),
+                    text(channelLabel(row.channel)),
                     text(TimeUtils.millis2String(row.connectedAt)),
                     text(TimeUtils.millis2String(row.endedAt)),
                     text(if (row.ended) "已断开" else "连接中"),
@@ -124,6 +133,9 @@ fun saveDataToSheet(
                     text(TimeUtils.millis2String(row.timestamp)),
                     num(row.minutesSinceConnect),
                     num(row.level),
+                    num(row.leftLevel),
+                    num(row.rightLevel),
+                    num(row.caseLevel),
                     num(row.volume),
                     text(if (row.isPlaying) "是" else "否")
                 )
@@ -214,6 +226,15 @@ private fun deviceTypeLabel(type: Int): String = when (type) {
 private fun getCurrentDateTime(): String {
     val sdf = SimpleDateFormat("yyyy_MM_dd_HH_mm_ss", Locale.getDefault())
     return sdf.format(Date())
+}
+
+/** 左右耳、充电仓电量：未知时留空，大多数耳机没有这几列数据，避免整列“未上报” */
+private fun Int.toLevelCell(): String = takeIf { it in 0..100 }?.toString().orEmpty()
+
+private fun channelLabel(channel: BatteryChannel): String = when (channel) {
+    BatteryChannel.HEADSET -> "系统上报"
+    BatteryChannel.LEFT -> "左耳"
+    BatteryChannel.RIGHT -> "右耳"
 }
 
 private fun getRecordEventLabel(record: RecordInfo): String {

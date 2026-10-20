@@ -68,8 +68,10 @@ fun parseExportedRows(
             // 新导出的表格没有“手机电量”列，与新记录一样写未知值，而不是 0%
             batteryLevel = row.cell("手机电量").toIntOrNull()?.takeIf { it in 0..100 }
                 ?: DEVICE_BATTERY_LEVEL_UNKNOWN,
-            headsetBatteryLevel = row.cell("耳机电量").toIntOrNull()?.takeIf { it in 0..100 }
-                ?: DEVICE_BATTERY_LEVEL_UNKNOWN,
+            headsetBatteryLevel = row.cell("耳机电量").toLevelOrUnknown(),
+            leftBatteryLevel = row.cell("左耳电量").toLevelOrUnknown(),
+            rightBatteryLevel = row.cell("右耳电量").toLevelOrUnknown(),
+            caseBatteryLevel = row.cell("充电仓电量").toLevelOrUnknown(),
             volume = row.cell("媒体音量").removeSuffix("%").trim().toIntOrNull() ?: 0,
             isPlaying = row.cell("正在播放") == "是",
             eventType = eventType,
@@ -82,6 +84,9 @@ fun parseExportedRows(
 }
 
 const val EXPORT_TIME_PATTERN = "yyyy-MM-dd HH:mm:ss"
+
+/** 导出时未知电量写“未上报”或留空，读回统一为未知 */
+private fun String.toLevelOrUnknown(): Int = toIntOrNull()?.takeIf { it in 0..100 } ?: DEVICE_BATTERY_LEVEL_UNKNOWN
 
 private fun parseTime(text: String, format: SimpleDateFormat): Long? =
     if (text.isBlank()) null else try {

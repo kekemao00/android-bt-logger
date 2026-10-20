@@ -29,7 +29,10 @@ fun RecordInfo.toBatteryReading(): BatteryReading = BatteryReading(
     kind = readingKindOf(eventType),
     headsetLevel = headsetBatteryLevel.takeIf { it in 0..100 },
     volume = volume,
-    isPlaying = isPlaying == 1
+    isPlaying = isPlaying == 1,
+    leftLevel = leftBatteryLevel.takeIf { it in 0..100 },
+    rightLevel = rightBatteryLevel.takeIf { it in 0..100 },
+    caseLevel = caseBatteryLevel.takeIf { it in 0..100 }
 )
 
 fun BatteryRecordRow.toBatteryReading(): BatteryReading = BatteryReading(
