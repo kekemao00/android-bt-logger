@@ -78,8 +78,9 @@ private class ChannelCurve(
 /**
  * 详情页的耳机电量卡片（无状态，缩放与游标除外）：范围与来源切换、读数、贝塞尔曲线与掉电统计。
  *
- * 有左右耳数据时，来源标签同时充当图例：选中左耳或右耳时两只耳机的曲线叠加，读数与统计跟随所选来源，
- * 游标停在哪条曲线上，读数就显示哪个来源。
+ * 有左右耳数据时，来源标签同时充当图例：选中左耳或右耳时两只耳机的曲线叠加，所选来源画在最上层，
+ * 另一只淡化作参照。游标只吸附所选来源，读数与统计始终属于它；读数下方给出另一只耳机同一时刻的电量与差值，
+ * 轻触即可切换过去，游标停在原来的时刻。
  *
  * @param deviceKey 设备 MAC，切换设备时重置缩放与游标
  * @param isConnected 设备当前是否连接，决定第一个范围显示“本次连接”还是“上次连接”
@@ -192,19 +193,33 @@ fun HeadsetBatteryCard(
             return@WmCard
         }
 
-        // 读数跟随游标所在的曲线；没有游标时显示所选来源（所选来源这段时间没数据时取第一条曲线）
+        // 读数始终属于所选来源（所选来源这段时间没数据时取第一条曲线）；游标只会吸附在它上面
         val cursor = chartState.cursor
-        val focused = curves.firstOrNull { cursor != null && seriesKey(deviceKey, it.channel) == cursor.seriesKey }
-            ?: curves.firstOrNull { it.channel == channelOverview.selected }
-            ?: curves.first()
+        val focused = curves.firstOrNull { it.channel == channelOverview.selected } ?: curves.first()
+        val focusedKey = seriesKey(deviceKey, focused.channel)
+        val cursorPoint = cursor?.takeIf { it.seriesKey == focusedKey }?.point
+        val readoutPoint = cursorPoint ?: focused.segments.last().last()
+        // 没有游标时比较“现在”：所选来源的电量保持到当前，另一只耳机此时放回充电仓了就显示没有读数
+        val compareAt = cursorPoint?.timestamp ?: maxOf(readoutPoint.timestamp, focused.holdUntil.lastOrNull() ?: 0L)
+        val comparisons = series.filter { it.key != focusedKey }.mapNotNull { other ->
+            val curve = curves.firstOrNull { seriesKey(deviceKey, it.channel) == other.key } ?: return@mapNotNull null
+            ChannelComparison(
+                channel = curve.channel,
+                label = other.label,
+                color = other.color,
+                level = other.valueAt(compareAt)?.level
+            )
+        }
         BatteryReadout(
-            cursorPoint = cursor?.point?.takeIf { point -> focused.segments.any { point in it } },
+            cursorPoint = cursorPoint,
             segments = focused.segments,
             sessionStarts = focused.sessions.map { it.connectedAt },
             carriedSince = focused.sessions.map { it.carriedSince },
-            latest = focused.segments.last().last(),
+            latest = readoutPoint,
             channelLabel = labels.getValue(focused.channel).takeIf { showChannels },
-            channelColor = colors.channelColor(focused.channel)
+            channelColor = colors.channelColor(focused.channel).takeIf { showChannels },
+            comparisons = comparisons,
+            onSelectChannel = onChannelChange
         )
         Spacer(modifier = Modifier.height(Dimens.spacingXs))
         // 左右耳的横轴取两者并集，一只耳机先读到电量时另一条曲线也完整可见
@@ -233,6 +248,13 @@ fun HeadsetBatteryCard(
 }
 
 private fun seriesKey(deviceKey: String, channel: BatteryChannel) = "$deviceKey#${channel.name}"
+
+/**
+ * 读数下方的另一只耳机。
+ *
+ * @param level 读数时刻它的电量；这时放在充电仓里或还没读到时为 null
+ */
+private class ChannelComparison(val channel: BatteryChannel, val label: String, val color: Color, val level: Int?)
 
 /** 左耳、右耳取对比图的前两种颜色，系统上报沿用原来的强调色（与左耳不会同时出现） */
 private fun WarmMonoColors.channelColor(channel: BatteryChannel): Color = when (channel) {
@@ -301,10 +323,13 @@ private fun BatteryChannelChip(label: String, color: Color?, selected: Boolean, 
 
 /**
  * 读数区固定高度放在曲线上方，不用浮层：手指在图上拖动时不会挡住数值，布局也不跳动。
- * 第一行是记录时间与连接后用时；第二行是相对上一档的变化，没有游标时显示操作提示。
+ * 第一行是记录时间与连接后用时；第二行是相对上一档的变化，没有游标时显示操作提示；
+ * 左右耳叠加时第三行是另一只耳机同一时刻的电量与差值，轻触切换到它。
  *
+ * @param latest 没有游标时显示的点
  * @param carriedSince 与 [segments] 一一对应，见 [com.xingkeqi.btlogger.domain.battery.BatterySession.carriedSince]
  * @param channelLabel 有多个来源时显示读数属于哪个来源，前面的圆点为该曲线颜色；只有一个来源时为 null
+ * @param channelColor 有多个来源时大号读数用曲线颜色，一眼对上是哪条曲线；只有一个来源时为 null
  */
 @Composable
 private fun BatteryReadout(
@@ -314,7 +339,9 @@ private fun BatteryReadout(
     carriedSince: List<Long?>,
     latest: LevelPoint,
     channelLabel: String?,
-    channelColor: Color
+    channelColor: Color?,
+    comparisons: List<ChannelComparison>,
+    onSelectChannel: (BatteryChannel) -> Unit
 ) {
     val colors = BtTheme.colors
     val point = cursorPoint ?: latest
@@ -350,12 +377,12 @@ private fun BatteryReadout(
         Text(
             text = stringResource(id = R.string.battery_percent, point.level),
             style = MonoTextStyle.copy(fontSize = 26.sp, lineHeight = 30.sp),
-            color = if (cursorPoint == null) colors.ink else colors.accent
+            color = channelColor ?: if (cursorPoint == null) colors.ink else colors.accent
         )
         Spacer(modifier = Modifier.width(Dimens.spacingMd))
         Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (channelLabel != null) {
+                if (channelLabel != null && channelColor != null) {
                     Box(
                         modifier = Modifier
                             .size(8.dp)
@@ -379,6 +406,52 @@ private fun BatteryReadout(
                 overflow = TextOverflow.Ellipsis
             )
         }
+    }
+    comparisons.forEach { other ->
+        ComparisonRow(other = other, focusedLabel = channelLabel, focusedLevel = point.level, onClick = { onSelectChannel(other.channel) })
+    }
+}
+
+/**
+ * 另一只耳机同一时刻的电量：“● 右耳 96% · 比左耳高 2%”，整行可点，切换到它。
+ *
+ * 左右耳掉电不一致正是测试关心的，差值直接写出来，不用来回切换心算。
+ */
+@Composable
+private fun ComparisonRow(other: ChannelComparison, focusedLabel: String?, focusedLevel: Int, onClick: () -> Unit) {
+    val colors = BtTheme.colors
+    val level = other.level
+    val text = when {
+        level == null -> stringResource(id = R.string.battery_compare_unknown, other.label)
+        focusedLabel == null -> stringResource(id = R.string.battery_compare_level, other.label, level)
+        level > focusedLevel -> stringResource(id = R.string.battery_compare_higher, other.label, level, focusedLabel, level - focusedLevel)
+        level < focusedLevel -> stringResource(id = R.string.battery_compare_lower, other.label, level, focusedLabel, focusedLevel - level)
+        else -> stringResource(id = R.string.battery_compare_same, other.label, level, focusedLabel)
+    }
+    val switchLabel = stringResource(id = R.string.battery_compare_switch, other.label)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(28.dp)
+            .clip(RoundedCornerShape(Dimens.radiusButton))
+            .clickable(role = Role.Button, onClickLabel = switchLabel, onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .background(other.color, CircleShape)
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.ink2,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+        )
+        Text(text = switchLabel, style = MaterialTheme.typography.labelSmall, color = colors.ink3, maxLines = 1)
     }
 }
 

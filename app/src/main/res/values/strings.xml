@@ -132,6 +132,12 @@
     <string name="battery_cursor_hold">本档已持续 %1$s</string>
     <string name="battery_cursor_first">本段首个电量</string>
     <string name="battery_cursor_window_start">范围起点，电量沿用此前的记录</string>
+    <string name="battery_compare_level">%1$s %2$d%%</string>
+    <string name="battery_compare_higher">%1$s %2$d%% · 比%3$s高 %4$d%%</string>
+    <string name="battery_compare_lower">%1$s %2$d%% · 比%3$s低 %4$d%%</string>
+    <string name="battery_compare_same">%1$s %2$d%% · 与%3$s相同</string>
+    <string name="battery_compare_unknown">%1$s 此刻没有读数（可能在充电仓里）</string>
+    <string name="battery_compare_switch">查看%1$s</string>
     <string name="battery_percent">%1$d%%</string>
     <string name="battery_stat_levels">起止电量</string>
     <string name="battery_stat_levels_value">%1$d%% → %2$d%%</string>
