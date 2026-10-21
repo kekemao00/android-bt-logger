@@ -134,6 +134,7 @@ fun BtLoggerApp(
     val records by viewModel.records.collectAsState()
     val stats by viewModel.recordStats.collectAsState()
     val recordFilter by viewModel.recordFilter.collectAsState()
+    val expandedHistoryGroups by viewModel.expandedHistoryGroups.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val fixedVolumeEnabled by viewModel.fixedVolumeEnabled.collectAsState()
     val fixedVolumePercent by viewModel.fixedVolumePercent.collectAsState()
@@ -291,6 +292,8 @@ fun BtLoggerApp(
                         dualEarState = dualEarState,
                         filter = recordFilter,
                         onFilterChange = viewModel::setRecordFilter,
+                        expandedGroups = expandedHistoryGroups,
+                        onToggleGroup = viewModel::toggleHistoryGroup,
                         onBatteryRangeChange = viewModel::setBatteryRange,
                         onBatteryChannelChange = viewModel::setBatteryChannel,
                         onDualEarChange = viewModel::setDualEarEnabled,

@@ -57,6 +57,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -139,6 +140,15 @@ class BtLoggerForegroundService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val keepAlive by lazy { ServiceKeepAlive(applicationContext, serviceScope) }
 
+    /**
+     * 连接/断开事件队列，由单个协程按广播到达顺序逐条落库。
+     *
+     * Why: 过去每条连接广播各起一个 IO 协程并发处理，记录时间在查完数据库之后才取。
+     * 系统一两秒内连续发出十几条连接/断开广播时，落库时间的先后与广播顺序不一致，
+     * 历史记录里因此出现本不存在的“连续断开 ×4”，内存中的已连接状态也可能停在错误的一端。
+     */
+    private val connectionEvents = Channel<ConnectionStateEvent>(Channel.UNLIMITED)
+
     private val btReceiver = object : BroadcastReceiver() {
         @SuppressLint("MissingPermission")
         override fun onReceive(context: Context, intent: Intent) {
@@ -172,7 +182,13 @@ class BtLoggerForegroundService : Service() {
                     return
                 }
 
-                handleConnectionStateChanged(bluetoothDevice, state)
+                // 上一状态用来区分“连接中断开”（连接失败）与真正的断开，先只写日志，供排查连续断开时对照
+                val previousState = intent.getIntExtra(BluetoothProfile.EXTRA_PREVIOUS_STATE, -1)
+                Log.i(
+                    tag,
+                    "[BtLoggerForegroundService] onReceive -> a2dp state: device=${readDeviceAddressOrNull(bluetoothDevice)}, ${profileStateName(previousState)} -> ${profileStateName(state)}"
+                )
+                handleConnectionStateChanged(bluetoothDevice, state, previousState = previousState)
             }
 
             ACTION_A2DP_CODEC_CONFIG_CHANGED -> {
@@ -231,6 +247,7 @@ class BtLoggerForegroundService : Service() {
             addCategory(vendorEventCategory(BluetoothAssignedNumbers.APPLE))
             addCategory(vendorEventCategory(BluetoothAssignedNumbers.PLANTRONICS))
         }
+        consumeConnectionEvents()
         registerReceiver(btReceiver, intentFilter)
         Log.i(tag, "[BtLoggerForegroundService] onCreate -> receiver registered: vendorCategories=APPLE,PLANTRONICS")
         syncAlreadyConnectedDevices(lastAliveAt)
@@ -275,87 +292,131 @@ class BtLoggerForegroundService : Service() {
 
     /**
      * 连接状态变化必须立即落库，同时把当前已知的耳机电量快照一并写入，避免详情页只显示手机电量。
+     *
+     * 这里只取到达时间并入队，落库由 [consumeConnectionEvents] 按到达顺序逐条完成。
      */
     @SuppressLint("MissingPermission")
     private fun handleConnectionStateChanged(
         bluetoothDevice: BluetoothDevice,
         state: Int,
-        applyFixedVolume: Boolean = true
+        applyFixedVolume: Boolean = true,
+        previousState: Int = -1
     ) {
         val address = readDeviceAddressOrNull(bluetoothDevice) ?: return
-        val isConnected = state == BluetoothProfile.STATE_CONNECTED
+        if (state == BluetoothProfile.STATE_CONNECTED) {
+            preloadHeadsetBatterySafely(bluetoothDevice, address)
+        }
+        val event = ConnectionStateEvent(
+            device = bluetoothDevice,
+            address = address,
+            state = state,
+            previousState = previousState,
+            observedAt = System.currentTimeMillis(),
+            applyFixedVolume = applyFixedVolume
+        )
+        if (connectionEvents.trySend(event).isFailure) {
+            Log.w(tag, "[BtLoggerForegroundService] handleConnectionStateChanged -> queue closed, drop: device=$address, state=$state")
+        }
+    }
+
+    /** 单个协程顺序消费连接事件：一条处理完（含落库）才取下一条，单条失败不影响后续 */
+    private fun consumeConnectionEvents() {
+        serviceScope.launch {
+            for (event in connectionEvents) {
+                try {
+                    persistConnectionStateChanged(event)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.e(tag, "[BtLoggerForegroundService] consumeConnectionEvents -> failed: device=${event.address}, state=${event.state}", e)
+                } catch (e: LinkageError) {
+                    Log.e(tag, "[BtLoggerForegroundService] consumeConnectionEvents -> platform API unavailable: device=${event.address}", e)
+                }
+            }
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private suspend fun persistConnectionStateChanged(event: ConnectionStateEvent) {
+        val bluetoothDevice = event.device
+        val address = event.address
+        val applyFixedVolume = event.applyFixedVolume
+        val isConnected = event.state == BluetoothProfile.STATE_CONNECTED
         val connectStatus = if (isConnected) {
             BluetoothA2dp.STATE_CONNECTED
         } else {
             BluetoothA2dp.STATE_DISCONNECTED
         }
-
-        if (isConnected) {
-            preloadHeadsetBatterySafely(bluetoothDevice, address)
-        }
-
-        launchSafely("connectionStateChanged[$address]") {
-            val existingDevice = deviceDao.getDeviceByMacSnapshot(address)
-            val deviceState = buildConnectedDeviceState(bluetoothDevice, existingDevice)
-            if (isConnected) {
-                connectedDevices[address] = deviceState
-            }
-            if (!isConnected) {
-                // 先停读取，避免断开记录落库后又收到一条迟到的左右耳电量
-                runSafely("stopEarbudReader[$address]") { earbudBatteryReader.stop(address) }
-            }
-            val codecSnapshot = resolveCodecSnapshot(address)
-            val headsetBatteryLevel = resolveHeadsetBatteryLevel(address)
-            // 断开记录带上最后读到的左右耳电量，作为这一段曲线的终点
-            val earbudLevels = if (isConnected) resolveEarbudLevels(address) else resolveDisconnectEarbudLevels(address)
-            val volumeSnapshot = readMediaVolumeSnapshotSafely()
-            val record = DeviceConnectionRecord(
-                deviceMac = address,
-                timestamp = System.currentTimeMillis(),
-                connectState = connectStatus,
-                batteryLevel = DEVICE_BATTERY_LEVEL_UNKNOWN,
-                headsetBatteryLevel = headsetBatteryLevel,
-                isPlaying = isPlayingSafely(),
-                volume = volumeSnapshot.percent,
-                eventType = if (isConnected) RecordEventType.CONNECTED else RecordEventType.DISCONNECTED,
-                phoneSupportedCodecs = codecSnapshot.phoneSupportedCodecs,
-                negotiableCodecs = codecSnapshot.negotiableCodecs,
-                activeCodec = codecSnapshot.activeCodec,
-                leftBatteryLevel = earbudLevels.left.orUnknown(),
-                rightBatteryLevel = earbudLevels.right.orUnknown(),
-                caseBatteryLevel = earbudLevels.case.orUnknown()
-            )
-            val device = buildDevice(deviceState, codecSnapshot)
-
+        val wasTracked = connectedDevices.containsKey(address)
+        if (isConnected == wasTracked) {
+            // 状态没有变化仍照常落库，保证记录与系统广播一一对应；详情页会把它合并显示
             Log.i(
                 tag,
-                "[BtLoggerForegroundService] handleConnectionStateChanged -> state=${record.eventType}, device=${device.name}[${device.mac}], activeCodec=${codecSnapshot.activeCodec}, headsetBattery=$headsetBatteryLevel, volume=${volumeSnapshot.percent}(${volumeSnapshot.currentLevel}/${volumeSnapshot.maxLevel}), bluetoothConnected=${volumeSnapshot.hasBluetoothOutput}"
+                "[BtLoggerForegroundService] persistConnectionStateChanged -> repeated state: device=$address, state=${profileStateName(event.state)}, previous=${profileStateName(event.previousState)}, queuedMs=${System.currentTimeMillis() - event.observedAt}"
             )
-            if (persistDeviceAndRecord(device, record)) {
-                latestPersistedHeadsetLevels[address] = headsetBatteryLevel
-                latestPersistedEarbudLevels[address] = earbudLevels
-            }
-            showConnectionToastSafely(device.name, isConnected)
-
-            if (isConnected) {
-                if (applyFixedVolume) {
-                    scheduleFixedVolume(address)
-                }
-                startConnectedDeviceProbes(bluetoothDevice, deviceState)
-            } else {
-                fixedVolumeJobs.remove(address)?.cancel()
-                stopConnectedDeviceProbes(address)
-                connectedDevices.remove(address)
-                latestPersistedHeadsetLevels.remove(address)
-                // Why: 断开期间耳机可能已放回充电盒充电，下次连接沿用旧值会让新一段曲线从错误的电量起步；
-                // 清掉后新连接记录先记为未上报，等首个真实电量到达再回填
-                latestHeadsetBatteryLevels.remove(address)
-                latestEarbudLevels.remove(address)
-                latestPersistedEarbudLevels.remove(address)
-                retractedEarbudLevels.remove(address)
-            }
-            refreshNotificationSafely()
         }
+
+        val existingDevice = deviceDao.getDeviceByMacSnapshot(address)
+        val deviceState = buildConnectedDeviceState(bluetoothDevice, existingDevice)
+        if (isConnected) {
+            connectedDevices[address] = deviceState
+        }
+        if (!isConnected) {
+            // 先停读取，避免断开记录落库后又收到一条迟到的左右耳电量
+            runSafely("stopEarbudReader[$address]") { earbudBatteryReader.stop(address) }
+        }
+        val codecSnapshot = resolveCodecSnapshot(address)
+        val headsetBatteryLevel = resolveHeadsetBatteryLevel(address)
+        // 断开记录带上最后读到的左右耳电量，作为这一段曲线的终点
+        val earbudLevels = if (isConnected) resolveEarbudLevels(address) else resolveDisconnectEarbudLevels(address)
+        val volumeSnapshot = readMediaVolumeSnapshotSafely()
+        val record = DeviceConnectionRecord(
+            deviceMac = address,
+            // 取广播到达的时刻，不受排队与查库耗时影响
+            timestamp = event.observedAt,
+            connectState = connectStatus,
+            batteryLevel = DEVICE_BATTERY_LEVEL_UNKNOWN,
+            headsetBatteryLevel = headsetBatteryLevel,
+            isPlaying = isPlayingSafely(),
+            volume = volumeSnapshot.percent,
+            eventType = if (isConnected) RecordEventType.CONNECTED else RecordEventType.DISCONNECTED,
+            phoneSupportedCodecs = codecSnapshot.phoneSupportedCodecs,
+            negotiableCodecs = codecSnapshot.negotiableCodecs,
+            activeCodec = codecSnapshot.activeCodec,
+            leftBatteryLevel = earbudLevels.left.orUnknown(),
+            rightBatteryLevel = earbudLevels.right.orUnknown(),
+            caseBatteryLevel = earbudLevels.case.orUnknown()
+        )
+        val device = buildDevice(deviceState, codecSnapshot)
+
+        Log.i(
+            tag,
+            "[BtLoggerForegroundService] persistConnectionStateChanged -> state=${record.eventType}, device=${device.name}[${device.mac}], activeCodec=${codecSnapshot.activeCodec}, headsetBattery=$headsetBatteryLevel, volume=${volumeSnapshot.percent}(${volumeSnapshot.currentLevel}/${volumeSnapshot.maxLevel}), bluetoothConnected=${volumeSnapshot.hasBluetoothOutput}"
+        )
+        if (persistDeviceAndRecord(device, record)) {
+            latestPersistedHeadsetLevels[address] = headsetBatteryLevel
+            latestPersistedEarbudLevels[address] = earbudLevels
+        }
+        showConnectionToastSafely(device.name, isConnected)
+
+        if (isConnected) {
+            if (applyFixedVolume) {
+                scheduleFixedVolume(address)
+            }
+            startConnectedDeviceProbes(bluetoothDevice, deviceState)
+        } else {
+            fixedVolumeJobs.remove(address)?.cancel()
+            stopConnectedDeviceProbes(address)
+            connectedDevices.remove(address)
+            latestPersistedHeadsetLevels.remove(address)
+            // Why: 断开期间耳机可能已放回充电盒充电，下次连接沿用旧值会让新一段曲线从错误的电量起步；
+            // 清掉后新连接记录先记为未上报，等首个真实电量到达再回填
+            latestHeadsetBatteryLevels.remove(address)
+            latestEarbudLevels.remove(address)
+            latestPersistedEarbudLevels.remove(address)
+            retractedEarbudLevels.remove(address)
+        }
+        refreshNotificationSafely()
     }
 
     /**
@@ -1449,6 +1510,29 @@ class BtLoggerForegroundService : Service() {
 }
 
 private data class RetractedEarbudLevels(val levels: EarbudLevels, val at: Long)
+
+/**
+ * 一条待落库的连接/断开广播。
+ *
+ * @param previousState 广播附带的上一状态，-1 表示未知（服务启动时补记的连接没有上一状态）
+ * @param observedAt 广播到达的时刻，作为记录时间
+ */
+private class ConnectionStateEvent(
+    val device: BluetoothDevice,
+    val address: String,
+    val state: Int,
+    val previousState: Int,
+    val observedAt: Long,
+    val applyFixedVolume: Boolean
+)
+
+private fun profileStateName(state: Int): String = when (state) {
+    BluetoothProfile.STATE_DISCONNECTED -> "DISCONNECTED"
+    BluetoothProfile.STATE_CONNECTING -> "CONNECTING"
+    BluetoothProfile.STATE_CONNECTED -> "CONNECTED"
+    BluetoothProfile.STATE_DISCONNECTING -> "DISCONNECTING"
+    else -> "UNKNOWN($state)"
+}
 
 private data class ConnectedDeviceState(
     val mac: String,

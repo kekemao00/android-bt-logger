@@ -67,6 +67,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -187,6 +188,10 @@ class MainViewModel(
 
     private val _recordFilter = MutableStateFlow(RecordFilter.ALL)
     val recordFilter: StateFlow<RecordFilter> = _recordFilter.asStateFlow()
+
+    /** 历史记录中已展开的合并分组，以组内最旧一条记录的 id 标识；切换设备时清空 */
+    private val _expandedHistoryGroups = MutableStateFlow<Set<Int>>(emptySet())
+    val expandedHistoryGroups: StateFlow<Set<Int>> = _expandedHistoryGroups.asStateFlow()
 
     private val _batteryRange = MutableStateFlow(BatteryRange.LATEST_SESSION)
     val batteryRange: StateFlow<BatteryRange> = _batteryRange.asStateFlow()
@@ -319,6 +324,7 @@ class MainViewModel(
     fun selectDevice(device: DeviceInfo) {
         Log.i(tag, "[MainViewModel] selectDevice -> mac=${device.mac}")
         _recordFilter.value = RecordFilter.ALL
+        _expandedHistoryGroups.value = emptySet()
         _batteryChannel.value = null
         _selectedDevice.value = device
     }
@@ -333,6 +339,13 @@ class MainViewModel(
 
     fun setRecordFilter(filter: RecordFilter) {
         _recordFilter.value = filter
+    }
+
+    fun toggleHistoryGroup(groupId: Int) {
+        _expandedHistoryGroups.update { expanded ->
+            if (groupId in expanded) expanded - groupId else expanded + groupId
+        }
+        Log.d(tag, "[MainViewModel] toggleHistoryGroup -> group=$groupId, expanded=${groupId in _expandedHistoryGroups.value}")
     }
 
     fun setBatteryRange(range: BatteryRange) {
