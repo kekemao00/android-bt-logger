@@ -2,6 +2,7 @@ package com.xingkeqi.btlogger.ui.components
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -16,7 +17,9 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -35,6 +38,7 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
@@ -78,7 +82,8 @@ import kotlin.math.floor
  * @param segments 每段是一次连接，段与段之间（断开期间）不连线；段内按时间升序
  * @param holdUntil 与 [segments] 一一对应：该段最后一个电量保持到的时间（断开时间，或仍在连接时的当前时间）。
  *   电量只在变化时记录，最后一次变化之后没有新记录并不代表连接结束，这一截画成同色虚线；为空时不画
- * @param emphasized 是否画面积渐变；单条曲线时打开，多条叠加时关闭避免互相遮挡
+ * @param emphasized 是否为当前关注的曲线（如所选的左耳或右耳）。多条叠加时它画在最上层并带面积渐变，
+ *   其他曲线淡化作为参照，游标也只吸附它的实测点；没有任何曲线关注时（多机对比）各曲线同等对待
  */
 @Immutable
 data class ChartSeries(
@@ -269,11 +274,26 @@ fun BatteryLineChart(
     val currentSeries by rememberUpdatedState(series)
     SideEffect { state.domain = ChartWindow.of(domainStart, domainEnd) }
 
-    // 数据刷新后游标所在的点可能已不存在（如“24 小时”的起点随时间后移），不再保留
+    // 切换关注的曲线时游标留在同一时刻、改吸附到新曲线上，对比左右耳不必重新找位置；
+    // 数据刷新后游标所在的点不存在了（如“24 小时”的起点随时间后移）也按原时刻重新吸附，范围内没有点才清掉
     LaunchedEffect(series) {
         val cursor = state.cursor ?: return@LaunchedEffect
-        if (series.none { it.key == cursor.seriesKey && cursor.point in it.points }) state.clearCursor()
+        state.cursor = retargetCursor(series, cursor, state.windowIn(ChartWindow.of(domainStart, domainEnd)).toLongRange())
     }
+
+    // 关注的曲线切换时淡入淡出，而不是瞬间跳变
+    val focusAll = series.none { it.emphasized }
+    val emphasis: Map<String, State<Float>> = series.associate { line ->
+        line.key to key(line.key) {
+            animateFloatAsState(
+                targetValue = if (focusAll || line.emphasized) 1f else 0f,
+                animationSpec = Springs.smooth(),
+                label = "seriesEmphasis"
+            )
+        }
+    }
+    // 关注的曲线最后画，压在其他曲线上面
+    val drawOrder = series.sortedBy { it.emphasized }
 
     Canvas(
         modifier = modifier
@@ -297,10 +317,7 @@ fun BatteryLineChart(
                     return (window.start + fraction * window.span).toLong()
                 }
 
-                fun visibleRange(): LongRange {
-                    val window = state.windowIn(state.domain)
-                    return ceil(window.start).toLong()..floor(window.end).toLong()
-                }
+                fun visibleRange(): LongRange = state.windowIn(state.domain).toLongRange()
 
                 fun moveCursor(x: Float, toggle: Boolean) {
                     val snapped = snapCursor(currentSeries, timeAt(x), visibleRange())
@@ -407,20 +424,24 @@ fun BatteryLineChart(
         // 放大后可见范围外的点在屏幕坐标上可能远到上百倍屏宽，路径只保留绘图区附近这一截
         val clipMargin = (stroke + ring * 2).toDouble()
         clipRect(plot.left - ring, plot.top - ring * 2, revealRight, plot.bottom + ring) {
-            series.forEach { line ->
+            drawOrder.forEach { line ->
+                val weight = emphasis[line.key]?.value ?: 1f
+                // 淡化的曲线用不透明的混合色而不是半透明：与上层曲线交叠处不会透出两种颜色
+                val lineColor = lerp(colors.surface, line.color, DIMMED_FRACTION + (1f - DIMMED_FRACTION) * weight)
+                val areaAlpha = if (focusAll) 0f else AREA_TOP_ALPHA * weight
                 line.segments.forEachIndexed { index, segment ->
-                    drawHoldTail(segment, line.holdUntil.getOrNull(index), line, mapper, plot, viewMin, viewMax, stroke)
+                    drawHoldTail(segment, line.holdUntil.getOrNull(index), lineColor, areaAlpha, mapper, plot, viewMin, viewMax, stroke)
                     val visible = visibleSlice(segment, viewMin, viewMax)
                     if (visible.isEmpty()) return@forEachIndexed
                     val screen = visible.map { CurvePoint(mapper.x(it.timestamp).toDouble(), mapper.y(it.level).toDouble()) }
                     val cubics = monotoneCubicSegments(screen).clipX(plot.left - clipMargin, plot.right + clipMargin)
                     val path = curvePath(cubics)
                     if (path != null) {
-                        if (line.emphasized) {
+                        if (areaAlpha > 0f) {
                             drawPath(
                                 path = curvePath(cubics, closeToY = plot.bottom) ?: path,
                                 brush = Brush.verticalGradient(
-                                    colors = listOf(line.color.copy(alpha = AREA_TOP_ALPHA), line.color.copy(alpha = 0f)),
+                                    colors = listOf(line.color.copy(alpha = areaAlpha), line.color.copy(alpha = 0f)),
                                     startY = plot.top,
                                     endY = plot.bottom
                                 )
@@ -430,15 +451,16 @@ fun BatteryLineChart(
                             // 曲线交叉处留一圈表面色描边，叠加时也能分清前后
                             drawPath(path, colors.surface, style = lineStroke(stroke + ring * 2))
                         }
-                        drawPath(path, line.color, style = lineStroke(stroke))
+                        drawPath(path, lineColor, style = lineStroke(stroke))
                     }
-                    drawSampleDots(visible, mapper, plot, line.color, colors.surface)
+                    // 淡化的曲线只作参照，不画实测点，避免与关注曲线的点混在一起
+                    if (weight > DOTS_MIN_WEIGHT) drawSampleDots(visible, mapper, plot, lineColor, colors.surface)
                 }
             }
         }
 
         state.cursor?.let { cursor ->
-            drawCursor(cursor, series, mapper, plot, colors.ink3, colors.surface)
+            drawCursor(cursor, drawOrder, emphasis, mapper, plot, colors.ink3, colors.surface)
         }
     }
 }
@@ -452,7 +474,8 @@ private enum class GestureMode { UNDECIDED, SCRUB, SCROLL, TRANSFORM }
 private fun DrawScope.drawHoldTail(
     segment: List<LevelPoint>,
     holdUntil: Long?,
-    line: ChartSeries,
+    color: Color,
+    areaAlpha: Float,
     mapper: ChartMapper,
     plot: Rect,
     viewMin: Double,
@@ -466,10 +489,10 @@ private fun DrawScope.drawHoldTail(
     val endX = mapper.x(holdUntil).coerceAtMost(plot.right)
     if (endX <= startX) return
     val y = mapper.y(last.level)
-    if (line.emphasized) {
+    if (areaAlpha > 0f) {
         drawRect(
             brush = Brush.verticalGradient(
-                colors = listOf(line.color.copy(alpha = AREA_TOP_ALPHA), line.color.copy(alpha = 0f)),
+                colors = listOf(color.copy(alpha = areaAlpha), color.copy(alpha = 0f)),
                 startY = plot.top,
                 endY = plot.bottom
             ),
@@ -478,7 +501,7 @@ private fun DrawScope.drawHoldTail(
         )
     }
     drawLine(
-        color = line.color.copy(alpha = HOLD_ALPHA),
+        color = color.copy(alpha = HOLD_ALPHA),
         start = Offset(startX, y),
         end = Offset(endX, y),
         strokeWidth = stroke,
@@ -492,28 +515,39 @@ private class ChartMapper(private val plot: Rect, private val viewMin: Double, p
     fun y(level: Int): Float = plot.bottom - level / 100f * plot.height
 }
 
+private fun ChartWindow.toLongRange(): LongRange = ceil(start).toLong()..floor(end).toLong()
+
 /**
  * 找离 [timestamp] 最近、且在可见范围内的实测点。
  *
+ * 有关注的曲线时只在它上面找：读数始终属于所选来源，游标不会因为另一只耳机的点离手指更近就跳过去。
  * 先限定可见范围内的下标再取最近点：手指在边缘时最近的点可能刚好在范围外，直接丢弃会让游标在边缘吸不上。
  */
-private fun snapCursor(series: List<ChartSeries>, timestamp: Long, visible: LongRange): ChartCursor? {
+internal fun snapCursor(series: List<ChartSeries>, timestamp: Long, visible: LongRange): ChartCursor? {
     var best: ChartCursor? = null
     var bestDistance = Long.MAX_VALUE
-    series.forEach { line ->
+    series.filter { it.emphasized }.ifEmpty { series }.forEach { line ->
         val points = line.points
         val first = firstIndexAtOrAfter(points, visible.first)
         val last = firstIndexAtOrAfter(points, visible.last + 1) - 1
         if (first > last) return@forEach
         val point = points[nearestPointIndex(points, timestamp).coerceIn(first, last)]
         val distance = abs(point.timestamp - timestamp)
-        // 左右耳曲线常在同一时刻都有点：距离相同时停在突出显示（所选来源）的曲线上，否则后面的曲线永远点不到
-        if (distance < bestDistance || (distance == bestDistance && line.emphasized)) {
+        if (distance < bestDistance) {
             bestDistance = distance
             best = ChartCursor(line.key, point)
         }
     }
     return best
+}
+
+/**
+ * 曲线数据或关注的曲线变化后，游标该停在哪：原来的点仍是可吸附的实测点就不动，否则按原时刻重新吸附。
+ */
+internal fun retargetCursor(series: List<ChartSeries>, cursor: ChartCursor, visible: LongRange): ChartCursor? {
+    val targets = series.filter { it.emphasized }.ifEmpty { series }
+    if (targets.any { it.key == cursor.seriesKey && cursor.point in it.points }) return cursor
+    return snapCursor(series, cursor.point.timestamp, visible)
 }
 
 /** 第一个时间不早于 [timestamp] 的下标；都更早时为 size */
@@ -586,9 +620,13 @@ private fun DrawScope.drawSampleDots(
     }
 }
 
+/**
+ * @param drawOrder 关注的曲线排在最后，它的标记压在最上面
+ */
 private fun DrawScope.drawCursor(
     cursor: ChartCursor,
-    series: List<ChartSeries>,
+    drawOrder: List<ChartSeries>,
+    emphasis: Map<String, State<Float>>,
     mapper: ChartMapper,
     plot: Rect,
     lineColor: Color,
@@ -603,14 +641,16 @@ private fun DrawScope.drawCursor(
         strokeWidth = 1.dp.toPx(),
         pathEffect = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 4.dp.toPx()))
     )
-    // 其他曲线标在“此刻最近一次上报”的实测点上，与读数一致
-    series.forEach { line ->
+    // 其他曲线标在“此刻最近一次上报”的实测点上，与读数一致；淡化的曲线标记也小一圈、颜色更浅
+    drawOrder.forEach { line ->
         val point = if (line.key == cursor.seriesKey) cursor.point else line.valueAt(cursor.point.timestamp)
         point ?: return@forEach
         val center = Offset(mapper.x(point.timestamp), mapper.y(point.level))
         if (center.x < plot.left - 1f || center.x > plot.right + 1f) return@forEach
-        drawCircle(ringColor, CURSOR_RADIUS.toPx() + RING_WIDTH.toPx(), center)
-        drawCircle(line.color, CURSOR_RADIUS.toPx(), center)
+        val weight = emphasis[line.key]?.value ?: 1f
+        val radius = (CURSOR_RADIUS_DIMMED + (CURSOR_RADIUS - CURSOR_RADIUS_DIMMED) * weight).toPx()
+        drawCircle(ringColor, radius + RING_WIDTH.toPx(), center)
+        drawCircle(lerp(ringColor, line.color, DIMMED_FRACTION + (1f - DIMMED_FRACTION) * weight), radius, center)
     }
 }
 
@@ -709,11 +749,18 @@ private val RING_WIDTH = 2.dp
 private val DOT_RADIUS = 2.5.dp
 private val DOT_MIN_SPACING = 12.dp
 private val CURSOR_RADIUS = 4.5.dp
+private val CURSOR_RADIUS_DIMMED = 3.dp
 private val TICK_MIN_SPACING = 64.dp
 private val HOLD_DASH = 4.dp
 private val HOLD_GAP = 3.dp
 private const val HOLD_ALPHA = 0.7f
 private const val AREA_TOP_ALPHA = 0.22f
+
+/** 淡化曲线的颜色：曲线色占的比例，其余混入背景色 */
+private const val DIMMED_FRACTION = 0.4f
+
+/** 淡入淡出过半才画实测点，切换时点不会闪一下 */
+private const val DOTS_MIN_WEIGHT = 0.5f
 private const val REVEAL_DURATION_MILLIS = 720
 
 /** 纵轴网格线所在的电量 */
