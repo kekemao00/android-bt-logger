@@ -20,6 +20,8 @@
     <!--    前台服务权限（Android 9+）-->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <!--    后台保活：弹出“忽略电池优化”系统确认框；忽略后 Doze 不再推迟广播，Android 12+ 也允许看门狗从后台重新启动前台服务-->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!--    Android 13+ 显示前台服务通知需要运行时通知权限-->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!--    要正确地使用 FileProvider 来共享文件，您需要在清单文件中请求以下权限-->

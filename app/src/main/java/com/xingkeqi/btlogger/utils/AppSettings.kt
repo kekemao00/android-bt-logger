@@ -53,6 +53,32 @@ class AppSettings private constructor(context: Context) {
         prefs.edit().putStringSet(KEY_DUAL_EAR_DEVICES, _dualEarDevices.value).apply()
     }
 
+    private val _keepScreenOn = MutableStateFlow(prefs.getBoolean(KEY_KEEP_SCREEN_ON, true))
+
+    /**
+     * App 在前台时保持屏幕常亮、不自动锁屏。
+     *
+     * Why: 续航测试时常把手机放在一旁看详情页的实时电量，自动锁屏后既看不到数据，
+     * 部分系统还会在锁屏后更快地收紧后台；默认开启，可在“后台运行设置”里关闭。
+     */
+    val keepScreenOn: StateFlow<Boolean> = _keepScreenOn.asStateFlow()
+
+    fun setKeepScreenOn(enabled: Boolean) {
+        _keepScreenOn.value = enabled
+        prefs.edit().putBoolean(KEY_KEEP_SCREEN_ON, enabled).apply()
+    }
+
+    private val _keepAliveSuggestionDismissed =
+        MutableStateFlow(prefs.getBoolean(KEY_KEEP_ALIVE_SUGGESTION_DISMISSED, false))
+
+    /** 用户关掉了列表页“建议完成后台运行设置”的提示；之后只在检测到中断时再提示 */
+    val keepAliveSuggestionDismissed: StateFlow<Boolean> = _keepAliveSuggestionDismissed.asStateFlow()
+
+    fun dismissKeepAliveSuggestion() {
+        _keepAliveSuggestionDismissed.value = true
+        prefs.edit().putBoolean(KEY_KEEP_ALIVE_SUGGESTION_DISMISSED, true).apply()
+    }
+
     /**
      * 用户选择“跳过此版本”的 tag；启动时的自动检查不再提示该版本，手动检查仍会提示
      */
@@ -68,6 +94,8 @@ class AppSettings private constructor(context: Context) {
         private const val KEY_FIXED_VOLUME_PERCENT = "fixed_volume_percent"
         private const val KEY_SKIPPED_UPDATE_TAG = "skipped_update_tag"
         private const val KEY_DUAL_EAR_DEVICES = "dual_ear_devices"
+        private const val KEY_KEEP_SCREEN_ON = "keep_screen_on"
+        private const val KEY_KEEP_ALIVE_SUGGESTION_DISMISSED = "keep_alive_suggestion_dismissed"
         const val DEFAULT_FIXED_VOLUME_PERCENT = 60
 
         @Volatile
