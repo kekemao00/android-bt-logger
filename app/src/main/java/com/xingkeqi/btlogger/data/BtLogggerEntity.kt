@@ -86,6 +86,12 @@ data class RecordInfo(
      * 断开总时长
      */
     var totalDisConnectionTime: Long? = 0L
+
+    /**
+     * 状态与上一条状态事件相同（例如连续两条“已断开”），即系统重复上报、状态并未变化。
+     * 这类记录不计入连接/断开次数与时长。
+     */
+    var repeatsPreviousState: Boolean = false
 }
 
 /**
