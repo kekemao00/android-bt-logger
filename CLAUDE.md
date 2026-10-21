@@ -41,7 +41,7 @@ BtLoggerApp → DeviceListScreen / DeviceDetailScreen（无状态 Compose）
 
 **数据流**：
 1. `BtLoggerForegroundService` 动态注册广播，监听 A2DP 连接、Codec、耳机电量（不记录手机电量；耳机电量仅在变化时落库）；对开启开关的 SOUNDPEATS 耳机另起 SPP 读取左右耳电量，任一来源变化即落库
-2. 服务直接写入 Room，并通过 EventBus 通知界面刷新音量快照
+2. 连接/断开广播入队后由单协程按到达顺序落库（记录时间取广播到达时刻）；服务直接写入 Room，并通过 EventBus 通知界面刷新音量快照
 3. 固定音量由服务读取 `AppSettings` 执行，不依赖界面存活
 4. UI 通过 Flow → StateFlow 响应式更新
 
@@ -55,6 +55,7 @@ BtLoggerApp → DeviceListScreen / DeviceDetailScreen（无状态 Compose）
 | `update/*` | GitHub Release 检查、下载与 SHA-256 校验、签名比对与安装 |
 | `service/BtLoggerForegroundService.kt` | 蓝牙事件采集与落库 |
 | `data/RecordTimeline.kt` | 累计时长与统计（纯函数，有单测） |
+| `domain/history/*` | 历史记录展示分组：连续重复的连接/断开、短时间反复连断（连接抖动）合并为一行，组内保留原始记录（纯 Kotlin，有单测） |
 | `domain/battery/*` | 耳机电量按连接切分、掉电速率、多机对比、单调贝塞尔插值、左耳/右耳/系统上报按来源概览（纯 Kotlin，有单测） |
 | `service/earbud/*` | SOUNDPEATS 私有协议（SPP）读取左右耳与充电仓电量：帧编解码、轮询与退避重试（读取逻辑可注入通道，有单测）；读取通道与 SOUNDPEATS App 互斥，按设备开关 |
 | `ui/components/BatteryLineChart.kt` | 电量曲线绘制与手势（吸附、拖动、缩放、双击还原） |
