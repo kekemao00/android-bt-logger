@@ -26,6 +26,9 @@ import com.xingkeqi.btlogger.domain.battery.BatteryRange
 import com.xingkeqi.btlogger.domain.battery.ComparisonCandidate
 import com.xingkeqi.btlogger.domain.battery.buildBatteryChannelOverview
 import com.xingkeqi.btlogger.domain.battery.buildComparisonCandidates
+import com.xingkeqi.btlogger.domain.keepalive.KeepAliveBanner
+import com.xingkeqi.btlogger.domain.keepalive.RomVendor
+import com.xingkeqi.btlogger.domain.keepalive.keepAliveBannerOf
 import com.xingkeqi.btlogger.service.earbud.EarbudReaderStatusStore
 import com.xingkeqi.btlogger.update.ApkInstaller
 import com.xingkeqi.btlogger.update.GitHubUpdateRepository
@@ -35,7 +38,10 @@ import com.xingkeqi.btlogger.update.isNewerVersion
 import com.xingkeqi.btlogger.update.selectApkAsset
 import com.xingkeqi.btlogger.update.simplifyReleaseNotes
 import com.xingkeqi.btlogger.utils.AppSettings
+import com.xingkeqi.btlogger.utils.KeepAliveSettings
+import com.xingkeqi.btlogger.utils.KeepAliveSystemStatus
 import com.xingkeqi.btlogger.utils.MediaVolumeSnapshot
+import com.xingkeqi.btlogger.utils.ServiceHealthStore
 import com.xingkeqi.btlogger.utils.readExportSheet
 import com.xingkeqi.btlogger.utils.saveDataToSheet
 import kotlinx.coroutines.CancellationException
@@ -119,6 +125,8 @@ class MainViewModel(
     private val recordDao: RecordDao,
     private val deviceWithRecordsDao: DeviceWithRecordsDao,
     private val settings: AppSettings,
+    private val healthStore: ServiceHealthStore,
+    private val romVendor: RomVendor,
     private val exportDir: File,
     private val recordImporter: RecordImporter,
     private val openUri: (Uri) -> InputStream?,
@@ -275,6 +283,31 @@ class MainViewModel(
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BatteryComparisonUiState())
 
     val fixedVolumeEnabled: StateFlow<Boolean> = settings.fixedVolumeEnabled
+
+    val keepScreenOn: StateFlow<Boolean> = settings.keepScreenOn
+
+    private val _keepAliveStatus = MutableStateFlow(KeepAliveSystemStatus())
+
+    val keepAliveState: StateFlow<KeepAliveUiState> = combine(
+        settings.keepScreenOn,
+        _keepAliveStatus,
+        healthStore.gaps,
+        healthStore.acknowledgedAt,
+        settings.keepAliveSuggestionDismissed
+    ) { keepScreenOn, status, gaps, acknowledgedAt, suggestionDismissed ->
+        KeepAliveUiState(
+            keepScreenOn = keepScreenOn,
+            status = status,
+            vendor = romVendor,
+            recentGaps = gaps,
+            banner = keepAliveBannerOf(
+                gaps = gaps,
+                acknowledgedAt = acknowledgedAt,
+                ignoringBatteryOptimizations = status.ignoringBatteryOptimizations,
+                suggestionDismissed = suggestionDismissed
+            )
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), KeepAliveUiState(vendor = romVendor))
     val fixedVolumePercent: StateFlow<Int> = settings.fixedVolumePercent
 
     private val _mediaVolumeSnapshot = MutableStateFlow(MediaVolumeSnapshot())
@@ -328,6 +361,34 @@ class MainViewModel(
     /**
      * 打开或关闭当前设备的左右耳电量读取；前台服务订阅该设置，立即开始或停止
      */
+    /**
+     * 界面回到前台时刷新：用户可能刚在系统设置里放行了电池优化或通知
+     */
+    fun updateKeepAliveStatus(status: KeepAliveSystemStatus) {
+        if (_keepAliveStatus.value != status) {
+            Log.i(tag, "[MainViewModel] updateKeepAliveStatus -> ${_keepAliveStatus.value} -> $status")
+        }
+        _keepAliveStatus.value = status
+    }
+
+    fun setKeepScreenOn(enabled: Boolean) {
+        Log.i(tag, "[MainViewModel] setKeepScreenOn -> enabled=$enabled")
+        settings.setKeepScreenOn(enabled)
+    }
+
+    /** 打开“后台运行设置”面板即视为看过了全部中断 */
+    fun acknowledgeServiceGaps() {
+        healthStore.acknowledge()
+    }
+
+    fun dismissKeepAliveBanner(banner: KeepAliveBanner) {
+        Log.i(tag, "[MainViewModel] dismissKeepAliveBanner -> banner=${banner::class.simpleName}")
+        when (banner) {
+            is KeepAliveBanner.Interrupted -> healthStore.acknowledge()
+            KeepAliveBanner.Suggest -> settings.dismissKeepAliveSuggestion()
+        }
+    }
+
     fun setDualEarEnabled(enabled: Boolean) {
         val mac = selectedDevice.value?.mac ?: return
         Log.i(tag, "[MainViewModel] setDualEarEnabled -> device=$mac, enabled=$enabled")
@@ -600,6 +661,8 @@ class MainViewModel(
                             recordDao = database.connectionRecordDao(),
                             deviceWithRecordsDao = database.deviceWithRecordsDao(),
                             settings = AppSettings.get(applicationContext),
+                            healthStore = ServiceHealthStore.get(applicationContext),
+                            romVendor = KeepAliveSettings.currentVendor,
                             exportDir = File(applicationContext.filesDir, "exports"),
                             recordImporter = RecordImporter(database.deviceDao(), database.connectionRecordDao()),
                             openUri = { applicationContext.contentResolver.openInputStream(it) },

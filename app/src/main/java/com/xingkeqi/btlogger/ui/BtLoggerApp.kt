@@ -66,6 +66,7 @@ import com.xingkeqi.btlogger.ui.components.LineIcons
 import com.xingkeqi.btlogger.ui.components.WmIconButton
 import com.xingkeqi.btlogger.ui.dialogs.ConfirmDeleteDialog
 import com.xingkeqi.btlogger.ui.dialogs.FixedVolumeDialog
+import com.xingkeqi.btlogger.ui.dialogs.KeepAliveDialog
 import com.xingkeqi.btlogger.ui.dialogs.UpdateDialogs
 import com.xingkeqi.btlogger.update.ApkInstaller
 import com.xingkeqi.btlogger.ui.screens.BatteryCompareScreen
@@ -74,6 +75,7 @@ import com.xingkeqi.btlogger.ui.screens.DeviceListScreen
 import com.xingkeqi.btlogger.ui.theme.BtTheme
 import com.xingkeqi.btlogger.ui.theme.Dimens
 import com.xingkeqi.btlogger.utils.EXCEL_MIME_TYPE
+import com.xingkeqi.btlogger.utils.KeepAliveSettings
 import com.xingkeqi.btlogger.utils.MediaVolumeSnapshot
 import com.xingkeqi.btlogger.utils.readMediaVolumeSnapshot
 import com.xingkeqi.btlogger.utils.setMediaVolumePercent
@@ -142,9 +144,11 @@ fun BtLoggerApp(
     val dualEarState by viewModel.dualEarState.collectAsState()
     val compareOpen by viewModel.compareOpen.collectAsState()
     val batteryComparison by viewModel.batteryComparison.collectAsState()
+    val keepAliveState by viewModel.keepAliveState.collectAsState()
 
     var searchActive by rememberSaveable { mutableStateOf(false) }
     var showVolumeDialog by rememberSaveable { mutableStateOf(false) }
+    var showKeepAliveDialog by rememberSaveable { mutableStateOf(false) }
     var showOverflow by remember { mutableStateOf(false) }
     var pendingConfirm by remember { mutableStateOf<PendingConfirm?>(null) }
     var lastBackPressAt by remember { mutableStateOf(0L) }
@@ -153,6 +157,14 @@ fun BtLoggerApp(
         runCatching { context.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) }
             .onFailure { Log.e(TAG, "[BtLoggerApp] openBluetoothSettings -> failed", it) }
         Unit
+    }
+
+    val openKeepAlive = {
+        viewModel.acknowledgeServiceGaps()
+        showKeepAliveDialog = true
+    }
+    val showOpenFailed: (Boolean) -> Unit = { opened ->
+        if (!opened) scope.launch { snackbarHostState.showSnackbar(context.getString(R.string.keep_alive_open_failed)) }
     }
 
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -244,6 +256,7 @@ fun BtLoggerApp(
                 },
                 onClearAll = { pendingConfirm = PendingConfirm.ClearAll },
                 onCheckUpdate = { viewModel.checkUpdate(manual = true) },
+                onOpenKeepAlive = openKeepAlive,
                 onClearDeviceRecords = { device -> pendingConfirm = PendingConfirm.ClearDeviceRecords(device) }
             )
 
@@ -265,7 +278,10 @@ fun BtLoggerApp(
                         onSearchQueryChange = viewModel::setSearchQuery,
                         onDeviceClick = viewModel::selectDevice,
                         onDeviceLongClick = { pendingConfirm = PendingConfirm.DeleteDevice(it) },
-                        onOpenBluetoothSettings = openBluetoothSettings
+                        onOpenBluetoothSettings = openBluetoothSettings,
+                        keepAliveBanner = keepAliveState.banner,
+                        onOpenKeepAlive = openKeepAlive,
+                        onDismissKeepAliveBanner = viewModel::dismissKeepAliveBanner
                     )
 
                     is AppPage.Detail -> DeviceDetailScreen(
@@ -338,6 +354,18 @@ fun BtLoggerApp(
         )
     }
 
+    if (showKeepAliveDialog) {
+        KeepAliveDialog(
+            state = keepAliveState,
+            showNotificationItem = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O,
+            onKeepScreenOnChange = viewModel::setKeepScreenOn,
+            onRequestBatteryOptimization = { showOpenFailed(KeepAliveSettings.requestIgnoreBatteryOptimizations(context)) },
+            onOpenNotificationSettings = { showOpenFailed(KeepAliveSettings.openNotificationSettings(context)) },
+            onOpenVendorSettings = { showOpenFailed(KeepAliveSettings.openVendorBackgroundSettings(context)) },
+            onDismiss = { showKeepAliveDialog = false }
+        )
+    }
+
     UpdateDialogs(
         state = updateState,
         onUpdateNow = viewModel::startDownload,
@@ -371,6 +399,7 @@ private fun AppTopBar(
     onImport: () -> Unit,
     onClearAll: () -> Unit,
     onCheckUpdate: () -> Unit,
+    onOpenKeepAlive: () -> Unit,
     onClearDeviceRecords: (DeviceInfo) -> Unit
 ) {
     val colors = BtTheme.colors
@@ -485,6 +514,14 @@ private fun AppTopBar(
                         onClick = {
                             onShowOverflowChange(false)
                             onImport()
+                        }
+                    )
+                    MenuItem(
+                        text = stringResource(id = R.string.action_keep_alive),
+                        icon = LineIcons.Shield,
+                        onClick = {
+                            onShowOverflowChange(false)
+                            onOpenKeepAlive()
                         }
                     )
                     MenuItem(

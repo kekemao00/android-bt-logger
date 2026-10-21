@@ -170,6 +170,28 @@ interface RecordDao {
     )
     suspend fun getLatestConnectionStateRecord(deviceMac: String): DeviceConnectionRecord?
 
+    /**
+     * 库中最新连接状态仍为“已连接”的设备，每台设备返回它最近一条连接/断开状态记录。
+     *
+     * Why: 服务被系统杀掉期间耳机断开收不到广播，重启后要找出这些停在“已连接”的设备补记断开。
+     */
+    @Query(
+        """
+        SELECT *
+        FROM device_connection_records AS record
+        WHERE record.connect_state = 2
+            AND record.id = (
+                SELECT latest.id
+                FROM device_connection_records AS latest
+                WHERE latest.device_mac = record.device_mac
+                    AND latest.event_type IN ('CONNECTED', 'DISCONNECTED')
+                ORDER BY latest.timestamp DESC, latest.id DESC
+                LIMIT 1
+            )
+        """
+    )
+    suspend fun getDevicesStillConnectedInRecords(): List<DeviceConnectionRecord>
+
     @Query(
         """
         SELECT *

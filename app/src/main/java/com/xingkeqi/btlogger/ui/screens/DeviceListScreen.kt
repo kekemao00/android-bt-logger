@@ -32,6 +32,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -45,6 +46,8 @@ import androidx.compose.ui.unit.dp
 import com.blankj.utilcode.util.TimeUtils
 import com.xingkeqi.btlogger.R
 import com.xingkeqi.btlogger.data.DeviceInfo
+import com.xingkeqi.btlogger.domain.keepalive.KeepAliveBanner
+import com.xingkeqi.btlogger.ui.components.KeepAliveBannerCard
 import com.xingkeqi.btlogger.ui.components.EmptyState
 import com.xingkeqi.btlogger.ui.components.LineIcons
 import com.xingkeqi.btlogger.ui.components.LiveDurationText
@@ -81,10 +84,37 @@ fun DeviceListScreen(
     onDeviceClick: (DeviceInfo) -> Unit,
     onDeviceLongClick: (DeviceInfo) -> Unit,
     onOpenBluetoothSettings: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    keepAliveBanner: KeepAliveBanner? = null,
+    onOpenKeepAlive: () -> Unit = {},
+    onDismissKeepAliveBanner: (KeepAliveBanner) -> Unit = {}
 ) {
     val colors = BtTheme.colors
     Column(modifier = modifier.fillMaxSize()) {
+        // 放在列表之外：没有设备、搜索无结果时也要能看到后台被中断的提示
+        AnimatedVisibility(
+            visible = keepAliveBanner != null && !searchActive,
+            enter = expandVertically(Springs.smooth()) + fadeIn(Springs.snappy()),
+            exit = shrinkVertically(Springs.default()) + fadeOut(Springs.snappy())
+        ) {
+            // 退场动画期间 banner 已为 null，保留最后一次的内容
+            val shown = remember { mutableStateOf(keepAliveBanner) }
+            keepAliveBanner?.let { shown.value = it }
+            shown.value?.let { banner ->
+                KeepAliveBannerCard(
+                    banner = banner,
+                    onOpen = onOpenKeepAlive,
+                    onDismiss = { onDismissKeepAliveBanner(banner) },
+                    modifier = Modifier.padding(
+                        start = Dimens.pageGutter,
+                        end = Dimens.pageGutter,
+                        top = Dimens.spacingXs,
+                        bottom = Dimens.spacingXs
+                    )
+                )
+            }
+        }
+
         AnimatedVisibility(
             visible = searchActive,
             enter = expandVertically(Springs.smooth()) + fadeIn(Springs.snappy()),

@@ -35,7 +35,9 @@ import com.xingkeqi.btlogger.data.DeviceDao
 import com.xingkeqi.btlogger.data.MessageEvent
 import com.xingkeqi.btlogger.data.RecordEventType
 import com.xingkeqi.btlogger.data.RecordDao
+import com.xingkeqi.btlogger.domain.keepalive.staleDisconnectAt
 import com.xingkeqi.btlogger.service.earbud.EarbudLevels
+import com.xingkeqi.btlogger.service.earbud.EarbudReaderStatusStore
 import com.xingkeqi.btlogger.service.earbud.RfcommEarbudLink
 import com.xingkeqi.btlogger.service.earbud.SoundpeatsBatteryReader
 import com.xingkeqi.btlogger.service.earbud.SoundpeatsProtocol
@@ -56,6 +58,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -134,6 +138,7 @@ class BtLoggerForegroundService : Service() {
     private val recordDao: RecordDao by lazy { database.connectionRecordDao() }
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val keepAlive by lazy { ServiceKeepAlive(applicationContext, serviceScope) }
 
     /**
      * 连接/断开事件队列，由单个协程按广播到达顺序逐条落库。
@@ -156,6 +161,14 @@ class BtLoggerForegroundService : Service() {
     @SuppressLint("MissingPermission")
     private fun handleBluetoothBroadcast(intent: Intent) {
         when (intent.action) {
+            BluetoothAdapter.ACTION_STATE_CHANGED -> {
+                // 蓝牙重新打开后同步一次：关闭期间可能漏掉断开广播，打开前已自动回连的设备也不会再发连接广播
+                if (intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, -1) == BluetoothAdapter.STATE_ON) {
+                    Log.i(tag, "[BtLoggerForegroundService] onReceive -> bluetooth turned on, sync connected devices")
+                    syncAlreadyConnectedDevices(lastAliveAt = null)
+                }
+            }
+
             BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED -> {
                 val state = intent.getIntExtra(BluetoothProfile.EXTRA_STATE, -1)
                 if (state != BluetoothProfile.STATE_CONNECTED && state != BluetoothProfile.STATE_DISCONNECTED) {
@@ -218,8 +231,13 @@ class BtLoggerForegroundService : Service() {
     override fun onCreate() {
         super.onCreate()
         Log.i(tag, "onCreate: 前台服务启动")
+        isRunning = true
+        val lastAliveAt = runCatching { keepAlive.onServiceCreated() }
+            .onFailure { Log.e(tag, "[BtLoggerForegroundService] onCreate -> keepAlive init failed", it) }
+            .getOrNull()
 
         val intentFilter = IntentFilter().apply {
+            addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
             addAction(BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED)
             addAction(ACTION_A2DP_CODEC_CONFIG_CHANGED)
             addAction(ACTION_BLUETOOTH_DEVICE_BATTERY_LEVEL_CHANGED)
@@ -232,8 +250,9 @@ class BtLoggerForegroundService : Service() {
         consumeConnectionEvents()
         registerReceiver(btReceiver, intentFilter)
         Log.i(tag, "[BtLoggerForegroundService] onCreate -> receiver registered: vendorCategories=APPLE,PLANTRONICS")
-        syncAlreadyConnectedDevices()
+        syncAlreadyConnectedDevices(lastAliveAt)
         observeDualEarSetting()
+        observeEarbudWakeLock()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -242,8 +261,16 @@ class BtLoggerForegroundService : Service() {
         return START_STICKY
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        Log.i(tag, "[BtLoggerForegroundService] onTaskRemoved -> task swiped away")
+        runSafely("keepAlive.onTaskRemoved") { keepAlive.onTaskRemoved() }
+    }
+
     override fun onDestroy() {
         super.onDestroy()
+        isRunning = false
+        runSafely("keepAlive.onServiceDestroyed") { keepAlive.onServiceDestroyed() }
         runSafely("stopAllProbes") {
             batteryProbeManager.stopAll()
             versionProbeManager.stopAll()
@@ -418,20 +445,27 @@ class BtLoggerForegroundService : Service() {
     }
 
     /**
-     * 服务（重新）启动时同步系统中已连接的 A2DP 设备。
+     * 服务（重新）启动或蓝牙重新打开时同步系统中已连接的 A2DP 设备。
      *
      * Why:
      * 服务被系统回收后以 START_STICKY 重建、或开机前耳机已连上时，不会再收到连接广播，
      * 导致电量采样与版本探测全部失效。这里主动查询一次已连接设备：
      * 数据库最新状态已是“已连接”的只恢复内存跟踪；否则补记一条连接记录。
+     * 反过来，库里仍是“已连接”、系统里却已不在的设备，是服务不在期间断开的，补记断开。
+     *
+     * @param lastAliveAt 上一次运行最后一次心跳的时间，用于推断漏掉的断开发生在什么时候；null 时按当前时间
      */
     @SuppressLint("MissingPermission")
-    private fun syncAlreadyConnectedDevices() {
+    private fun syncAlreadyConnectedDevices(lastAliveAt: Long?) {
         runSafely("syncAlreadyConnectedDevices") {
             @Suppress("DEPRECATION")
             val adapter = BluetoothAdapter.getDefaultAdapter() ?: return@runSafely
-            if (!adapter.isEnabled) return@runSafely
-            adapter.getProfileProxy(applicationContext, object : BluetoothProfile.ServiceListener {
+            if (!adapter.isEnabled) {
+                // 蓝牙关着就不可能有已连接的设备
+                reconcileStaleConnections(connectedAddresses = emptySet(), lastAliveAt = lastAliveAt)
+                return@runSafely
+            }
+            val requested = adapter.getProfileProxy(applicationContext, object : BluetoothProfile.ServiceListener {
                 override fun onServiceConnected(profile: Int, proxy: BluetoothProfile) {
                     runSafely("syncAlreadyConnectedDevices.onServiceConnected") {
                         val devices = proxy.connectedDevices.orEmpty()
@@ -440,6 +474,10 @@ class BtLoggerForegroundService : Service() {
                             "[BtLoggerForegroundService] syncAlreadyConnectedDevices -> connected=${devices.size}"
                         )
                         devices.forEach { restoreConnectedDevice(it) }
+                        reconcileStaleConnections(
+                            connectedAddresses = devices.mapNotNullTo(HashSet()) { readDeviceAddressOrNull(it) },
+                            lastAliveAt = lastAliveAt
+                        )
                     }
                     runSafely("syncAlreadyConnectedDevices.closeProxy") {
                         adapter.closeProfileProxy(profile, proxy)
@@ -448,6 +486,62 @@ class BtLoggerForegroundService : Service() {
 
                 override fun onServiceDisconnected(profile: Int) = Unit
             }, BluetoothProfile.A2DP)
+            if (!requested) Log.w(tag, "[BtLoggerForegroundService] syncAlreadyConnectedDevices -> profile proxy unavailable")
+        }
+    }
+
+    /**
+     * 补记服务不在期间漏掉的断开：库里最新状态仍是“已连接”、但系统里已不在连接列表中的设备。
+     *
+     * Why: 不补的话，详情页会一直显示“已连接”，连接时长也会从上次连接一直累加到下次连接。
+     * 断开时间按上一次运行最后的心跳推断（见 [staleDisconnectAt]），不带耳机电量，避免把旧电量画成新的采样点。
+     */
+    private fun reconcileStaleConnections(connectedAddresses: Set<String>, lastAliveAt: Long?) {
+        launchSafely("reconcileStaleConnections") {
+            val now = System.currentTimeMillis()
+            recordDao.getDevicesStillConnectedInRecords()
+                .filter { it.deviceMac !in connectedAddresses && !connectedDevices.containsKey(it.deviceMac) }
+                .forEach { stale ->
+                    val address = stale.deviceMac
+                    val lastRecord = recordDao.getLatestRecordSnapshotByConnectState(address, BluetoothA2dp.STATE_CONNECTED)
+                        ?: stale
+                    val disconnectedAt = staleDisconnectAt(lastRecordAt = lastRecord.timestamp, lastAliveAt = lastAliveAt, now = now)
+                    val codecSnapshot = resolveCodecSnapshot(address)
+                    recordDao.insert(
+                        DeviceConnectionRecord(
+                            deviceMac = address,
+                            timestamp = disconnectedAt,
+                            connectState = BluetoothA2dp.STATE_DISCONNECTED,
+                            batteryLevel = DEVICE_BATTERY_LEVEL_UNKNOWN,
+                            headsetBatteryLevel = DEVICE_BATTERY_LEVEL_UNKNOWN,
+                            volume = lastRecord.volume,
+                            isPlaying = false,
+                            eventType = RecordEventType.DISCONNECTED,
+                            phoneSupportedCodecs = codecSnapshot.phoneSupportedCodecs,
+                            negotiableCodecs = codecSnapshot.negotiableCodecs,
+                            activeCodec = codecSnapshot.activeCodec
+                        )
+                    )
+                    Log.i(
+                        tag,
+                        "[BtLoggerForegroundService] reconcileStaleConnections -> backfilled disconnect: device=$address, lastRecordAt=${lastRecord.timestamp}, lastAliveAt=$lastAliveAt, disconnectedAt=$disconnectedAt"
+                    )
+                }
+        }
+    }
+
+    /**
+     * 读取左右耳电量期间持有唤醒锁，停止读取后立即释放。
+     *
+     * Why: 每 10 秒一轮的轮询靠协程定时，息屏深睡后 CPU 挂起，轮询会停住直到下次被别的事件唤醒；
+     * 读取是按设备手动开启的测试功能，为它付出的额外耗电是可预期的。
+     */
+    private fun observeEarbudWakeLock() {
+        serviceScope.launch {
+            EarbudReaderStatusStore.statuses
+                .map { it.isNotEmpty() }
+                .distinctUntilChanged()
+                .collect { reading -> runSafely("earbudWakeLock") { keepAlive.setWakeLockWanted(reading) } }
         }
     }
 
@@ -1388,6 +1482,11 @@ class BtLoggerForegroundService : Service() {
     companion object {
         const val CHANNEL_ID = "bt_logger_channel"
         const val NOTIFICATION_ID = 1001
+
+        /** 本进程中服务是否在运行；进程被杀后新进程里为 false，看门狗据此决定是否重新拉起 */
+        @Volatile
+        var isRunning: Boolean = false
+            private set
 
         /** 连接后首个耳机电量在此时间内到达时，视为连接时的电量补到连接记录上 */
         private const val HEADSET_BACKFILL_WINDOW_MS = 2 * 60_000L
