@@ -2,8 +2,10 @@ package com.xingkeqi.btlogger.ui.screens
 
 import android.bluetooth.BluetoothDevice
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -34,6 +36,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -56,6 +59,9 @@ import com.xingkeqi.btlogger.data.recordLevelChanges
 import com.xingkeqi.btlogger.domain.battery.BatteryChannel
 import com.xingkeqi.btlogger.domain.battery.BatteryChannelOverview
 import com.xingkeqi.btlogger.domain.battery.BatteryRange
+import com.xingkeqi.btlogger.domain.history.HistoryEntry
+import com.xingkeqi.btlogger.domain.history.HistoryEventKind
+import com.xingkeqi.btlogger.domain.history.groupHistory
 import com.xingkeqi.btlogger.service.earbud.EarbudLevels
 import com.xingkeqi.btlogger.service.earbud.EarbudReaderFailure
 import com.xingkeqi.btlogger.service.earbud.EarbudReaderStatus
@@ -99,6 +105,9 @@ private val HistoryFilters = listOf(
  *
  * 头部不再使用渐变底色，概览、电量、统计分别放在白色卡片里；历史记录是一张分组卡片，
  * 用分段标签页筛选。耳机电量是续航测试最常看的内容，紧跟在概览之后。
+ * 连续重复的状态事件与连接抖动合并成一行（见 [groupHistory]），点按展开原始记录。
+ *
+ * @param expandedGroups 已展开的合并分组，以组内最旧一条记录的 id 标识
  */
 @Composable
 fun DeviceDetailScreen(
@@ -109,6 +118,8 @@ fun DeviceDetailScreen(
     dualEarState: DualEarUiState,
     filter: RecordFilter,
     onFilterChange: (RecordFilter) -> Unit,
+    expandedGroups: Set<Int>,
+    onToggleGroup: (Int) -> Unit,
     onBatteryRangeChange: (BatteryRange) -> Unit,
     onBatteryChannelChange: (BatteryChannel) -> Unit,
     onDualEarChange: (Boolean) -> Unit,
@@ -136,6 +147,12 @@ fun DeviceDetailScreen(
                 RecordFilter.BATTERY -> record.eventType == RecordEventType.BATTERY_CHANGED
             }
         }
+    }
+    val historyRows = remember(historyRecords, expandedGroups) {
+        historyRowsOf(
+            entries = groupHistory(historyRecords, timestampOf = { it.timestamp }, kindOf = { it.historyKind() }),
+            expandedGroups = expandedGroups
+        )
     }
     // 在全部记录上计算，按类型筛选后每条电量记录仍能显示它前一档的电量
     val levelChanges = remember(records) { recordLevelChanges(records) }
@@ -176,15 +193,58 @@ fun DeviceDetailScreen(
             }
         }
 
-        itemsIndexed(items = historyRecords, key = { _, record -> record.id }) { index, record ->
-            RecordItem(
-                record = record,
-                levelChange = levelChanges[record.id],
-                position = segmentPositionOf(index, historyRecords.size),
-                onLongClick = { onRecordLongClick(record) }
-            )
+        itemsIndexed(items = historyRows, key = { _, row -> row.key }) { index, row ->
+            val position = segmentPositionOf(index, historyRows.size)
+            when (row) {
+                is HistoryRow.Record -> RecordItem(
+                    record = row.record,
+                    levelChange = levelChanges[row.record.id],
+                    position = position,
+                    nested = row.nested,
+                    onLongClick = { onRecordLongClick(row.record) }
+                )
+
+                is HistoryRow.Group -> RecordGroupItem(
+                    entry = row.entry,
+                    expanded = row.expanded,
+                    position = position,
+                    onToggle = { onToggleGroup(row.groupId) }
+                )
+            }
         }
     }
+}
+
+/** 历史记录列表中的一行：单条记录（可能是展开分组里的一条），或一个合并分组的摘要行 */
+private sealed interface HistoryRow {
+    val key: String
+
+    data class Record(val record: RecordInfo, val nested: Boolean) : HistoryRow {
+        override val key: String get() = "record-${record.id}"
+    }
+
+    data class Group(val entry: HistoryEntry<RecordInfo>, val expanded: Boolean) : HistoryRow {
+        val groupId: Int get() = entry.oldest.id
+        override val key: String get() = "group-$groupId"
+    }
+}
+
+private fun historyRowsOf(entries: List<HistoryEntry<RecordInfo>>, expandedGroups: Set<Int>): List<HistoryRow> =
+    entries.flatMap { entry ->
+        when (entry) {
+            is HistoryEntry.Single -> listOf(HistoryRow.Record(entry.item, nested = false))
+            else -> {
+                val expanded = entry.oldest.id in expandedGroups
+                val group = HistoryRow.Group(entry, expanded)
+                if (expanded) listOf(group) + entry.items.map { HistoryRow.Record(it, nested = true) } else listOf(group)
+            }
+        }
+    }
+
+private fun RecordInfo.historyKind(): HistoryEventKind = when (eventType) {
+    RecordEventType.CONNECTED -> HistoryEventKind.CONNECTED
+    RecordEventType.DISCONNECTED -> HistoryEventKind.DISCONNECTED
+    else -> HistoryEventKind.OTHER
 }
 
 @Composable
@@ -381,7 +441,8 @@ private fun RecordItem(
     record: RecordInfo,
     levelChange: RecordLevelChanges?,
     position: SegmentPosition,
-    onLongClick: () -> Unit
+    onLongClick: () -> Unit,
+    nested: Boolean = false
 ) {
     val colors = BtTheme.colors
     val haptics = LocalHapticFeedback.current
@@ -412,7 +473,13 @@ private fun RecordItem(
                     onLongClick()
                 }
             )
-            .padding(horizontal = Dimens.cardPadding, vertical = 14.dp)
+            // 展开分组里的原始记录向右缩进，与分组摘要行区分
+            .padding(
+                start = if (nested) Dimens.cardPadding + Dimens.spacingXl else Dimens.cardPadding,
+                end = Dimens.cardPadding,
+                top = 14.dp,
+                bottom = 14.dp
+            )
     ) {
         EventIcon(
             icon = when {
@@ -452,14 +519,7 @@ private fun RecordItem(
             val summary = when {
                 isCodecChanged -> stringResource(id = R.string.record_active_codec, record.activeCodec.ifBlank { CODEC_UNKNOWN })
                 isBatteryChanged -> batterySummary(record, levelChange)
-                record.timestamp == record.lastRecordTime -> stringResource(id = R.string.record_first)
-                else -> {
-                    val duration = getDurationString(record.timestamp - (record.lastRecordTime ?: record.timestamp))
-                    stringResource(
-                        id = if (isConnected) R.string.record_disconnected_gap else R.string.record_session_duration,
-                        duration
-                    )
-                }
+                else -> stateSummary(record)
             }
             Text(
                 text = summary,
@@ -486,6 +546,146 @@ private fun RecordItem(
         }
     }
 }
+
+/**
+ * 连接、断开记录的摘要：距上一次状态变化的时长；重复上报的状态写明状态未变化
+ */
+@Composable
+private fun stateSummary(record: RecordInfo): String {
+    val isConnected = record.connectState == STATE_CONNECTED
+    return when {
+        record.repeatsPreviousState -> stringResource(
+            id = R.string.record_repeated_state,
+            stringResource(id = if (isConnected) R.string.event_label_connected else R.string.event_label_disconnected)
+        )
+        record.timestamp == record.lastRecordTime -> stringResource(id = R.string.record_first)
+        else -> stringResource(
+            id = if (isConnected) R.string.record_disconnected_gap else R.string.record_session_duration,
+            getDurationString(record.timestamp - (record.lastRecordTime ?: record.timestamp))
+        )
+    }
+}
+
+/**
+ * 合并分组的摘要行：事件类型与条数、时间范围，点按展开或收起组内原始记录。
+ *
+ * 连续重复的状态事件额外显示组内第一条的连接/断开时长，它才是真正发生状态变化的那一条。
+ * 分组行不响应长按删除，删除需展开后对单条记录操作。
+ */
+@Composable
+private fun RecordGroupItem(
+    entry: HistoryEntry<RecordInfo>,
+    expanded: Boolean,
+    position: SegmentPosition,
+    onToggle: () -> Unit
+) {
+    val colors = BtTheme.colors
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val pressedBackground by animateColorAsState(
+        if (pressed) colors.surface2 else colors.surface2.copy(alpha = 0f),
+        Springs.snappy(),
+        label = "groupPressed"
+    )
+    val chevronRotation by animateFloatAsState(if (expanded) 90f else 0f, Springs.snappy(), label = "groupChevron")
+    val newest = entry.newest
+    val oldest = entry.oldest
+    val endsConnected = when (entry) {
+        is HistoryEntry.Flapping -> entry.finalKind == HistoryEventKind.CONNECTED
+        else -> newest.connectState == STATE_CONNECTED
+    }
+    val spanMillis = newest.timestamp - oldest.timestamp
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .cardSegment(position, background = colors.surface, border = colors.line, divider = colors.line)
+            .clip(position.shape())
+            .background(pressedBackground)
+            .clickable(interactionSource = interaction, indication = null, onClick = onToggle)
+            .padding(horizontal = Dimens.cardPadding, vertical = 14.dp)
+    ) {
+        EventIcon(icon = if (endsConnected) LineIcons.Bluetooth else LineIcons.BluetoothOff, emphasized = endsConnected)
+        Spacer(modifier = Modifier.width(Dimens.spacingMd))
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = stringResource(
+                        id = when {
+                            entry is HistoryEntry.Flapping -> R.string.history_group_flapping_title
+                            endsConnected -> R.string.event_connected
+                            else -> R.string.event_disconnected
+                        }
+                    ),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = colors.ink,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.width(Dimens.spacingSm))
+                WmChip(text = stringResource(id = R.string.history_group_count, entry.items.size))
+                Spacer(modifier = Modifier.weight(1f))
+                Text(
+                    text = TimeUtils.millis2String(newest.timestamp, "MM-dd HH:mm:ss"),
+                    style = MonoTextStyle,
+                    color = colors.ink3
+                )
+            }
+
+            val summary = when (entry) {
+                is HistoryEntry.Flapping -> stringResource(
+                    id = R.string.history_group_flapping_summary,
+                    if (spanMillis < 1_000L) stringResource(id = R.string.history_group_span_under_second) else getDurationString(spanMillis),
+                    entry.connectCount,
+                    entry.disconnectCount,
+                    stringResource(
+                        id = if (endsConnected) R.string.history_group_final_connected else R.string.history_group_final_disconnected
+                    )
+                )
+                else -> stringResource(id = R.string.history_group_repeated_summary, entry.items.size)
+            }
+            Text(text = summary, style = MaterialTheme.typography.bodySmall, color = colors.ink)
+            if (entry is HistoryEntry.Repeated && !oldest.repeatsPreviousState) {
+                Text(text = stateSummary(oldest), style = MaterialTheme.typography.bodySmall, color = colors.ink2)
+            }
+            Text(
+                text = stringResource(
+                    id = R.string.history_group_range,
+                    TimeUtils.millis2String(oldest.timestamp, "MM-dd HH:mm:ss"),
+                    TimeUtils.millis2String(newest.timestamp, if (sameDay(oldest.timestamp, newest.timestamp)) "HH:mm:ss" else "MM-dd HH:mm:ss")
+                ),
+                style = MonoTextStyle,
+                color = colors.ink3
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = if (expanded) {
+                        stringResource(id = R.string.history_group_collapse)
+                    } else {
+                        stringResource(id = R.string.history_group_expand, entry.items.size)
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.ink3
+                )
+                Spacer(modifier = Modifier.width(Dimens.spacingXs))
+                Icon(
+                    imageVector = LineIcons.ChevronRight,
+                    contentDescription = null,
+                    tint = colors.ink3,
+                    modifier = Modifier
+                        .size(Dimens.iconSizeXs)
+                        .rotate(chevronRotation)
+                )
+            }
+        }
+    }
+}
+
+private fun sameDay(first: Long, second: Long): Boolean =
+    TimeUtils.millis2String(first, "yyyyMMdd") == TimeUtils.millis2String(second, "yyyyMMdd")
 
 /**
  * 事件图标：32dp 的 surface-2 圆底 + 16dp 线性图标；已连接事件图标为 ink，其余 ink-2

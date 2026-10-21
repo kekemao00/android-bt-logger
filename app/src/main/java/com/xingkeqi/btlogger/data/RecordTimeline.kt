@@ -22,22 +22,30 @@ data class RecordStats(
  * 为记录补齐“距上一次状态变化的时间”和累计连接/断开时长，返回按时间倒序的列表。
  *
  * 编解码切换与电量采样不是状态变化，不参与累计，但同样会带上最近一次状态变化时间。
+ * 与上一条状态事件相同的状态事件（例如连续两条“已断开”）只标记 [RecordInfo.repeatsPreviousState]：
+ * 状态并没有变化，上一次状态变化时间保持不动，两条之间的间隔也不算作连接或断开时长。
+ * Why: 过去第二条“已断开”会把两条断开之间的时间计为“连接时长”，并算作一次新的连接会话。
  */
 fun buildRecordTimeline(records: List<RecordInfo>): List<RecordInfo> {
     var lastStateTimestamp = 0L
+    var lastState: Int? = null
     var connectionTime = 0L
     var disconnectionTime = 0L
     return records.sortedWith(compareBy<RecordInfo> { it.timestamp }.thenBy { it.id }).map { record ->
         record.lastRecordTime = if (lastStateTimestamp < 1) record.timestamp else lastStateTimestamp
         if (record.isStateEvent()) {
-            val timeDiff = record.timestamp - (record.lastRecordTime ?: record.timestamp)
-            // 本条为“已连接”，说明上一段是断开时长；反之为连接时长
-            if (record.connectState == BluetoothA2dp.STATE_CONNECTED) {
-                disconnectionTime += timeDiff
-            } else {
-                connectionTime += timeDiff
+            record.repeatsPreviousState = record.connectState == lastState
+            if (!record.repeatsPreviousState) {
+                val timeDiff = record.timestamp - (record.lastRecordTime ?: record.timestamp)
+                // 本条为“已连接”，说明上一段是断开时长；反之为连接时长
+                if (record.connectState == BluetoothA2dp.STATE_CONNECTED) {
+                    disconnectionTime += timeDiff
+                } else {
+                    connectionTime += timeDiff
+                }
+                lastStateTimestamp = record.timestamp
+                lastState = record.connectState
             }
-            lastStateTimestamp = record.timestamp
         }
         record.totalConnectionTime = connectionTime
         record.totalDisConnectionTime = disconnectionTime
@@ -49,7 +57,8 @@ fun buildRecordTimeline(records: List<RecordInfo>): List<RecordInfo> {
  * 基于 [buildRecordTimeline] 的结果计算统计摘要。
  */
 fun computeRecordStats(timeline: List<RecordInfo>): RecordStats {
-    val stateEvents = timeline.filter { it.isStateEvent() }
+    // 重复上报的状态事件不是一次新的连接或断开
+    val stateEvents = timeline.filter { it.isStateEvent() && !it.repeatsPreviousState }
     // 断开记录的 lastRecordTime 指向对应的连接时间，二者之差即一次完整连接时长
     val sessions = stateEvents
         .filter { it.eventType == RecordEventType.DISCONNECTED && it.lastRecordTime != it.timestamp }

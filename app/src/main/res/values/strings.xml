@@ -95,6 +95,18 @@
     <string name="record_battery_headset">耳机电量 %1$d%%</string>
     <string name="record_battery_step">耳机电量 %1$d%% → %2$d%% · 上一档持续 %3$s</string>
     <string name="record_battery_headset_unknown">耳机未上报电量</string>
+    <string name="record_repeated_state">重复上报：此前已是%1$s状态，不计入次数与时长</string>
+    <!-- 历史记录合并分组 -->
+    <string name="history_group_flapping_title">连接抖动</string>
+    <string name="history_group_count">×%1$d</string>
+    <string name="history_group_flapping_summary">%1$s内连接 %2$d 次、断开 %3$d 次，%4$s</string>
+    <string name="history_group_final_connected">最终已连接</string>
+    <string name="history_group_final_disconnected">最终已断开</string>
+    <string name="history_group_repeated_summary">连续上报 %1$d 次，状态未变化</string>
+    <string name="history_group_span_under_second">不到 1 秒</string>
+    <string name="history_group_range">%1$s – %2$s</string>
+    <string name="history_group_expand">点按展开 %1$d 条原始记录</string>
+    <string name="history_group_collapse">点按收起</string>
     <string name="codec_phone_supported">手机支持</string>
     <string name="codec_negotiable">双方可用</string>
     <string name="codec_active">当前使用</string>

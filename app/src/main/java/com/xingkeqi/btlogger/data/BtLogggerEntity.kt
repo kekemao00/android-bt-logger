@@ -3,6 +3,7 @@ package com.xingkeqi.btlogger.data
 import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
+import androidx.room.Ignore
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
@@ -86,6 +87,13 @@ data class RecordInfo(
      * 断开总时长
      */
     var totalDisConnectionTime: Long? = 0L
+
+    /**
+     * 状态与上一条状态事件相同（例如连续两条“已断开”），即系统重复上报、状态并未变化。
+     * 这类记录不计入连接/断开次数与时长。由 [buildRecordTimeline] 计算，不是查询列，Room 读取时忽略。
+     */
+    @Ignore
+    var repeatsPreviousState: Boolean = false
 }
 
 /**
