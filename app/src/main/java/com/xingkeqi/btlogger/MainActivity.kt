@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.util.Log
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -27,6 +28,7 @@ import com.xingkeqi.btlogger.service.BtLoggerForegroundService
 import com.xingkeqi.btlogger.ui.BtLoggerApp
 import com.xingkeqi.btlogger.ui.screens.PermissionScreen
 import com.xingkeqi.btlogger.ui.theme.BtLoggerTheme
+import com.xingkeqi.btlogger.utils.KeepAliveSettings
 import com.xingkeqi.btlogger.utils.readMediaVolumeSnapshot
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -88,6 +90,26 @@ class MainActivity : ComponentActivity() {
         if (!EventBus.getDefault().isRegistered(this)) {
             EventBus.getDefault().register(this)
         }
+        observeKeepScreenOn()
+    }
+
+    /**
+     * 按设置给窗口加上常亮标记。
+     *
+     * Why: FLAG_KEEP_SCREEN_ON 只在窗口可见时生效，切到后台或按电源键后系统照常熄屏，
+     * 正好对应“App 在前台时不锁屏”，不需要也不应该用唤醒锁。
+     */
+    private fun observeKeepScreenOn() {
+        lifecycleScope.launch {
+            viewModel.keepScreenOn.collect { enabled ->
+                if (enabled) {
+                    window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                } else {
+                    window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                }
+                Log.i(tag, "[MainActivity] observeKeepScreenOn -> enabled=$enabled")
+            }
+        }
     }
 
     override fun onResume() {
@@ -95,6 +117,7 @@ class MainActivity : ComponentActivity() {
         // 用户可能从系统设置页授权后返回
         onPermissionStateChanged()
         refreshMediaVolumeSnapshot()
+        viewModel.updateKeepAliveStatus(KeepAliveSettings.readStatus(this))
     }
 
     override fun onDestroy() {

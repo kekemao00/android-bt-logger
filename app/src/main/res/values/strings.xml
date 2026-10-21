@@ -23,6 +23,7 @@
     <string name="action_clear_device_records">清空该设备记录</string>
     <string name="action_clear_all">清空全部记录</string>
     <string name="action_check_update">检查更新</string>
+    <string name="action_keep_alive">后台运行设置</string>
     <string name="app_version">当前版本 v%1$s</string>
 
     <!-- 设备列表 -->
@@ -212,6 +213,41 @@
     <string name="update_export_data">导出数据</string>
     <string name="update_open_release">打开下载页</string>
     <string name="update_download_failed">下载失败，请稍后重试</string>
+
+    <!-- 后台运行 -->
+    <string name="keep_alive_title">后台运行设置</string>
+    <string name="keep_alive_intro">部分手机（vivo、小米、OPPO、华为等）会在息屏、划掉任务或一键清理后关闭 BtLogger，期间的连接、断开与电量变化都记不上。按下面几项放行后基本可以长期在后台记录。</string>
+    <string name="keep_alive_screen_on">前台时屏幕常亮</string>
+    <string name="keep_alive_screen_on_hint">打开 BtLogger 时屏幕不自动熄灭、不锁屏；切到后台或按电源键后照常熄屏。</string>
+    <string name="keep_alive_battery_title">忽略电池优化</string>
+    <string name="keep_alive_battery_hint">允许在后台持续运行，系统省电时也能及时收到蓝牙广播，被清理后也能自动重新启动。</string>
+    <string name="keep_alive_notification_title">通知</string>
+    <string name="keep_alive_notification_hint">常驻通知是前台服务的标志，关闭后部分系统会把 BtLogger 当作普通后台应用清理。</string>
+    <string name="keep_alive_vendor_title">自启动与后台耗电</string>
+    <string name="keep_alive_vendor_xiaomi">小米 / Redmi：打开“自启动”；“省电策略”选择“无限制”。</string>
+    <string name="keep_alive_vendor_vivo">vivo / iQOO：打开“自启动”；“后台耗电管理”中选择“允许后台高耗电”。</string>
+    <string name="keep_alive_vendor_oppo">OPPO / 一加 / realme：在“耗电管理”中允许“完全允许后台行为”“允许自动启动”。</string>
+    <string name="keep_alive_vendor_huawei">华为：“应用启动管理”中关闭“自动管理”，并允许自启动、关联启动与后台活动。</string>
+    <string name="keep_alive_vendor_honor">荣耀：“应用启动管理”中关闭“自动管理”，并允许自启动、关联启动与后台活动。</string>
+    <string name="keep_alive_vendor_samsung">三星：在“电池”中把 BtLogger 设为“不受限制”，并确认不在“深度休眠应用”中。</string>
+    <string name="keep_alive_vendor_meizu">魅族：在“后台管理”中选择“允许后台运行”。</string>
+    <string name="keep_alive_vendor_other">在系统设置中允许 BtLogger 自启动与后台运行。</string>
+    <string name="keep_alive_lock_task">另外建议在最近任务中锁定 BtLogger（下拉或长按卡片选择“锁定”），一键清理时不会被关闭。</string>
+    <string name="keep_alive_earbud_note">开启“读取左右耳电量”时，息屏期间会保持 CPU 运行以每 10 秒读取一次，停止读取后立即释放。</string>
+    <string name="keep_alive_status_ok">已开启</string>
+    <string name="keep_alive_status_off">未开启</string>
+    <string name="keep_alive_go_settings">去设置</string>
+    <string name="keep_alive_open_failed">无法打开系统设置，请在系统设置中手动查找 BtLogger</string>
+    <string name="keep_alive_gaps_title">最近的后台中断</string>
+    <string name="keep_alive_gaps_empty">没有检测到后台中断</string>
+    <string name="keep_alive_gaps_hint">时长按最后一次心跳估算，最多偏长约 1 分钟；中断期间断开的设备已按中断开始时间补记断开。</string>
+    <string name="keep_alive_gap_item">%1$s 起 · 约 %2$s</string>
+    <string name="keep_alive_banner_interrupted">后台记录在 %1$s 起中断了约 %2$s，可能被系统清理</string>
+    <string name="keep_alive_banner_interrupted_more">后台记录中断了 %1$d 次，最近一次 %2$s 起约 %3$s</string>
+    <string name="keep_alive_banner_suggest">部分手机会在后台关闭 BtLogger，建议完成后台运行设置</string>
+    <string name="keep_alive_banner_action">查看</string>
+    <string name="keep_alive_duration_minutes">%1$d 分钟</string>
+    <string name="keep_alive_duration_hours">%1$d 小时 %2$d 分钟</string>
 
     <!-- 权限 -->
     <string name="permission_title">需要蓝牙权限</string>

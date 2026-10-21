@@ -56,6 +56,12 @@ object LineIcons {
     val Info by lazy {
         lineIcon("Info", "M12 2a10 10 0 1 0 0 20a10 10 0 1 0 0 -20z", "M12 16v-4", "M12 8h.01")
     }
+    val Shield by lazy {
+        lineIcon(
+            "Shield",
+            "M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"
+        )
+    }
     val Bluetooth by lazy { lineIcon("Bluetooth", "m7 7 10 10-5 5V2l5 5L7 17") }
     val BluetoothOff by lazy {
         lineIcon("BluetoothOff", "m17 17-5 5V12l-5 5", "m2 2 20 20", "M14.5 9.5 17 7l-5-5v4.5")

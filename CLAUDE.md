@@ -28,7 +28,7 @@ APK 输出路径：`app/build/outputs/apk/`
 MVVM + Jetpack Compose；数据库与 ViewModel 通过工厂显式创建（Hilt 模块保留但未启用）
 
 ```
-BtLoggerForegroundService (广播监听 + 探测器 + 固定音量)
+BtLoggerForegroundService (广播监听 + 探测器 + 固定音量 + ServiceKeepAlive 心跳/看门狗/唤醒锁)
     ↓ 写入
 Room Database (BtLoggerDatabase)
     ├── devices 表
@@ -44,6 +44,7 @@ BtLoggerApp → DeviceListScreen / DeviceDetailScreen（无状态 Compose）
 2. 服务直接写入 Room，并通过 EventBus 通知界面刷新音量快照
 3. 固定音量由服务读取 `AppSettings` 执行，不依赖界面存活
 4. UI 通过 Flow → StateFlow 响应式更新
+5. 服务每分钟写心跳（`ServiceHealthStore`），被系统杀掉后重启时据此记下中断时段，并给库里仍是“已连接”、系统里已断开的设备补记断开；看门狗闹钟经 `BootCompletedReceiver` 重新拉起服务
 
 ## 关键文件
 
@@ -59,7 +60,10 @@ BtLoggerApp → DeviceListScreen / DeviceDetailScreen（无状态 Compose）
 | `service/earbud/*` | SOUNDPEATS 私有协议（SPP）读取左右耳与充电仓电量：帧编解码、轮询与退避重试（读取逻辑可注入通道，有单测）；读取通道与 SOUNDPEATS App 互斥，按设备开关 |
 | `ui/components/BatteryLineChart.kt` | 电量曲线绘制与手势（吸附、拖动、缩放、双击还原） |
 | `utils/JxlUtils.kt` | Excel 导出 |
-| `utils/AppSettings.kt` | 用户设置（SharedPreferences + StateFlow） |
+| `utils/AppSettings.kt` | 用户设置（SharedPreferences + StateFlow），含前台屏幕常亮 |
+| `domain/keepalive/*` | 后台中断检测、漏记断开时间推断、ROM 厂商识别、列表页提示判定（纯 Kotlin，有单测） |
+| `service/ServiceKeepAlive.kt` / `utils/ServiceHealthStore.kt` | 心跳与中断记录、看门狗闹钟、读取左右耳期间的限时唤醒锁 |
+| `utils/KeepAliveSettings.kt` / `ui/dialogs/KeepAliveDialog.kt` | 电池优化 / 通知 / 厂商自启动页跳转与“后台运行设置”面板 |
 
 ## 技术栈
 

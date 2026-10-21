@@ -153,3 +153,11 @@ fun keepAliveBannerOf(
     if (!ignoringBatteryOptimizations && !suggestionDismissed) return KeepAliveBanner.Suggest
     return null
 }
+
+/**
+ * 中断时长拆成小时与分钟用于展示：按分钟向上取整，至少 1 分钟。
+ */
+fun gapDurationParts(durationMs: Long): Pair<Int, Int> {
+    val totalMinutes = ((durationMs.coerceAtLeast(0L) + 59_999L) / 60_000L).coerceAtLeast(1L)
+    return (totalMinutes / 60).toInt() to (totalMinutes % 60).toInt()
+}
