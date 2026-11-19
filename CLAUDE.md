@@ -43,8 +43,9 @@ BtLoggerApp → DeviceListScreen / DeviceDetailScreen（无状态 Compose）
 1. `BtLoggerForegroundService` 动态注册广播，监听 A2DP 连接、Codec、耳机电量（不记录手机电量；耳机电量仅在变化时落库）；对开启开关的 SOUNDPEATS 耳机另起 SPP 读取左右耳电量，任一来源变化即落库
 2. 连接/断开广播入队后由单协程按到达顺序落库（记录时间取广播到达时刻）；服务直接写入 Room，并通过 EventBus 通知界面刷新音量快照
 3. 固定音量由服务读取 `AppSettings` 执行，不依赖界面存活
-4. UI 通过 Flow → StateFlow 响应式更新
-5. 服务每分钟写心跳（`ServiceHealthStore`），被系统杀掉后重启时据此记下中断时段，并给库里仍是“已连接”、系统里已断开的设备补记断开；看门狗闹钟经 `BootCompletedReceiver` 重新拉起服务
+4. 自动续播（默认关）由服务监听 `AudioPlaybackCallback` 与 A2DP 重连：开关打开后在蓝牙上播放过才续播，中断后发媒体键 `KEYCODE_MEDIA_PLAY`，未连蓝牙/通话中不发、断开超 10 分钟不再续播；结果计入 `PlaybackResumeStore`
+5. UI 通过 Flow → StateFlow 响应式更新
+6. 服务每分钟写心跳（`ServiceHealthStore`），被系统杀掉后重启时据此记下中断时段，并给库里仍是“已连接”、系统里已断开的设备补记断开；看门狗闹钟经 `BootCompletedReceiver` 重新拉起服务
 
 ## 关键文件
 
@@ -59,6 +60,7 @@ BtLoggerApp → DeviceListScreen / DeviceDetailScreen（无状态 Compose）
 | `domain/history/*` | 历史记录展示分组：连续重复的连接/断开、短时间反复连断（连接抖动）合并为一行，组内保留原始记录（纯 Kotlin，有单测） |
 | `domain/battery/*` | 耳机电量按连接切分、掉电速率、多机对比、单调贝塞尔插值、左耳/右耳/系统上报按来源概览（纯 Kotlin，有单测） |
 | `service/earbud/*` | SOUNDPEATS 私有协议（SPP）读取左右耳与充电仓电量：帧编解码、轮询与退避重试（读取逻辑可注入通道，有单测）；读取通道与 SOUNDPEATS App 互斥，按设备开关 |
+| `domain/playback/*` / `service/playback/*` | 播放中断自动续播：判定纯逻辑、续播执行器（系统能力经 `MediaPlaybackControl` 注入，有单测）、媒体键与限时唤醒锁实现 |
 | `ui/components/BatteryLineChart.kt` | 电量曲线绘制与手势（吸附、拖动、缩放、双击还原） |
 | `utils/JxlUtils.kt` | Excel 导出 |
 | `utils/AppSettings.kt` | 用户设置（SharedPreferences + StateFlow），含前台屏幕常亮 |

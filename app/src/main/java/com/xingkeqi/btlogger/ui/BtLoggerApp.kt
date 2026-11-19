@@ -139,6 +139,7 @@ fun BtLoggerApp(
     val fixedVolumeEnabled by viewModel.fixedVolumeEnabled.collectAsState()
     val fixedVolumePercent by viewModel.fixedVolumePercent.collectAsState()
     val mediaVolumeSnapshot by viewModel.mediaVolumeSnapshot.collectAsState()
+    val autoResumeState by viewModel.autoResumeState.collectAsState()
     val updateState by viewModel.updateState.collectAsState()
     val batteryOverview by viewModel.batteryOverview.collectAsState()
     val dualEarState by viewModel.dualEarState.collectAsState()
@@ -232,7 +233,7 @@ fun BtLoggerApp(
             AppTopBar(
                 page = page,
                 searchActive = searchActive,
-                fixedVolumeEnabled = fixedVolumeEnabled,
+                playbackSettingsActive = fixedVolumeEnabled || autoResumeState.enabled,
                 showOverflow = showOverflow,
                 onShowOverflowChange = { showOverflow = it },
                 onBack = {
@@ -340,6 +341,7 @@ fun BtLoggerApp(
             enabled = fixedVolumeEnabled,
             targetPercent = fixedVolumePercent,
             snapshot = mediaVolumeSnapshot,
+            autoResume = autoResumeState,
             onEnabledChange = viewModel::setFixedVolumeEnabled,
             onTargetChange = { value ->
                 val percent = value.roundToInt()
@@ -350,6 +352,7 @@ fun BtLoggerApp(
             onTargetChangeFinished = {
                 viewModel.updateMediaVolumeSnapshot(readMediaVolumeSnapshot(context))
             },
+            onAutoResumeChange = viewModel::setAutoResumePlaybackEnabled,
             onDismiss = { showVolumeDialog = false }
         )
     }
@@ -386,7 +389,7 @@ fun BtLoggerApp(
 private fun AppTopBar(
     page: AppPage,
     searchActive: Boolean,
-    fixedVolumeEnabled: Boolean,
+    playbackSettingsActive: Boolean,
     showOverflow: Boolean,
     onShowOverflowChange: (Boolean) -> Unit,
     onBack: () -> Unit,
@@ -471,7 +474,7 @@ private fun AppTopBar(
                         icon = LineIcons.Volume,
                         contentDescription = stringResource(id = R.string.action_volume_preset),
                         onClick = onOpenVolume,
-                        active = fixedVolumeEnabled
+                        active = playbackSettingsActive
                     )
                     WmIconButton(
                         icon = LineIcons.Bluetooth,

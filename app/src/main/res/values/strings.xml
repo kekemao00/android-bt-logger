@@ -15,7 +15,7 @@
     <string name="press_again_to_exit">再按一次返回键退出（后台仍会继续记录）</string>
 
     <!-- 顶栏动作 -->
-    <string name="action_volume_preset">固定连接音量</string>
+    <string name="action_volume_preset">音量与播放</string>
     <string name="action_bluetooth_settings">蓝牙设置</string>
     <string name="action_export_device">导出该设备记录</string>
     <string name="action_export_all">导出全部记录</string>
@@ -184,7 +184,7 @@
     <string name="compare_note">每台耳机取最近一次能算出掉电速率的连接（10 分钟以上且电量有下降），没有时取最近一次有电量的连接。按开始对齐时，以这次连接的首个电量记录为起点。</string>
 
     <!-- 固定音量 -->
-    <string name="volume_dialog_title">固定连接音量</string>
+    <string name="volume_dialog_title">音量与播放</string>
     <string name="volume_dialog_switch">蓝牙连接后自动设置音量</string>
     <string name="volume_dialog_switch_hint">开启后，每次连接蓝牙音频设备都会把媒体音量调到下方数值，App 在后台也会生效。</string>
     <string name="volume_dialog_current">当前系统媒体音量：%1$d%%</string>
@@ -192,6 +192,12 @@
     <string name="volume_dialog_target">连接后音量：%1$d%%</string>
     <string name="volume_route_bluetooth">蓝牙音频设备已连接</string>
     <string name="volume_route_none">当前未连接蓝牙音频设备</string>
+    <string name="auto_resume_switch">播放中断后自动续播</string>
+    <string name="auto_resume_switch_hint">蓝牙耳机上的音乐被暂停后（其他 App 抢占、耳机断开重连、播放器被系统关闭等），自动让播放器继续播放。仅在耳机已连接且未通话时尝试，不会外放；耳机断开超过 10 分钟不再续播。手动暂停也会被续播，测试结束请先关闭。</string>
+    <string name="auto_resume_unsupported">需要 Android 8.0 及以上系统</string>
+    <string name="auto_resume_stats_empty">本轮尚未发生中断</string>
+    <string name="auto_resume_stats_resumed">已自动续播 %1$d 次，累计中断 %2$s，最近一次 %3$s</string>
+    <string name="auto_resume_stats_failed">续播失败 %1$d 次，最近一次 %2$s，本轮续航结果可能受影响</string>
 
     <!-- 导出 -->
     <string name="export_empty">没有可以导出的记录</string>
