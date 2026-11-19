@@ -21,8 +21,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.blankj.utilcode.util.TimeUtils
+import com.xingkeqi.btlogger.AutoResumeUiState
 import com.xingkeqi.btlogger.R
 import com.xingkeqi.btlogger.UpdateUiState
+import com.xingkeqi.btlogger.ui.components.GAP_TIME_PATTERN
 import com.xingkeqi.btlogger.ui.components.WmButton
 import com.xingkeqi.btlogger.ui.components.WmButtonStyle
 import com.xingkeqi.btlogger.ui.components.WmPanel
@@ -32,6 +35,7 @@ import com.xingkeqi.btlogger.ui.theme.BtTheme
 import com.xingkeqi.btlogger.ui.theme.Dimens
 import com.xingkeqi.btlogger.ui.theme.MonoTextStyle
 import com.xingkeqi.btlogger.utils.MediaVolumeSnapshot
+import com.xingkeqi.btlogger.utils.getDurationString
 import kotlin.math.roundToInt
 
 /**
@@ -69,7 +73,7 @@ fun ConfirmDeleteDialog(
 }
 
 /**
- * 固定连接音量设置。
+ * 音量与播放设置：固定连接音量 + 播放中断后自动续播。
  *
  * 拖动滑块会实时修改系统媒体音量，方便边听边调；松手后的值作为连接后的目标音量。
  */
@@ -78,9 +82,11 @@ fun FixedVolumeDialog(
     enabled: Boolean,
     targetPercent: Int,
     snapshot: MediaVolumeSnapshot,
+    autoResume: AutoResumeUiState,
     onEnabledChange: (Boolean) -> Unit,
     onTargetChange: (Float) -> Unit,
     onTargetChangeFinished: () -> Unit,
+    onAutoResumeChange: (Boolean) -> Unit,
     onDismiss: () -> Unit
 ) {
     val colors = BtTheme.colors
@@ -92,64 +98,134 @@ fun FixedVolumeDialog(
             WmButton(text = stringResource(id = R.string.action_done), onClick = onDismiss)
         }
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(
+            modifier = Modifier
+                .heightIn(max = 520.dp)
+                .verticalScroll(rememberScrollState())
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = stringResource(id = R.string.volume_dialog_switch),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = colors.ink,
+                    modifier = Modifier.weight(1f)
+                )
+                Spacer(modifier = Modifier.width(Dimens.spacingMd))
+                WmSwitch(checked = enabled, onCheckedChange = onEnabledChange)
+            }
+            Spacer(modifier = Modifier.height(Dimens.spacingXs))
             Text(
-                text = stringResource(id = R.string.volume_dialog_switch),
+                text = stringResource(id = R.string.volume_dialog_switch_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.ink3
+            )
+
+            Spacer(modifier = Modifier.height(Dimens.spacingXl))
+
+            Text(
+                text = stringResource(id = R.string.volume_dialog_target, targetPercent),
                 style = MaterialTheme.typography.titleSmall,
-                color = colors.ink,
-                modifier = Modifier.weight(1f)
+                color = if (enabled) colors.ink else colors.ink3
             )
-            Spacer(modifier = Modifier.width(Dimens.spacingMd))
-            WmSwitch(checked = enabled, onCheckedChange = onEnabledChange)
+            Slider(
+                value = targetPercent.toFloat(),
+                onValueChange = onTargetChange,
+                onValueChangeFinished = onTargetChangeFinished,
+                valueRange = 0f..100f,
+                colors = SliderDefaults.colors(
+                    thumbColor = colors.ink,
+                    activeTrackColor = colors.ink,
+                    inactiveTrackColor = colors.surface3,
+                    activeTickColor = Color.Transparent,
+                    inactiveTickColor = Color.Transparent
+                )
+            )
+
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = stringResource(id = R.string.volume_dialog_current, snapshot.percent),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.ink2
+                )
+                Text(
+                    text = stringResource(
+                        id = R.string.volume_dialog_route,
+                        stringResource(
+                            id = if (snapshot.hasBluetoothOutput) R.string.volume_route_bluetooth else R.string.volume_route_none
+                        ),
+                        snapshot.currentLevel,
+                        snapshot.maxLevel,
+                        stringResource(
+                            id = if (snapshot.isMusicActive) R.string.badge_playing else R.string.badge_not_playing
+                        )
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.ink3
+                )
+            }
+
+            Spacer(modifier = Modifier.height(Dimens.spacingXl))
+            AutoResumeSection(state = autoResume, onCheckedChange = onAutoResumeChange)
         }
-        Spacer(modifier = Modifier.height(Dimens.spacingXs))
-        Text(
-            text = stringResource(id = R.string.volume_dialog_switch_hint),
-            style = MaterialTheme.typography.bodySmall,
-            color = colors.ink3
-        )
+    }
+}
 
-        Spacer(modifier = Modifier.height(Dimens.spacingXl))
-
+@Composable
+private fun AutoResumeSection(state: AutoResumeUiState, onCheckedChange: (Boolean) -> Unit) {
+    val colors = BtTheme.colors
+    Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
-            text = stringResource(id = R.string.volume_dialog_target, targetPercent),
+            text = stringResource(id = R.string.auto_resume_switch),
             style = MaterialTheme.typography.titleSmall,
-            color = if (enabled) colors.ink else colors.ink3
+            color = if (state.supported) colors.ink else colors.ink3,
+            modifier = Modifier.weight(1f)
         )
-        Slider(
-            value = targetPercent.toFloat(),
-            onValueChange = onTargetChange,
-            onValueChangeFinished = onTargetChangeFinished,
-            valueRange = 0f..100f,
-            colors = SliderDefaults.colors(
-                thumbColor = colors.ink,
-                activeTrackColor = colors.ink,
-                inactiveTrackColor = colors.surface3,
-                activeTickColor = Color.Transparent,
-                inactiveTickColor = Color.Transparent
-            )
-        )
+        if (state.supported) {
+            Spacer(modifier = Modifier.width(Dimens.spacingMd))
+            WmSwitch(checked = state.enabled, onCheckedChange = onCheckedChange)
+        }
+    }
+    Spacer(modifier = Modifier.height(Dimens.spacingXs))
+    Text(
+        text = stringResource(
+            id = if (state.supported) R.string.auto_resume_switch_hint else R.string.auto_resume_unsupported
+        ),
+        style = MaterialTheme.typography.bodySmall,
+        color = colors.ink3
+    )
+    if (!state.supported || !state.enabled) return
 
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+    val stats = state.stats
+    Spacer(modifier = Modifier.height(Dimens.spacingSm))
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        if (stats.resumedCount == 0 && stats.failedCount == 0) {
             Text(
-                text = stringResource(id = R.string.volume_dialog_current, snapshot.percent),
+                text = stringResource(id = R.string.auto_resume_stats_empty),
                 style = MaterialTheme.typography.bodySmall,
                 color = colors.ink2
             )
+        }
+        if (stats.resumedCount > 0) {
             Text(
                 text = stringResource(
-                    id = R.string.volume_dialog_route,
-                    stringResource(
-                        id = if (snapshot.hasBluetoothOutput) R.string.volume_route_bluetooth else R.string.volume_route_none
-                    ),
-                    snapshot.currentLevel,
-                    snapshot.maxLevel,
-                    stringResource(
-                        id = if (snapshot.isMusicActive) R.string.badge_playing else R.string.badge_not_playing
-                    )
+                    id = R.string.auto_resume_stats_resumed,
+                    stats.resumedCount,
+                    getDurationString(stats.totalPausedMs),
+                    TimeUtils.millis2String(stats.lastResumedAt, GAP_TIME_PATTERN)
                 ),
                 style = MaterialTheme.typography.bodySmall,
-                color = colors.ink3
+                color = colors.ink2
+            )
+        }
+        if (stats.failedCount > 0) {
+            Text(
+                text = stringResource(
+                    id = R.string.auto_resume_stats_failed,
+                    stats.failedCount,
+                    TimeUtils.millis2String(stats.lastFailedAt, GAP_TIME_PATTERN)
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.danger
             )
         }
     }

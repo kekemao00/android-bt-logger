@@ -105,7 +105,7 @@ suspend fun applyFixedMediaVolume(
     return false
 }
 
-private fun hasBluetoothAudioOutput(audioManager: AudioManager): Boolean {
+internal fun hasBluetoothAudioOutput(audioManager: AudioManager): Boolean {
     val bluetoothDeviceTypes = setOf(
         AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
         AudioDeviceInfo.TYPE_BLUETOOTH_SCO,

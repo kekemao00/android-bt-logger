@@ -2,6 +2,7 @@ package com.xingkeqi.btlogger
 
 import android.content.Context
 import android.net.Uri
+import android.os.Build
 import android.util.Log
 import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
@@ -41,6 +42,7 @@ import com.xingkeqi.btlogger.utils.AppSettings
 import com.xingkeqi.btlogger.utils.KeepAliveSettings
 import com.xingkeqi.btlogger.utils.KeepAliveSystemStatus
 import com.xingkeqi.btlogger.utils.MediaVolumeSnapshot
+import com.xingkeqi.btlogger.utils.PlaybackResumeStore
 import com.xingkeqi.btlogger.utils.ServiceHealthStore
 import com.xingkeqi.btlogger.utils.readExportSheet
 import com.xingkeqi.btlogger.utils.saveDataToSheet
@@ -126,6 +128,8 @@ class MainViewModel(
     private val deviceWithRecordsDao: DeviceWithRecordsDao,
     private val settings: AppSettings,
     private val healthStore: ServiceHealthStore,
+    private val playbackResumeStore: PlaybackResumeStore,
+    private val autoResumeSupported: Boolean,
     private val romVendor: RomVendor,
     private val exportDir: File,
     private val recordImporter: RecordImporter,
@@ -447,6 +451,20 @@ class MainViewModel(
         settings.setFixedVolumePercent(percent)
     }
 
+    val autoResumeState: StateFlow<AutoResumeUiState> = combine(
+        settings.autoResumePlaybackEnabled,
+        playbackResumeStore.stats
+    ) { enabled, stats ->
+        AutoResumeUiState(supported = autoResumeSupported, enabled = enabled, stats = stats)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AutoResumeUiState(supported = autoResumeSupported))
+
+    /** 打开即视为开始新一轮测试，清零上一轮的续播统计 */
+    fun setAutoResumePlaybackEnabled(enabled: Boolean) {
+        Log.i(tag, "[MainViewModel] setAutoResumePlaybackEnabled -> $enabled")
+        if (enabled) playbackResumeStore.reset()
+        settings.setAutoResumePlaybackEnabled(enabled)
+    }
+
     fun deleteDevice(mac: String) = launchIo("deleteDevice") {
         deviceWithRecordsDao.deleteDeviceWithRecords(mac)
         if (_selectedDevice.value?.mac == mac) clearSelection()
@@ -662,6 +680,8 @@ class MainViewModel(
                             deviceWithRecordsDao = database.deviceWithRecordsDao(),
                             settings = AppSettings.get(applicationContext),
                             healthStore = ServiceHealthStore.get(applicationContext),
+                            playbackResumeStore = PlaybackResumeStore.get(applicationContext),
+                            autoResumeSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O,
                             romVendor = KeepAliveSettings.currentVendor,
                             exportDir = File(applicationContext.filesDir, "exports"),
                             recordImporter = RecordImporter(database.deviceDao(), database.connectionRecordDao()),
