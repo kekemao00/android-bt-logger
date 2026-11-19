@@ -70,7 +70,7 @@ BtLoggerApp → DeviceListScreen / DeviceDetailScreen（无状态 Compose）
 
 - Kotlin 2.0.21 / Java 17，Compose 编译器插件随 Kotlin
 - Room 2.5.0
-- compileSdk 36, targetSdk 33, minSdk 25
+- compileSdk 36, targetSdk 35, minSdk 25
 
 ## CI/CD
 
