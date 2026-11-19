@@ -13,7 +13,11 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.getValue
@@ -21,6 +25,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
 import com.xingkeqi.btlogger.data.MessageEvent
 import com.xingkeqi.btlogger.data.RecordEventType
@@ -56,6 +61,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         bluetoothPermissionGranted = hasBluetoothPermission()
+        // Why: targetSdk 35 起 Android 15+ 强制沉浸式，内容会画到状态栏下面；
+        // 所有版本统一沉浸式再按安全区留白，避免只在新系统上才走到这段布局
+        WindowCompat.setDecorFitsSystemWindows(window, false)
 
         setContent {
             BtLoggerTheme {
@@ -63,14 +71,17 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    if (bluetoothPermissionGranted) {
-                        BtLoggerApp(viewModel = viewModel, onExit = { finish() })
-                    } else {
-                        PermissionScreen(
-                            showNotificationNote = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU,
-                            onRequestPermission = ::requestRuntimePermissions,
-                            onOpenAppSettings = ::openAppSettings
-                        )
+                    // Surface 铺满整屏，状态栏与导航栏下方仍是页面底色；内容只放在安全区内
+                    Box(modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
+                        if (bluetoothPermissionGranted) {
+                            BtLoggerApp(viewModel = viewModel, onExit = { finish() })
+                        } else {
+                            PermissionScreen(
+                                showNotificationNote = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU,
+                                onRequestPermission = ::requestRuntimePermissions,
+                                onOpenAppSettings = ::openAppSettings
+                            )
+                        }
                     }
                 }
             }
