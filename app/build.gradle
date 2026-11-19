@@ -20,7 +20,7 @@ android {
     defaultConfig {
         applicationId "com.xingkeqi.btlogger"
         minSdk 25
-        targetSdk 33
+        targetSdk 35
         versionCode vCode
         // Release 流水线通过 VERSION_NAME 环境变量注入 tag 版本，本地构建使用默认值
         versionName System.getenv("VERSION_NAME") ?: "1.2.1"
