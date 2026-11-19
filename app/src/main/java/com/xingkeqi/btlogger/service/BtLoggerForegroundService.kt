@@ -16,6 +16,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.media.AudioManager
+import android.media.AudioPlaybackConfiguration
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
@@ -41,6 +42,8 @@ import com.xingkeqi.btlogger.service.earbud.EarbudReaderStatusStore
 import com.xingkeqi.btlogger.service.earbud.RfcommEarbudLink
 import com.xingkeqi.btlogger.service.earbud.SoundpeatsBatteryReader
 import com.xingkeqi.btlogger.service.earbud.SoundpeatsProtocol
+import com.xingkeqi.btlogger.service.playback.AndroidMediaPlaybackControl
+import com.xingkeqi.btlogger.service.playback.PlaybackAutoResumer
 import com.xingkeqi.btlogger.utils.ACTION_BLUETOOTH_DEVICE_BATTERY_LEVEL_CHANGED
 import com.xingkeqi.btlogger.utils.BluetoothBatteryUtils
 import com.xingkeqi.btlogger.utils.BluetoothVersionProbeResult
@@ -50,6 +53,7 @@ import com.xingkeqi.btlogger.utils.AppSettings
 import com.xingkeqi.btlogger.utils.HeadsetBatterySnapshot
 import com.xingkeqi.btlogger.utils.applyFixedMediaVolume
 import com.xingkeqi.btlogger.utils.MediaVolumeSnapshot
+import com.xingkeqi.btlogger.utils.PlaybackResumeStore
 import com.xingkeqi.btlogger.utils.readMediaVolumeSnapshot
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -139,6 +143,25 @@ class BtLoggerForegroundService : Service() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val keepAlive by lazy { ServiceKeepAlive(applicationContext, serviceScope) }
+    private val playbackResumer by lazy {
+        val resumeStore = PlaybackResumeStore.get(applicationContext)
+        PlaybackAutoResumer(
+            scope = serviceScope,
+            control = AndroidMediaPlaybackControl(applicationContext)
+        ) { outcome -> resumeStore.record(outcome) }
+    }
+
+    /** 系统任一播放器开始或停止时回调，只用作触发，是否在播放由续播器自己再读一次 */
+    private val playbackCallback: AudioManager.AudioPlaybackCallback? =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            object : AudioManager.AudioPlaybackCallback() {
+                override fun onPlaybackConfigChanged(configs: MutableList<AudioPlaybackConfiguration>?) {
+                    runSafely("playbackConfigChanged") { playbackResumer.onPlaybackChanged() }
+                }
+            }
+        } else {
+            null
+        }
 
     /**
      * 连接/断开事件队列，由单个协程按广播到达顺序逐条落库。
@@ -253,6 +276,7 @@ class BtLoggerForegroundService : Service() {
         syncAlreadyConnectedDevices(lastAliveAt)
         observeDualEarSetting()
         observeEarbudWakeLock()
+        observeAutoResumeSetting()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -276,6 +300,13 @@ class BtLoggerForegroundService : Service() {
             versionProbeManager.stopAll()
             versionAdvertisementProbeManager.stopAll()
             earbudBatteryReader.stopAll()
+        }
+        runSafely("stopAutoResume") {
+            val callback = playbackCallback
+            if (callback != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                (getSystemService(Context.AUDIO_SERVICE) as AudioManager).unregisterAudioPlaybackCallback(callback)
+            }
+            playbackResumer.stop()
         }
         fixedVolumeJobs.values.forEach { it.cancel() }
         fixedVolumeJobs.clear()
@@ -404,6 +435,7 @@ class BtLoggerForegroundService : Service() {
                 scheduleFixedVolume(address)
             }
             startConnectedDeviceProbes(bluetoothDevice, deviceState)
+            runSafely("autoResume.onBluetoothConnected") { playbackResumer.onBluetoothConnected() }
         } else {
             fixedVolumeJobs.remove(address)?.cancel()
             stopConnectedDeviceProbes(address)
@@ -527,6 +559,28 @@ class BtLoggerForegroundService : Service() {
                         "[BtLoggerForegroundService] reconcileStaleConnections -> backfilled disconnect: device=$address, lastRecordAt=${lastRecord.timestamp}, lastAliveAt=$lastAliveAt, disconnectedAt=$disconnectedAt"
                     )
                 }
+        }
+    }
+
+    /**
+     * 按开关启停自动续播；播放回调常驻注册，开关关闭时续播器直接忽略回调。
+     *
+     * Why: AudioPlaybackCallback 需要 Android 8.0+，更低版本无法感知播放中断，只记日志不续播。
+     */
+    private fun observeAutoResumeSetting() {
+        val callback = playbackCallback
+        if (callback == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            Log.w(tag, "[BtLoggerForegroundService] observeAutoResumeSetting -> unsupported below API 26")
+            return
+        }
+        runSafely("registerPlaybackCallback") {
+            (getSystemService(Context.AUDIO_SERVICE) as AudioManager).registerAudioPlaybackCallback(callback, null)
+        }
+        serviceScope.launch {
+            appSettings.autoResumePlaybackEnabled.collect { enabled ->
+                Log.i(tag, "[BtLoggerForegroundService] observeAutoResumeSetting -> enabled=$enabled")
+                runSafely("autoResume.setEnabled") { playbackResumer.setEnabled(enabled) }
+            }
         }
     }
 

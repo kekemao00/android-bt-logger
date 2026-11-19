@@ -53,6 +53,22 @@ class AppSettings private constructor(context: Context) {
         prefs.edit().putStringSet(KEY_DUAL_EAR_DEVICES, _dualEarDevices.value).apply()
     }
 
+    private val _autoResumePlaybackEnabled =
+        MutableStateFlow(prefs.getBoolean(KEY_AUTO_RESUME_PLAYBACK_ENABLED, false))
+
+    /**
+     * 播放中断后自动续播。
+     *
+     * Why: 续航测试要一直播放到耳机没电，中途被暂停整晚的结果就作废；默认关闭，
+     * 打开后测试同事手动暂停也会被续播，只在测试期间打开。
+     */
+    val autoResumePlaybackEnabled: StateFlow<Boolean> = _autoResumePlaybackEnabled.asStateFlow()
+
+    fun setAutoResumePlaybackEnabled(enabled: Boolean) {
+        _autoResumePlaybackEnabled.value = enabled
+        prefs.edit().putBoolean(KEY_AUTO_RESUME_PLAYBACK_ENABLED, enabled).apply()
+    }
+
     private val _keepScreenOn = MutableStateFlow(prefs.getBoolean(KEY_KEEP_SCREEN_ON, true))
 
     /**
@@ -95,6 +111,7 @@ class AppSettings private constructor(context: Context) {
         private const val KEY_SKIPPED_UPDATE_TAG = "skipped_update_tag"
         private const val KEY_DUAL_EAR_DEVICES = "dual_ear_devices"
         private const val KEY_KEEP_SCREEN_ON = "keep_screen_on"
+        private const val KEY_AUTO_RESUME_PLAYBACK_ENABLED = "auto_resume_playback_enabled"
         private const val KEY_KEEP_ALIVE_SUGGESTION_DISMISSED = "keep_alive_suggestion_dismissed"
         const val DEFAULT_FIXED_VOLUME_PERCENT = 60
 
